@@ -1,0 +1,4 @@
+Sistema Integrado de Gestão (SIG)
+Os indicadores de negócio hoje estão descentralizados e as métricas de medição não seguem um padrão único. Para o sucesso do plano, é fundamental que todos os indicadores e apurações sejam centralizados em uma única plataforma de gestão. O desafio de medir e apurar é significativo, e atualmente enfrentamos dificuldades relevantes para gerir o negócio devido à falta de informações confiáveis, integradas e disponibilizadas de forma recorrente.
+O desenvolvimento dessa plataforma na velocidade necessária é ousado, porém absolutamente essencial. O projeto será chamado SIG – Sistema Integrado de Gestão.
+O SIG funcionará como a Controladoria Integrada de Pessoas e Resultados, sustentando os pilares financeiro, operacional, jurídico e trabalhista do Turnaround. Abaixo, os principais requisitos iniciais do sistema, cuja priorização será definida nas próximas etapas.
