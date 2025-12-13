@@ -11,6 +11,7 @@ from app.api.v1.auth import auth_router
 from app.api.v1.users import users_router
 from app.api.v1.roles import roles_router
 from app.api.v1.modules import modules_router
+from app.api.v1.orcamento import router as orcamento_router
 
 
 @asynccontextmanager
@@ -55,6 +56,7 @@ app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
 app.include_router(users_router, prefix=settings.API_V1_PREFIX)
 app.include_router(roles_router, prefix=settings.API_V1_PREFIX)
 app.include_router(modules_router, prefix=settings.API_V1_PREFIX)
+app.include_router(orcamento_router, prefix=settings.API_V1_PREFIX)
 
 
 @app.get("/")

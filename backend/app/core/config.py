@@ -11,8 +11,16 @@ class Settings(BaseSettings):
     # API
     API_V1_PREFIX: str = "/api/v1"
     
-    # Database
+    # Database (PostgreSQL SIG - Leitura e Escrita)
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/sig_db"
+    
+    # CORPORERM (SQL Server - Somente Leitura)
+    CORPORERM_HOST: str = "172.22.0.19"
+    CORPORERM_PORT: int = 1433
+    CORPORERM_DATABASE: str = "CORPORERM"
+    CORPORERM_USER: str = "ricardo.pimenta"
+    CORPORERM_PASSWORD: str = "Senha@2024"
+    CORPORERM_CODCOLIGADA: int = 1
     
     # JWT Authentication
     SECRET_KEY: str = "your-super-secret-key-change-in-production"
