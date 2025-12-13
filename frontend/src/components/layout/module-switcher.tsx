@@ -28,46 +28,49 @@ export interface ModuleConfig {
   activeColor: string;
 }
 
+// Cor padrão da marca Alert Brasil (laranja)
+const ACTIVE_COLOR = "bg-orange-100 text-orange-600 ring-2 ring-orange-400";
+
 export const modules: ModuleConfig[] = [
   {
     code: "controladoria",
     name: "Controladoria",
     icon: PieChart,
     href: "/controladoria",
-    color: "text-emerald-600",
-    activeColor: "bg-emerald-100 text-emerald-700 ring-2 ring-emerald-500",
+    color: "text-muted-foreground",
+    activeColor: ACTIVE_COLOR,
   },
   {
     code: "planejamento",
     name: "Planejamento",
     icon: Target,
     href: "/planejamento",
-    color: "text-blue-600",
-    activeColor: "bg-blue-100 text-blue-700 ring-2 ring-blue-500",
+    color: "text-muted-foreground",
+    activeColor: ACTIVE_COLOR,
   },
   {
     code: "operacoes",
     name: "Operações",
     icon: Headphones,
     href: "/operacoes",
-    color: "text-amber-600",
-    activeColor: "bg-amber-100 text-amber-700 ring-2 ring-amber-500",
+    color: "text-muted-foreground",
+    activeColor: ACTIVE_COLOR,
   },
   {
     code: "rh",
     name: "Recursos Humanos",
     icon: Users,
     href: "/rh",
-    color: "text-purple-600",
-    activeColor: "bg-purple-100 text-purple-700 ring-2 ring-purple-500",
+    color: "text-muted-foreground",
+    activeColor: ACTIVE_COLOR,
   },
   {
     code: "juridico",
     name: "Jurídico",
     icon: Scale,
     href: "/juridico",
-    color: "text-rose-600",
-    activeColor: "bg-rose-100 text-rose-700 ring-2 ring-rose-500",
+    color: "text-muted-foreground",
+    activeColor: ACTIVE_COLOR,
   },
 ];
 
@@ -80,11 +83,15 @@ export function ModuleSwitcher() {
 
   return (
     <TooltipProvider delayDuration={0}>
-      <div className="flex h-full w-16 flex-col items-center border-r bg-gray-50 py-4">
-        {/* Logo */}
+      <div className="flex h-full w-16 shrink-0 flex-col items-center border-r border-border bg-muted/50 py-4">
+        {/* Logo Alert Brasil */}
         <div className="mb-6">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white font-bold text-lg shadow-lg">
-            S
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white shadow-lg overflow-hidden p-1">
+            <img
+              src="/logo-icon.png"
+              alt="Alert Brasil"
+              className="h-8 w-8 object-contain"
+            />
           </div>
         </div>
 
@@ -103,7 +110,7 @@ export function ModuleSwitcher() {
                       "flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-200",
                       isActive
                         ? module.activeColor
-                        : "text-gray-500 hover:text-gray-700 hover:bg-gray-200"
+                        : "text-muted-foreground hover:text-orange-500 hover:bg-orange-50"
                     )}
                   >
                     <Icon className="h-5 w-5" />
@@ -119,7 +126,7 @@ export function ModuleSwitcher() {
 
         {/* Admin Icon (if superadmin) */}
         {user?.is_superadmin && (
-          <div className="mt-auto pt-4 border-t border-gray-200">
+          <div className="mt-auto pt-4 border-t border-border">
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -127,8 +134,8 @@ export function ModuleSwitcher() {
                   className={cn(
                     "flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-200",
                     pathname.startsWith("/admin")
-                      ? "bg-gray-200 text-gray-700 ring-2 ring-gray-400"
-                      : "text-gray-500 hover:text-gray-700 hover:bg-gray-200"
+                      ? "bg-orange-100 text-orange-600 ring-2 ring-orange-400"
+                      : "text-muted-foreground hover:text-orange-500 hover:bg-orange-50"
                   )}
                 >
                   <Settings className="h-5 w-5" />

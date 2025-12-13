@@ -15,11 +15,11 @@ export function AppHeader() {
   const title = isAdmin ? "Administração" : activeModule?.name || "SIG";
 
   return (
-    <header className="flex h-14 items-center gap-4 border-b bg-background px-4">
-      <SidebarTrigger />
+    <header className="flex h-12 items-center gap-4 border-b bg-background px-4">
+      <SidebarTrigger className="h-8 w-8" />
       
       <div className="flex-1">
-        <h1 className="text-lg font-semibold">{title}</h1>
+        <h1 className="text-sm font-semibold">{title}</h1>
       </div>
 
       {/* Search */}
@@ -28,14 +28,14 @@ export function AppHeader() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Buscar..."
-            className="w-64 pl-9"
+            className="w-56 pl-9 h-8 text-xs"
           />
         </div>
       </div>
 
       {/* Notifications */}
-      <Button variant="ghost" size="icon">
-        <Bell className="h-5 w-5" />
+      <Button variant="ghost" size="icon-sm" className="hover:bg-orange-50 hover:text-orange-600">
+        <Bell className="h-4 w-4" />
       </Button>
     </header>
   );

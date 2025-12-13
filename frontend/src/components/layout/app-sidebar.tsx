@@ -14,61 +14,64 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/stores/auth-store";
-import { getActiveModule, modules } from "./module-switcher";
+import { getActiveModule } from "./module-switcher";
 import { getModuleMenus } from "@/lib/module-menus";
 
 export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout } = useAuthStore();
+  const { state } = useSidebar();
 
-  // Get active module from URL
   const activeModule = getActiveModule(pathname);
   const isAdmin = pathname.startsWith("/admin");
-  
-  // Get module code for menus
   const moduleCode = isAdmin ? "admin" : activeModule?.code || "";
   const menuSections = getModuleMenus(moduleCode);
 
-  // Get module display info
   const moduleInfo = isAdmin 
-    ? { name: "Administração", color: "text-gray-700" }
+    ? { name: "Administração" }
     : activeModule 
-      ? { name: activeModule.name, color: activeModule.color }
-      : { name: "SIG", color: "text-gray-700" };
+      ? { name: activeModule.name }
+      : { name: "SIG" };
 
   const handleLogout = () => {
     logout();
     router.push("/login");
   };
 
+  const isCollapsed = state === "collapsed";
+
   return (
-    <Sidebar className="border-r">
-      <SidebarHeader className="border-b">
-        <div className="flex items-center gap-3 px-4 py-4">
+    <Sidebar collapsible="icon" className="border-r border-border">
+      {/* Header com logo e nome do módulo */}
+      <SidebarHeader className="border-b border-border">
+        <div className="flex items-center gap-3 px-2 py-2">
           {activeModule && !isAdmin && (
-            <div className={`flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100 ${activeModule.color}`}>
-              <activeModule.icon className="h-5 w-5" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 text-orange-600 shrink-0">
+              <activeModule.icon className="h-4 w-4" />
             </div>
           )}
-          <div className="flex flex-col">
-            <span className={`text-base font-semibold ${moduleInfo.color}`}>
-              {moduleInfo.name}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              SIG - Sistema Integrado
-            </span>
-          </div>
+          {!isCollapsed && (
+            <div className="flex flex-col min-w-0">
+              <span className="text-sm font-semibold text-foreground truncate">
+                {moduleInfo.name}
+              </span>
+              <span className="text-[10px] text-muted-foreground">Alert Brasil</span>
+            </div>
+          )}
         </div>
       </SidebarHeader>
 
+      {/* Menu principal */}
       <SidebarContent>
         {menuSections.map((section) => (
           <SidebarGroup key={section.title}>
-            <SidebarGroupLabel className="text-xs uppercase tracking-wider">
+            <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {section.title}
             </SidebarGroupLabel>
             <SidebarGroupContent>
@@ -79,7 +82,15 @@ export function AppSidebar() {
 
                   return (
                     <SidebarMenuItem key={item.href}>
-                      <SidebarMenuButton asChild isActive={isActive}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive}
+                        tooltip={item.name}
+                        className={isActive 
+                          ? "bg-orange-100 text-orange-700 hover:bg-orange-100 hover:text-orange-700" 
+                          : "hover:bg-orange-50 hover:text-orange-600"
+                        }
+                      >
                         <Link href={item.href}>
                           <Icon className="h-4 w-4" />
                           <span>{item.name}</span>
@@ -94,27 +105,33 @@ export function AppSidebar() {
         ))}
       </SidebarContent>
 
-      <SidebarFooter className="border-t">
-        <div className="flex items-center gap-3 px-4 py-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-medium">
+      {/* Footer com usuário */}
+      <SidebarFooter className="border-t border-border">
+        <div className="flex items-center gap-3 px-2 py-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-orange-100 text-orange-700 text-sm font-medium shrink-0">
             {user?.name?.charAt(0).toUpperCase() || "U"}
           </div>
-          <div className="flex flex-col flex-1 min-w-0">
-            <span className="text-sm font-medium truncate">{user?.name}</span>
-            <span className="text-xs text-muted-foreground truncate">
-              {user?.email}
-            </span>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8"
-            onClick={handleLogout}
-          >
-            <LogOut className="h-4 w-4" />
-          </Button>
+          {!isCollapsed && (
+            <>
+              <div className="flex flex-col flex-1 min-w-0">
+                <span className="text-sm font-medium truncate">{user?.name}</span>
+                <span className="text-[10px] text-muted-foreground truncate">{user?.email}</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0 hover:text-orange-600"
+                onClick={handleLogout}
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </>
+          )}
         </div>
       </SidebarFooter>
+
+      {/* Rail para arrastar e colapsar */}
+      <SidebarRail />
     </Sidebar>
   );
 }

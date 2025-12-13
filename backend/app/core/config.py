@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     CORPORERM_PASSWORD: str = "Senha@2024"
     CORPORERM_CODCOLIGADA: int = 1
     
+    # NW (PostgreSQL - Somente Leitura)
+    NW_HOST: str = "dbmaster.nws.com.br"
+    NW_PORT: int = 5462
+    NW_DATABASE: str = "BD_0001555"
+    NW_USER: str = "LR_0001555"
+    NW_PASSWORD: str = "RCWD6Zaw8QwdofSC"
+    
     # JWT Authentication
     SECRET_KEY: str = "your-super-secret-key-change-in-production"
     ALGORITHM: str = "HS256"

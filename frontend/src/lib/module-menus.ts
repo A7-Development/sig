@@ -32,7 +32,6 @@ import {
   Layers,
   CircleDollarSign,
   CalendarDays,
-  Calculator,
   type LucideIcon,
 } from "lucide-react";
 
@@ -72,6 +71,7 @@ export const moduleMenus: ModuleMenus = {
       items: [
         { name: "Visão Geral", href: "/controladoria/orcamento", icon: Wallet },
         { name: "Cenários", href: "/controladoria/orcamento/cenarios", icon: GitCompare },
+        { name: "Empresas", href: "/controladoria/orcamento/empresas", icon: Building2 },
         { name: "Cargos e Salários", href: "/controladoria/orcamento/cargos-salarios", icon: Briefcase },
       ],
     },
@@ -82,7 +82,6 @@ export const moduleMenus: ModuleMenus = {
         { name: "Seções", href: "/controladoria/orcamento/cadastros/secoes", icon: Layers },
         { name: "Centros de Custo", href: "/controladoria/orcamento/cadastros/centros-custo", icon: CircleDollarSign },
         { name: "Feriados", href: "/controladoria/orcamento/cadastros/feriados", icon: CalendarDays },
-        { name: "Encargos", href: "/controladoria/orcamento/configuracoes/encargos", icon: Calculator },
       ],
     },
     {

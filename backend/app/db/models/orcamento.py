@@ -92,3 +92,340 @@ class Feriado(Base):
     def __repr__(self):
         return f"<Feriado {self.data}: {self.nome}>"
 
+
+class Funcao(Base):
+    """Função/Cargo para o orçamento de pessoal."""
+    __tablename__ = "funcoes"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    codigo = Column(String(50), unique=True, nullable=False, index=True)
+    codigo_totvs = Column(String(50), nullable=True, index=True)  # Vínculo opcional com PFUNCAO
+    nome = Column(String(200), nullable=False)
+    cbo = Column(String(20), nullable=True)  # Código Brasileiro de Ocupações
+    ativo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<Funcao {self.codigo}: {self.nome}>"
+
+
+class Empresa(Base):
+    """Empresa do grupo para configurações específicas (tributos, encargos, etc.)."""
+    __tablename__ = "empresas"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    codigo = Column(String(50), unique=True, nullable=False, index=True)
+    razao_social = Column(String(200), nullable=False)
+    nome_fantasia = Column(String(200), nullable=True)
+    cnpj = Column(String(20), nullable=True, unique=True)
+    ativo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    tributos = relationship("Tributo", back_populates="empresa", lazy="selectin", cascade="all, delete-orphan")
+    encargos = relationship("Encargo", back_populates="empresa", lazy="selectin", cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<Empresa {self.codigo}: {self.razao_social}>"
+
+
+class Tributo(Base):
+    """Tributos sobre receita por empresa (PIS, COFINS, ISS, etc.)."""
+    __tablename__ = "tributos"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    empresa_id = Column(UUID(as_uuid=True), ForeignKey("empresas.id", ondelete="CASCADE"), nullable=False)
+    
+    # Identificação
+    codigo = Column(String(50), nullable=False)  # PIS, COFINS, ISS, CPREV
+    nome = Column(String(200), nullable=False)
+    
+    # Valor
+    aliquota = Column(Numeric(10, 4), nullable=False)  # Percentual
+    
+    # Controle
+    ordem = Column(Integer, default=0)
+    ativo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    empresa = relationship("Empresa", back_populates="tributos", lazy="selectin")
+    
+    def __repr__(self):
+        return f"<Tributo {self.codigo}: {self.nome} ({self.aliquota}%)>"
+
+
+class Encargo(Base):
+    """Encargos patronais sobre folha por empresa (INSS, SAT/RAT, etc.)."""
+    __tablename__ = "encargos"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    empresa_id = Column(UUID(as_uuid=True), ForeignKey("empresas.id", ondelete="CASCADE"), nullable=False)
+    regime = Column(String(10), nullable=False, default="CLT")  # CLT, PJ
+    
+    # Identificação do encargo
+    codigo = Column(String(50), nullable=False)  # INSS_EMPRESA, INSS_TERCEIROS, SAT_RAT
+    nome = Column(String(200), nullable=False)
+    
+    # Valor
+    aliquota = Column(Numeric(10, 4), nullable=False)  # Percentual (ex: 20.0000 = 20%)
+    base_calculo = Column(String(50), nullable=False, default="SALARIO")  # SALARIO, TOTAL
+    
+    # Controle
+    ordem = Column(Integer, default=0)  # Ordem de exibição
+    ativo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    empresa = relationship("Empresa", back_populates="encargos", lazy="selectin")
+    
+    def __repr__(self):
+        return f"<Encargo {self.codigo}: {self.nome} ({self.aliquota}%)>"
+
+
+class Provisao(Base):
+    """Provisões de mão de obra (13º, Férias, Demandas Trabalhistas)."""
+    __tablename__ = "provisoes"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    
+    # Identificação
+    codigo = Column(String(50), unique=True, nullable=False, index=True)  # 13_SALARIO, FERIAS, DEMANDAS
+    nome = Column(String(200), nullable=False)
+    descricao = Column(Text, nullable=True)
+    
+    # Valor padrão
+    percentual = Column(Numeric(10, 4), nullable=False)  # Percentual sobre salário
+    incide_encargos = Column(Boolean, default=True)  # Se encargos incidem sobre esta provisão
+    
+    # Controle
+    ordem = Column(Integer, default=0)
+    ativo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<Provisao {self.codigo}: {self.nome} ({self.percentual}%)>"
+
+
+class PoliticaBeneficio(Base):
+    """Política/Template de benefícios reutilizável."""
+    __tablename__ = "politicas_beneficio"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    codigo = Column(String(50), unique=True, nullable=False, index=True)
+    nome = Column(String(200), nullable=False)
+    descricao = Column(Text, nullable=True)
+    regime = Column(String(10), nullable=False, default="CLT")  # CLT, PJ
+    
+    # Jornada e Escala
+    escala = Column(String(20), nullable=False, default="6x1")  # 5x2, 6x1, 12x36
+    jornada_mensal = Column(Integer, nullable=False, default=180)  # Horas/mês
+    
+    # Benefícios (valores diários ou mensais)
+    vt_dia = Column(Numeric(10, 2), default=0)  # VT por dia trabalhado
+    vt_desconto_6pct = Column(Boolean, default=True)  # Aplica desconto 6%?
+    vr_dia = Column(Numeric(10, 2), default=0)  # VR por dia trabalhado
+    va_dia = Column(Numeric(10, 2), default=0)  # VA por dia trabalhado
+    plano_saude = Column(Numeric(10, 2), default=0)  # Plano saúde mensal
+    plano_dental = Column(Numeric(10, 2), default=0)  # Plano dental mensal
+    seguro_vida = Column(Numeric(10, 2), default=0)  # Seguro vida mensal
+    aux_creche = Column(Numeric(10, 2), default=0)  # Valor aux creche
+    aux_creche_percentual = Column(Numeric(5, 2), default=0)  # % do quadro que recebe
+    aux_home_office = Column(Numeric(10, 2), default=0)  # Auxílio home office mensal
+    
+    # Treinamento
+    dias_treinamento = Column(Integer, default=15)  # Dias de treinamento inicial
+    
+    # Controle
+    ativo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<PoliticaBeneficio {self.codigo}: {self.nome}>"
+
+
+class FaixaSalarial(Base):
+    """Faixa salarial (Júnior, Pleno, Sênior, etc.)."""
+    __tablename__ = "faixas_salariais"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    codigo = Column(String(20), unique=True, nullable=False, index=True)
+    nome = Column(String(100), nullable=False)
+    ordem = Column(Integer, default=0)  # Para ordenação
+    ativo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<FaixaSalarial {self.codigo}: {self.nome}>"
+
+
+class TabelaSalarial(Base):
+    """Tabela salarial: Função + Regime + Faixa + Política = Salário."""
+    __tablename__ = "tabela_salarial"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    
+    # Vínculos
+    funcao_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="CASCADE"), nullable=False)
+    faixa_id = Column(UUID(as_uuid=True), ForeignKey("faixas_salariais.id", ondelete="SET NULL"), nullable=True)
+    politica_id = Column(UUID(as_uuid=True), ForeignKey("politicas_beneficio.id", ondelete="SET NULL"), nullable=True)
+    
+    # Regime
+    regime = Column(String(10), nullable=False, default="CLT")  # CLT, PJ
+    
+    # Salário
+    salario_base = Column(Numeric(12, 2), nullable=False)
+    
+    # Override de benefícios (se diferente da política)
+    override_vt_dia = Column(Numeric(10, 2), nullable=True)
+    override_vr_dia = Column(Numeric(10, 2), nullable=True)
+    override_plano_saude = Column(Numeric(10, 2), nullable=True)
+    
+    # Controle
+    ativo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    funcao = relationship("Funcao", lazy="selectin")
+    faixa = relationship("FaixaSalarial", lazy="selectin")
+    politica = relationship("PoliticaBeneficio", lazy="selectin")
+    
+    def __repr__(self):
+        return f"<TabelaSalarial {self.funcao_id} {self.regime} R${self.salario_base}>"
+
+
+# ============================================
+# CENÁRIOS DE ORÇAMENTO
+# ============================================
+
+class Cenario(Base):
+    """Cenário de orçamento de pessoal."""
+    __tablename__ = "cenarios"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    
+    # Identificação
+    codigo = Column(String(50), unique=True, nullable=False, index=True)
+    nome = Column(String(200), nullable=False)
+    descricao = Column(Text, nullable=True)
+    
+    # Vínculos
+    empresa_id = Column(UUID(as_uuid=True), ForeignKey("empresas.id", ondelete="SET NULL"), nullable=True)
+    
+    # Período
+    ano = Column(Integer, nullable=False)
+    mes_inicio = Column(Integer, nullable=False, default=1)  # 1-12
+    mes_fim = Column(Integer, nullable=False, default=12)  # 1-12
+    
+    # Status
+    status = Column(String(20), nullable=False, default="RASCUNHO")  # RASCUNHO, APROVADO, BLOQUEADO
+    versao = Column(Integer, default=1)
+    
+    # Controle
+    ativo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    empresa = relationship("Empresa", lazy="selectin")
+    premissas = relationship("Premissa", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
+    posicoes = relationship("QuadroPessoal", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<Cenario {self.codigo}: {self.nome} ({self.ano})>"
+
+
+class Premissa(Base):
+    """Premissas/índices de um cenário de orçamento."""
+    __tablename__ = "premissas"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False)
+    
+    # Índices de Ineficiência (percentuais)
+    absenteismo = Column(Numeric(5, 2), default=3.0)  # % absenteísmo
+    turnover = Column(Numeric(5, 2), default=5.0)  # % turnover mensal
+    ferias_indice = Column(Numeric(5, 2), default=8.33)  # 1/12 = 8.33%
+    
+    # Treinamento
+    dias_treinamento = Column(Integer, default=15)  # Dias de treinamento por novo funcionário
+    
+    # Reajustes (data e percentual)
+    reajuste_data = Column(Date, nullable=True)  # Data do reajuste
+    reajuste_percentual = Column(Numeric(5, 2), default=0)  # % reajuste
+    
+    # Dissídio
+    dissidio_mes = Column(Integer, nullable=True)  # Mês do dissídio (1-12)
+    dissidio_percentual = Column(Numeric(5, 2), default=0)  # % estimado
+    
+    # Controle
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    cenario = relationship("Cenario", back_populates="premissas", lazy="selectin")
+    
+    def __repr__(self):
+        return f"<Premissa cenario={self.cenario_id} abs={self.absenteismo}% to={self.turnover}%>"
+
+
+class QuadroPessoal(Base):
+    """Posição no quadro de pessoal de um cenário."""
+    __tablename__ = "quadro_pessoal"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False)
+    
+    # Vínculos
+    funcao_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="CASCADE"), nullable=False)
+    secao_id = Column(UUID(as_uuid=True), ForeignKey("secoes.id", ondelete="SET NULL"), nullable=True)
+    centro_custo_id = Column(UUID(as_uuid=True), ForeignKey("centros_custo.id", ondelete="SET NULL"), nullable=True)
+    tabela_salarial_id = Column(UUID(as_uuid=True), ForeignKey("tabela_salarial.id", ondelete="SET NULL"), nullable=True)
+    
+    # Regime
+    regime = Column(String(10), nullable=False, default="CLT")  # CLT, PJ
+    
+    # Quantidade por mês (12 colunas para flexibilidade)
+    qtd_jan = Column(Integer, default=0)
+    qtd_fev = Column(Integer, default=0)
+    qtd_mar = Column(Integer, default=0)
+    qtd_abr = Column(Integer, default=0)
+    qtd_mai = Column(Integer, default=0)
+    qtd_jun = Column(Integer, default=0)
+    qtd_jul = Column(Integer, default=0)
+    qtd_ago = Column(Integer, default=0)
+    qtd_set = Column(Integer, default=0)
+    qtd_out = Column(Integer, default=0)
+    qtd_nov = Column(Integer, default=0)
+    qtd_dez = Column(Integer, default=0)
+    
+    # Override de salário (se diferente da tabela salarial)
+    salario_override = Column(Numeric(12, 2), nullable=True)
+    
+    # Span de supervisão (para cargos de gestão)
+    span = Column(Integer, nullable=True)  # Quantidade de subordinados
+    
+    # Observações
+    observacao = Column(Text, nullable=True)
+    
+    # Controle
+    ativo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    cenario = relationship("Cenario", back_populates="posicoes", lazy="selectin")
+    funcao = relationship("Funcao", lazy="selectin")
+    secao = relationship("Secao", lazy="selectin")
+    centro_custo = relationship("CentroCusto", lazy="selectin")
+    tabela_salarial = relationship("TabelaSalarial", lazy="selectin")
+    
+    def __repr__(self):
+        return f"<QuadroPessoal {self.funcao_id} cenario={self.cenario_id}>"

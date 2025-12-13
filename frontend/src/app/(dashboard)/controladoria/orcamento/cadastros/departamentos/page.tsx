@@ -4,6 +4,15 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { 
   Plus, 
   Search, 
@@ -11,9 +20,8 @@ import {
   Edit2, 
   Trash2, 
   Building2,
-  CheckCircle2,
-  XCircle,
-  Loader2
+  Loader2,
+  FileX
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth-store";
 import { departamentosApi, totvsApi, type Departamento, type DepartamentoTotvs } from "@/lib/api/orcamento";
@@ -142,101 +150,141 @@ export default function DepartamentosPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="page-container">
+      {/* Header da página */}
+      <div className="flex items-start justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Departamentos</h1>
-          <p className="text-muted-foreground">
+          <div className="flex items-center gap-3 mb-1">
+            <h1 className="page-title">Departamentos</h1>
+            <Badge variant="info" className="text-[10px]">
+              {departamentos.length} registros
+            </Badge>
+          </div>
+          <p className="page-subtitle">
             Gerencie a estrutura organizacional da empresa
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={abrirImportacao}>
+          <Button variant="outline" size="sm" onClick={abrirImportacao}>
             <Download className="h-4 w-4 mr-2" />
             Importar do TOTVS
           </Button>
-          <Button onClick={() => { setEditando(null); setFormData({ codigo: "", nome: "", codigo_totvs: "", ativo: true }); setShowForm(true); }}>
+          <Button 
+            variant="success" 
+            size="sm"
+            onClick={() => { 
+              setEditando(null); 
+              setFormData({ codigo: "", nome: "", codigo_totvs: "", ativo: true }); 
+              setShowForm(true); 
+            }}
+          >
             <Plus className="h-4 w-4 mr-2" />
             Novo Departamento
           </Button>
         </div>
       </div>
 
-      {/* Busca */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por código ou nome..."
-                className="pl-10"
-                value={busca}
-                onChange={(e) => setBusca(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && carregarDepartamentos()}
-              />
+      {/* Filtros */}
+      <Card className="mb-4">
+        <CardContent className="py-3">
+          <div className="filter-container">
+            <div className="filter-group flex-1">
+              <label className="filter-label">Buscar</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por código ou nome..."
+                  className="pl-9 h-8 text-xs"
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && carregarDepartamentos()}
+                />
+              </div>
             </div>
-            <Button variant="secondary" onClick={carregarDepartamentos}>
+            <div className="filter-divider" />
+            <Button variant="secondary" size="sm" onClick={carregarDepartamentos}>
+              <Search className="h-4 w-4 mr-1" />
               Buscar
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Lista */}
+      {/* Tabela */}
       <Card>
         <CardHeader>
           <CardTitle>Departamentos Cadastrados</CardTitle>
           <CardDescription>{departamentos.length} registros encontrados</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           {loading ? (
-            <div className="flex items-center justify-center py-8">
+            <div className="flex items-center justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             </div>
           ) : departamentos.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              Nenhum departamento cadastrado
+            <div className="empty-state my-8 mx-4">
+              <FileX className="empty-state-icon" />
+              <p className="empty-state-title">Nenhum departamento cadastrado</p>
+              <p className="empty-state-description">
+                Clique em &quot;Novo Departamento&quot; para adicionar ou importe do TOTVS.
+              </p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {departamentos.map((depto) => (
-                <div
-                  key={depto.id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent/50 transition-colors"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${
-                      depto.ativo ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-400"
-                    }`}>
-                      <Building2 className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{depto.nome}</span>
-                        {depto.ativo ? (
-                          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-gray-400" />
-                        )}
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-16"></TableHead>
+                  <TableHead className="w-32">Código</TableHead>
+                  <TableHead>Nome</TableHead>
+                  <TableHead className="w-32">Código TOTVS</TableHead>
+                  <TableHead className="w-24 text-center">Status</TableHead>
+                  <TableHead className="w-24 text-right">Ações</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {departamentos.map((depto) => (
+                  <TableRow key={depto.id}>
+                    <TableCell>
+                      <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${
+                        depto.ativo ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-400"
+                      }`}>
+                        <Building2 className="h-4 w-4" />
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        Código: {depto.codigo}
-                        {depto.codigo_totvs && ` • TOTVS: ${depto.codigo_totvs}`}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="ghost" size="icon" onClick={() => handleEdit(depto)}>
-                      <Edit2 className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => handleDelete(depto.id)}>
-                      <Trash2 className="h-4 w-4 text-red-500" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{depto.codigo}</TableCell>
+                    <TableCell className="font-medium">{depto.nome}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {depto.codigo_totvs || "—"}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Badge variant={depto.ativo ? "success" : "secondary"} className="text-[10px]">
+                        {depto.ativo ? "Ativo" : "Inativo"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button 
+                          variant="ghost" 
+                          size="icon-xs" 
+                          onClick={() => handleEdit(depto)}
+                          className="hover:bg-orange-50 hover:text-orange-600"
+                        >
+                          <Edit2 className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon-xs" 
+                          onClick={() => handleDelete(depto.id)}
+                          className="hover:bg-red-50 hover:text-red-600"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>
@@ -247,46 +295,55 @@ export default function DepartamentosPage() {
           <Card className="w-full max-w-md">
             <CardHeader>
               <CardTitle>{editando ? "Editar Departamento" : "Novo Departamento"}</CardTitle>
+              <CardDescription>
+                {editando ? "Atualize as informações do departamento" : "Preencha os dados do novo departamento"}
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium">Código *</label>
+                <div className="form-field">
+                  <label className="filter-label">Código *</label>
                   <Input
                     value={formData.codigo}
                     onChange={(e) => setFormData({ ...formData, codigo: e.target.value })}
+                    className="h-8 text-sm"
                     required
                   />
                 </div>
-                <div>
-                  <label className="text-sm font-medium">Nome *</label>
+                <div className="form-field">
+                  <label className="filter-label">Nome *</label>
                   <Input
                     value={formData.nome}
                     onChange={(e) => setFormData({ ...formData, nome: e.target.value })}
+                    className="h-8 text-sm"
                     required
                   />
                 </div>
-                <div>
-                  <label className="text-sm font-medium">Código TOTVS (opcional)</label>
+                <div className="form-field">
+                  <label className="filter-label">Código TOTVS (opcional)</label>
                   <Input
                     value={formData.codigo_totvs}
                     onChange={(e) => setFormData({ ...formData, codigo_totvs: e.target.value })}
+                    className="h-8 text-sm"
                   />
                 </div>
                 <div className="flex items-center gap-2">
                   <input
                     type="checkbox"
+                    id="ativo"
                     checked={formData.ativo}
                     onChange={(e) => setFormData({ ...formData, ativo: e.target.checked })}
-                    className="h-4 w-4"
+                    className="h-4 w-4 rounded border-border"
                   />
-                  <label className="text-sm">Ativo</label>
+                  <label htmlFor="ativo" className="text-sm">Ativo</label>
                 </div>
-                <div className="flex gap-2 justify-end">
-                  <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
+                <div className="flex gap-2 justify-end pt-4 border-t">
+                  <Button type="button" variant="outline" size="sm" onClick={() => setShowForm(false)}>
                     Cancelar
                   </Button>
-                  <Button type="submit">Salvar</Button>
+                  <Button type="submit" variant="success" size="sm">
+                    {editando ? "Atualizar" : "Criar"}
+                  </Button>
                 </div>
               </form>
             </CardContent>
@@ -304,45 +361,59 @@ export default function DepartamentosPage() {
                 Selecione os departamentos que deseja importar do CORPORERM
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex-1 overflow-auto">
+            <CardContent className="flex-1 overflow-auto p-0">
               {loadingTotvs ? (
-                <div className="flex items-center justify-center py-8">
+                <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {deptosTotvs.map((depto) => (
-                    <div
-                      key={depto.codigo}
-                      className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${
-                        selectedTotvs.includes(depto.codigo) ? "bg-blue-50 border-blue-300" : "hover:bg-accent/50"
-                      }`}
-                      onClick={() => toggleSelectTotvs(depto.codigo)}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedTotvs.includes(depto.codigo)}
-                        onChange={() => toggleSelectTotvs(depto.codigo)}
-                        className="h-4 w-4"
-                      />
-                      <div>
-                        <p className="font-medium">{depto.nome}</p>
-                        <p className="text-sm text-muted-foreground">Código: {depto.codigo}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <Table>
+                  <TableHeader className="sticky top-0 bg-muted/95 backdrop-blur-sm">
+                    <TableRow>
+                      <TableHead className="w-12"></TableHead>
+                      <TableHead className="w-32">Código</TableHead>
+                      <TableHead>Nome</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {deptosTotvs.map((depto) => (
+                      <TableRow 
+                        key={depto.codigo}
+                        className={`cursor-pointer ${
+                          selectedTotvs.includes(depto.codigo) ? "bg-orange-50" : ""
+                        }`}
+                        onClick={() => toggleSelectTotvs(depto.codigo)}
+                      >
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            checked={selectedTotvs.includes(depto.codigo)}
+                            onChange={() => toggleSelectTotvs(depto.codigo)}
+                            className="h-4 w-4 rounded border-border"
+                          />
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">{depto.codigo}</TableCell>
+                        <TableCell>{depto.nome}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               )}
             </CardContent>
-            <div className="p-4 border-t flex justify-between items-center">
-              <span className="text-sm text-muted-foreground">
+            <div className="p-4 border-t flex justify-between items-center bg-muted/5">
+              <span className="text-xs text-muted-foreground">
                 {selectedTotvs.length} selecionados
               </span>
               <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setShowImport(false)}>
+                <Button variant="outline" size="sm" onClick={() => setShowImport(false)}>
                   Cancelar
                 </Button>
-                <Button onClick={handleImportar} disabled={selectedTotvs.length === 0 || importando}>
+                <Button 
+                  variant="success" 
+                  size="sm" 
+                  onClick={handleImportar} 
+                  disabled={selectedTotvs.length === 0 || importando}
+                >
                   {importando && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                   Importar Selecionados
                 </Button>
@@ -354,4 +425,3 @@ export default function DepartamentosPage() {
     </div>
   );
 }
-

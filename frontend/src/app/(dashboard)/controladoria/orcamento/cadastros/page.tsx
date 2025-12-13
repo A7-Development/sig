@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Building2, Layers, CircleDollarSign, CalendarDays, ArrowRight } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Building2, Layers, CircleDollarSign, CalendarDays, ArrowRight, Database } from "lucide-react";
 
 const cadastros = [
   {
@@ -41,45 +42,57 @@ const cadastros = [
 
 export default function CadastrosPage() {
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Cadastros do Orçamento</h1>
-        <p className="text-muted-foreground">
+    <div className="page-container">
+      {/* Header da página */}
+      <div className="mb-6">
+        <div className="flex items-center gap-3 mb-1">
+          <h1 className="page-title">Cadastros do Orçamento</h1>
+          <Badge variant="info" className="text-[10px]">
+            4 módulos
+          </Badge>
+        </div>
+        <p className="page-subtitle">
           Gerencie os cadastros base para construção do orçamento
         </p>
       </div>
 
+      {/* Grid de Cards */}
       <div className="grid gap-4 md:grid-cols-2">
         {cadastros.map((item) => (
           <Link key={item.href} href={item.href}>
-            <Card className="hover:shadow-md transition-shadow cursor-pointer group">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className={`h-12 w-12 rounded-lg ${item.bgColor} ${item.color} flex items-center justify-center`}>
-                    <item.icon className="h-6 w-6" />
+            <Card className="hover:shadow-md transition-all cursor-pointer group h-full">
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between">
+                  <div className={`h-10 w-10 rounded-lg ${item.bgColor} ${item.color} flex items-center justify-center shrink-0`}>
+                    <item.icon className="h-5 w-5" />
                   </div>
-                  <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                  <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-orange-500 group-hover:translate-x-1 transition-all" />
                 </div>
-                <CardTitle className="mt-4">{item.title}</CardTitle>
-                <CardDescription>{item.description}</CardDescription>
               </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">
-                  Clique para gerenciar
-                </p>
+              <CardContent className="pt-0">
+                <CardTitle className="text-sm mb-1">{item.title}</CardTitle>
+                <CardDescription className="text-xs">{item.description}</CardDescription>
               </CardContent>
             </Card>
           </Link>
         ))}
       </div>
 
-      <Card className="border-dashed">
-        <CardHeader>
-          <CardTitle className="text-lg">Integração com TOTVS</CardTitle>
-          <CardDescription>
-            Os cadastros podem ser importados diretamente do sistema TOTVS (CORPORERM).
-            Cada tela possui um botão &quot;Importar do TOTVS&quot; que permite selecionar e importar registros.
-          </CardDescription>
+      {/* Card de Integração */}
+      <Card className="mt-6 border-dashed border-orange-200 bg-orange-50/30">
+        <CardHeader className="bg-transparent border-0">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-lg bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">
+              <Database className="h-5 w-5" />
+            </div>
+            <div>
+              <CardTitle className="text-sm">Integração com TOTVS</CardTitle>
+              <CardDescription className="text-xs mt-0.5">
+                Os cadastros podem ser importados diretamente do sistema TOTVS (CORPORERM).
+                Cada tela possui um botão &quot;Importar do TOTVS&quot; que permite selecionar e importar registros.
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
       </Card>
     </div>

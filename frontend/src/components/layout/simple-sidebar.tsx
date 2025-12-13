@@ -22,10 +22,10 @@ export function SimpleSidebar() {
   const menuSections = getModuleMenus(moduleCode);
 
   const moduleInfo = isAdmin 
-    ? { name: "Administração", color: "text-gray-700" }
+    ? { name: "Administração", color: "text-foreground" }
     : activeModule 
-      ? { name: activeModule.name, color: activeModule.color }
-      : { name: "SIG", color: "text-gray-700" };
+      ? { name: activeModule.name, color: "text-foreground" }
+      : { name: "SIG", color: "text-foreground" };
 
   const handleLogout = () => {
     logout();
@@ -35,16 +35,16 @@ export function SimpleSidebar() {
   return (
     <aside 
       className={cn(
-        "flex flex-col h-full bg-white border-r transition-all duration-300",
+        "flex flex-col h-full bg-background border-r border-border transition-all duration-300",
         collapsed ? "w-16" : "w-64"
       )}
     >
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b">
+      <div className="flex items-center justify-between p-4 border-b border-border">
         {!collapsed && (
           <div className="flex items-center gap-3">
             {activeModule && !isAdmin && (
-              <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100", activeModule.color)}>
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-orange-100 text-orange-600">
                 <activeModule.icon className="h-5 w-5" />
               </div>
             )}
@@ -52,7 +52,7 @@ export function SimpleSidebar() {
               <span className={cn("text-sm font-semibold", moduleInfo.color)}>
                 {moduleInfo.name}
               </span>
-              <span className="text-xs text-gray-500">SIG</span>
+              <span className="text-xs text-muted-foreground">Alert Brasil</span>
             </div>
           </div>
         )}
@@ -71,7 +71,7 @@ export function SimpleSidebar() {
         {menuSections.map((section) => (
           <div key={section.title} className="mb-4">
             {!collapsed && (
-              <p className="px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <p className="px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                 {section.title}
               </p>
             )}
@@ -87,8 +87,8 @@ export function SimpleSidebar() {
                       className={cn(
                         "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors",
                         isActive
-                          ? "bg-gray-100 text-gray-900 font-medium"
-                          : "text-gray-600 hover:bg-gray-50 hover:text-gray-900",
+                          ? "bg-orange-100 text-orange-700 font-medium"
+                          : "text-muted-foreground hover:bg-orange-50 hover:text-orange-600",
                         collapsed && "justify-center"
                       )}
                       title={collapsed ? item.name : undefined}
@@ -105,21 +105,21 @@ export function SimpleSidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="border-t p-3">
+      <div className="border-t border-border p-3">
         <div className={cn("flex items-center gap-3", collapsed && "justify-center")}>
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 text-sm font-medium flex-shrink-0">
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-orange-100 text-orange-700 text-sm font-medium flex-shrink-0">
             {user?.name?.charAt(0).toUpperCase() || "U"}
           </div>
           {!collapsed && (
             <>
               <div className="flex flex-col flex-1 min-w-0">
                 <span className="text-sm font-medium truncate">{user?.name}</span>
-                <span className="text-xs text-gray-500 truncate">{user?.email}</span>
+                <span className="text-xs text-muted-foreground truncate">{user?.email}</span>
               </div>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 flex-shrink-0"
+                className="h-8 w-8 flex-shrink-0 hover:text-orange-600"
                 onClick={handleLogout}
               >
                 <LogOut className="h-4 w-4" />
@@ -131,4 +131,3 @@ export function SimpleSidebar() {
     </aside>
   );
 }
-
