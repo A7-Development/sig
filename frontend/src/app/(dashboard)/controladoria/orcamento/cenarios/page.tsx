@@ -43,6 +43,7 @@ import {
 import { ClienteNWSelector } from "@/components/orcamento/ClienteNWSelector";
 import { FuncoesQuantidadesTab } from "@/components/orcamento/FuncoesQuantidadesTab";
 import { PremissasFuncaoMesGrid } from "@/components/orcamento/PremissasFuncaoMesGrid";
+import { ClientesSecoesTree } from "@/components/orcamento/ClientesSecoesTree";
 import { useAuthStore } from "@/stores/auth-store";
 import { 
   cenariosApi, 
@@ -525,43 +526,19 @@ export default function CenariosPage() {
               <div className="h-full overflow-auto p-6">
                 <div className="mb-4">
                   <h2 className="section-title">Configuração do Cenário</h2>
-                  <p className="page-subtitle">Configure Cliente, Empresas e Seção (Projeto)</p>
+                  <p className="page-subtitle">Configure Clientes, Seções e Empresas</p>
                 </div>
                 
-                <div className="space-y-6">
-                  {/* Cliente NW */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">Cliente (NW)</CardTitle>
-                      <CardDescription>Selecione o cliente do banco NW</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <ClienteNWSelector
-                        value={cenarioSelecionado.cliente_nw_codigo || undefined}
-                        onValueChange={async (codigo) => {
-                          if (!token) return;
-                          try {
-                            await cenariosApi.atualizar(token, cenarioSelecionado.id, {
-                              cliente_nw_codigo: codigo
-                            });
-                            // Atualizar o cenário selecionado com o novo cliente
-                            setCenarioSelecionado({
-                              ...cenarioSelecionado,
-                              cliente_nw_codigo: codigo
-                            });
-                            // Também atualizar na lista de cenários
-                            setCenarios(prev => prev.map(c => 
-                              c.id === cenarioSelecionado.id 
-                                ? { ...c, cliente_nw_codigo: codigo }
-                                : c
-                            ));
-                          } catch (error: any) {
-                            alert(error.message || "Erro ao atualizar cliente");
-                          }
-                        }}
-                      />
-                    </CardContent>
-                  </Card>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Clientes e Seções - Árvore */}
+                  <div className="lg:col-span-2">
+                    <ClientesSecoesTree 
+                      cenarioId={cenarioSelecionado.id}
+                      onSecaoSelect={(secao) => {
+                        console.log("Seção selecionada:", secao);
+                      }}
+                    />
+                  </div>
 
                   {/* Empresas */}
                   <Card>
@@ -622,50 +599,6 @@ export default function CenariosPage() {
                           ? `${empresas.filter(e => e.ativo !== false).length} empresa${empresas.filter(e => e.ativo !== false).length !== 1 ? 's' : ''} disponível${empresas.filter(e => e.ativo !== false).length !== 1 ? 'is' : ''}`
                           : "Cadastre empresas primeiro"}
                       </p>
-                    </CardContent>
-                  </Card>
-
-                  {/* Seção (Projeto) */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">Seção (Projeto)</CardTitle>
-                      <CardDescription>Selecione a seção que será o projeto deste cenário</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {secoes.length === 0 ? (
-                        <div className="text-center py-4">
-                          <p className="text-xs text-muted-foreground mb-2">Nenhuma seção cadastrada</p>
-                          <p className="text-[10px] text-muted-foreground">
-                            Cadastre seções em: Cadastros → Seções
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <Select
-                            value={""}
-                            onValueChange={(secaoId) => {
-                              // TODO: Implementar quando adicionar campo secao_id ao Cenario
-                              console.log("Seção selecionada:", secaoId);
-                            }}
-                          >
-                            <SelectTrigger className="h-8 text-sm">
-                              <SelectValue placeholder="Selecione a seção (projeto)..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {secoes
-                                .filter(sec => sec.ativo !== false)
-                                .map((sec) => (
-                                  <SelectItem key={sec.id} value={sec.id}>
-                                    {sec.nome} ({sec.codigo})
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            A seção selecionada será usada como projeto padrão para as posições do quadro de pessoal
-                          </p>
-                        </div>
-                      )}
                     </CardContent>
                   </Card>
                 </div>
@@ -1133,6 +1066,337 @@ export default function CenariosPage() {
                     {cenario.cliente_nw_codigo ? (
                       <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">
                         {cenario.cliente_nw_codigo}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {getStatusBadge(cenario.status)}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleEditarCenario(cenario)}
+                        className="h-7 text-xs hover:bg-orange-50 hover:text-orange-600 hover:border-orange-300"
+                      >
+                        <Pencil className="h-3 w-3 mr-1" />
+                        Editar
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon-xs" 
+                        onClick={() => handleDuplicarCenario(cenario)}
+                        className="hover:bg-blue-50 hover:text-blue-600"
+                        title="Duplicar cenário"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon-xs" 
+                        onClick={() => handleDeleteCenario(cenario.id)}
+                        className="hover:bg-red-50 hover:text-red-600"
+                        title="Excluir cenário"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+
+      {/* Modal Cenário */}
+      {showFormCenario && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <Card className="w-full max-w-lg">
+            <CardHeader>
+              <CardTitle>{editandoCenario ? "Editar Cenário" : "Novo Cenário"}</CardTitle>
+              <CardDescription>
+                {editandoCenario ? "Atualize as informações do cenário" : "Preencha os dados do novo cenário"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSubmitCenario} className="space-y-4">
+                <div className="form-field">
+                  <label className="filter-label">Nome do Cenário *</label>
+                  <Input
+                    value={formCenario.nome}
+                    onChange={(e) => setFormCenario({ ...formCenario, nome: e.target.value })}
+                    placeholder="Orçamento 2026 - Conservador"
+                    className="h-8 text-sm"
+                    required
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    O código será gerado automaticamente
+                  </p>
+                </div>
+                
+                <div className="form-field">
+                  <label className="filter-label">Descrição</label>
+                  <Input
+                    value={formCenario.descricao}
+                    onChange={(e) => setFormCenario({ ...formCenario, descricao: e.target.value })}
+                    placeholder="Descrição opcional do cenário"
+                    className="h-8 text-sm"
+                  />
+                </div>
+
+
+                <div className="border-t pt-4">
+                  <label className="filter-label mb-3 block">Período do Cenário *</label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="form-field">
+                      <label className="filter-label text-[10px]">Data Início (mm/aaaa)</label>
+                      <Input
+                        type="text"
+                        value={`${formCenario.mes_inicio.toString().padStart(2, '0')}/${formCenario.ano_inicio}`}
+                        onChange={(e) => {
+                          let value = e.target.value.replace(/\D/g, '');
+                          
+                          // Limitar a 6 dígitos (2 para mês + 4 para ano)
+                          if (value.length > 6) {
+                            value = value.slice(0, 6);
+                          }
+                          
+                          // Separar mês e ano
+                          let mes = formCenario.mes_inicio;
+                          let ano = formCenario.ano_inicio;
+                          
+                          if (value.length >= 2) {
+                            mes = parseInt(value.slice(0, 2));
+                            if (mes < 1) mes = 1;
+                            if (mes > 12) mes = 12;
+                          }
+                          
+                          if (value.length > 2) {
+                            ano = parseInt(value.slice(2));
+                            if (ano < 2020) ano = 2020;
+                            if (ano > 2100) ano = 2100;
+                          }
+                          
+                          setFormCenario({
+                            ...formCenario,
+                            mes_inicio: mes,
+                            ano_inicio: ano
+                          });
+                        }}
+                        onBlur={(e) => {
+                          // Garantir formato correto ao sair do campo
+                          const mes = formCenario.mes_inicio.toString().padStart(2, '0');
+                          const ano = formCenario.ano_inicio.toString();
+                          e.target.value = `${mes}/${ano}`;
+                        }}
+                        placeholder="01/2026"
+                        className="h-8 text-sm font-mono"
+                        maxLength={7}
+                        required
+                      />
+                    </div>
+                    <div className="form-field">
+                      <label className="filter-label text-[10px]">Data Fim (mm/aaaa)</label>
+                      <Input
+                        type="text"
+                        value={`${formCenario.mes_fim.toString().padStart(2, '0')}/${formCenario.ano_fim}`}
+                        onChange={(e) => {
+                          let value = e.target.value.replace(/\D/g, '');
+                          
+                          // Limitar a 6 dígitos (2 para mês + 4 para ano)
+                          if (value.length > 6) {
+                            value = value.slice(0, 6);
+                          }
+                          
+                          // Separar mês e ano
+                          let mes = formCenario.mes_fim;
+                          let ano = formCenario.ano_fim;
+                          
+                          if (value.length >= 2) {
+                            mes = parseInt(value.slice(0, 2));
+                            if (mes < 1) mes = 1;
+                            if (mes > 12) mes = 12;
+                          }
+                          
+                          if (value.length > 2) {
+                            ano = parseInt(value.slice(2));
+                            if (ano < 2020) ano = 2020;
+                            if (ano > 2100) ano = 2100;
+                          }
+                          
+                          setFormCenario({
+                            ...formCenario,
+                            mes_fim: mes,
+                            ano_fim: ano
+                          });
+                        }}
+                        onBlur={(e) => {
+                          // Garantir formato correto ao sair do campo
+                          const mes = formCenario.mes_fim.toString().padStart(2, '0');
+                          const ano = formCenario.ano_fim.toString();
+                          e.target.value = `${mes}/${ano}`;
+                        }}
+                        placeholder="12/2027"
+                        className="h-8 text-sm font-mono"
+                        maxLength={7}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Exemplo: 01/2026 a 12/2027 (24 meses)
+                  </p>
+                </div>
+                
+                {editandoCenario && (
+                  <div className="form-field">
+                    <label className="filter-label">Status</label>
+                    <select
+                      value={editandoCenario.status}
+                      onChange={async (e) => {
+                        if (!token) return;
+                        try {
+                          await cenariosApi.atualizar(token, editandoCenario.id, {
+                            status: e.target.value as 'RASCUNHO' | 'APROVADO' | 'BLOQUEADO'
+                          });
+                          carregarDados();
+                        } catch (error: any) {
+                          alert(error.message || "Erro ao atualizar status");
+                        }
+                      }}
+                      className="w-full h-8 px-3 border rounded-md text-sm bg-background"
+                    >
+                      <option value="RASCUNHO">Rascunho</option>
+                      <option value="APROVADO">Aprovado</option>
+                      <option value="BLOQUEADO">Bloqueado</option>
+                    </select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Cenários novos sempre iniciam como Rascunho
+                    </p>
+                  </div>
+                )}
+                <div className="flex gap-2 justify-end pt-4 border-t">
+                  <Button type="button" variant="outline" size="sm" onClick={() => setShowFormCenario(false)}>
+                    Cancelar
+                  </Button>
+                  <Button type="submit" variant="success" size="sm">
+                    {editandoCenario ? "Atualizar" : "Criar"}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Modal Posição */}
+      {showFormPosicao && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-8">
+          <Card className="w-full max-w-2xl">
+            <CardHeader>
+              <CardTitle>{editandoPosicao ? "Editar Posição" : "Nova Posição"}</CardTitle>
+              <CardDescription>
+                {editandoPosicao ? "Atualize os dados da posição" : "Adicione uma nova posição ao quadro"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSubmitPosicao} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="form-field">
+                    <label className="filter-label">Função *</label>
+                    <select
+                      value={formPosicao.funcao_id}
+                      onChange={(e) => setFormPosicao({ ...formPosicao, funcao_id: e.target.value })}
+                      className="w-full h-8 px-3 border rounded-md text-sm bg-background"
+                      required
+                    >
+                      <option value="">Selecione...</option>
+                      {funcoes.map((f) => (
+                        <option key={f.id} value={f.id}>{f.nome}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label className="filter-label">Regime</label>
+                    <select
+                      value={formPosicao.regime}
+                      onChange={(e) => setFormPosicao({ ...formPosicao, regime: e.target.value as 'CLT' | 'PJ' })}
+                      className="w-full h-8 px-3 border rounded-md text-sm bg-background"
+                    >
+                      <option value="CLT">CLT</option>
+                      <option value="PJ">PJ</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="form-field">
+                    <label className="filter-label">Seção</label>
+                    <select
+                      value={formPosicao.secao_id || ""}
+                      onChange={(e) => setFormPosicao({ ...formPosicao, secao_id: e.target.value || null })}
+                      className="w-full h-8 px-3 border rounded-md text-sm bg-background"
+                    >
+                      <option value="">Selecione...</option>
+                      {secoes.map((s) => (
+                        <option key={s.id} value={s.id}>{s.nome}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label className="filter-label">Centro de Custo</label>
+                    <select
+                      value={formPosicao.centro_custo_id || ""}
+                      onChange={(e) => setFormPosicao({ ...formPosicao, centro_custo_id: e.target.value || null })}
+                      className="w-full h-8 px-3 border rounded-md text-sm bg-background"
+                    >
+                      <option value="">Selecione...</option>
+                      {centrosCusto.map((cc) => (
+                        <option key={cc.id} value={cc.id}>{cc.nome}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                
+                {/* Quantidades mensais */}
+                <div>
+                  <label className="filter-label mb-2 block">Quantidade por Mês</label>
+                  <div className="grid grid-cols-6 gap-2">
+                    {['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'].map((mes) => (
+                      <div key={mes}>
+                        <label className="text-[10px] text-muted-foreground uppercase block text-center">{mes}</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={(formPosicao as any)[`qtd_${mes}`]}
+                          onChange={(e) => setFormPosicao({ ...formPosicao, [`qtd_${mes}`]: parseInt(e.target.value) || 0 })}
+                          className="text-center h-8 text-sm"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex gap-2 justify-end pt-4 border-t">
+                  <Button type="button" variant="outline" size="sm" onClick={() => setShowFormPosicao(false)}>
+                    Cancelar
+                  </Button>
+                  <Button type="submit" variant="success" size="sm">
+                    {editandoPosicao ? "Atualizar" : "Adicionar"}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
                       </span>
                     ) : (
                       <span className="text-muted-foreground">—</span>
