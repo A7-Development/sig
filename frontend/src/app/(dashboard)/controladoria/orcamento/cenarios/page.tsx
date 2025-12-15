@@ -35,12 +35,12 @@ import {
   FileEdit,
   DollarSign,
   ChevronDown,
-  Building2,
   Calendar,
   Loader2,
   FileX
 } from "lucide-react";
 import { ClienteNWSelector } from "@/components/orcamento/ClienteNWSelector";
+import { ClientesSecoesTree } from "@/components/orcamento/ClientesSecoesTree";
 import { FuncoesQuantidadesTab } from "@/components/orcamento/FuncoesQuantidadesTab";
 import { PremissasFuncaoMesGrid } from "@/components/orcamento/PremissasFuncaoMesGrid";
 import { useAuthStore } from "@/stores/auth-store";
@@ -79,7 +79,7 @@ export default function CenariosPage() {
   const [tabelaSalarial, setTabelaSalarial] = useState<TabelaSalarial[]>([]);
   
   // Abas
-  const [abaAtiva, setAbaAtiva] = useState<'informacoes' | 'configuracao' | 'funcoes' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custos'>('informacoes');
+  const [abaAtiva, setAbaAtiva] = useState<'configuracao' | 'funcoes' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custos'>('configuracao');
   const [custos, setCustos] = useState<ResumoCustos | null>(null);
   const [loadingCustos, setLoadingCustos] = useState(false);
   
@@ -399,17 +399,6 @@ export default function CenariosPage() {
           {/* Abas */}
           <div className="shrink-0 flex gap-1 border-b bg-muted/30 rounded-t-lg px-2 overflow-x-auto">
             <button
-              onClick={() => setAbaAtiva('informacoes')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                abaAtiva === 'informacoes'
-                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Building2 className="h-4 w-4" />
-              Informações
-            </button>
-            <button
               onClick={() => setAbaAtiva('configuracao')}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
                 abaAtiva === 'configuracao'
@@ -476,50 +465,6 @@ export default function CenariosPage() {
               <div className="p-8 space-y-4">
                 <Skeleton className="h-8 w-64" />
                 <Skeleton className="h-48 w-full" />
-              </div>
-            ) : abaAtiva === 'informacoes' ? (
-              <div className="h-full overflow-auto p-6">
-                <div className="mb-4">
-                  <h2 className="section-title">Informações do Cenário</h2>
-                  <p className="page-subtitle">Dados básicos e configurações gerais</p>
-                </div>
-                
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm">Dados do Cenário</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="filter-label">Nome</label>
-                        <p className="text-sm font-medium">{cenarioSelecionado.nome}</p>
-                      </div>
-                      <div>
-                        <label className="filter-label">Código</label>
-                        <p className="text-sm font-mono">{cenarioSelecionado.codigo}</p>
-                      </div>
-                      <div>
-                        <label className="filter-label">Período</label>
-                        <p className="text-sm">
-                          {cenarioSelecionado.mes_inicio.toString().padStart(2, '0')}/{cenarioSelecionado.ano_inicio} a{" "}
-                          {cenarioSelecionado.mes_fim.toString().padStart(2, '0')}/{cenarioSelecionado.ano_fim}
-                        </p>
-                      </div>
-                      <div>
-                        <label className="filter-label">Status</label>
-                        <div className="mt-1">
-                          {getStatusBadge(cenarioSelecionado.status)}
-                        </div>
-                      </div>
-                      {cenarioSelecionado.descricao && (
-                        <div className="col-span-2">
-                          <label className="filter-label">Descrição</label>
-                          <p className="text-sm text-muted-foreground">{cenarioSelecionado.descricao}</p>
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
               </div>
             ) : abaAtiva === 'configuracao' ? (
               <div className="h-full overflow-auto p-6">
@@ -625,49 +570,10 @@ export default function CenariosPage() {
                     </CardContent>
                   </Card>
 
-                  {/* Seção (Projeto) */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">Seção (Projeto)</CardTitle>
-                      <CardDescription>Selecione a seção que será o projeto deste cenário</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {secoes.length === 0 ? (
-                        <div className="text-center py-4">
-                          <p className="text-xs text-muted-foreground mb-2">Nenhuma seção cadastrada</p>
-                          <p className="text-[10px] text-muted-foreground">
-                            Cadastre seções em: Cadastros → Seções
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <Select
-                            value={""}
-                            onValueChange={(secaoId) => {
-                              // TODO: Implementar quando adicionar campo secao_id ao Cenario
-                              console.log("Seção selecionada:", secaoId);
-                            }}
-                          >
-                            <SelectTrigger className="h-8 text-sm">
-                              <SelectValue placeholder="Selecione a seção (projeto)..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {secoes
-                                .filter(sec => sec.ativo !== false)
-                                .map((sec) => (
-                                  <SelectItem key={sec.id} value={sec.id}>
-                                    {sec.nome} ({sec.codigo})
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            A seção selecionada será usada como projeto padrão para as posições do quadro de pessoal
-                          </p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
+                  {/* Estrutura Clientes > Seções */}
+                  <ClientesSecoesTree
+                    cenarioId={cenarioSelecionado.id}
+                  />
                 </div>
               </div>
             ) : abaAtiva === 'funcoes' ? (

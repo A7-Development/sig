@@ -700,6 +700,42 @@ export interface FuncaoSpan {
   funcao?: { id: string; codigo: string; nome: string } | null;
 }
 
+// ============================================
+// CenarioCliente e CenarioSecao (Fase 1)
+// ============================================
+
+export interface CenarioSecao {
+  id: string;
+  cenario_cliente_id: string;
+  secao_id: string;
+  fator_pa: number;
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+  secao?: Secao;
+}
+
+export interface CenarioCliente {
+  id: string;
+  cenario_id: string;
+  cliente_nw_codigo: string;
+  nome_cliente: string | null;
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+  secoes?: CenarioSecao[];
+}
+
+export interface CenarioClienteCreate {
+  cliente_nw_codigo: string;
+  nome_cliente?: string;
+}
+
+export interface CenarioSecaoCreate {
+  secao_id: string;
+  fator_pa?: number;
+}
+
 export interface FuncaoSpanCreate {
   cenario_id: string;
   funcao_id: string;
@@ -839,6 +875,29 @@ export const cenariosApi = {
   
   bulkPremissasFuncao: (token: string, cenarioId: string, premissas: PremissaFuncaoMesCreate[]) =>
     api.post<PremissaFuncaoMes[]>(`/api/v1/orcamento/cenarios/${cenarioId}/premissas-funcao/bulk`, premissas, token),
+  
+  // ============================================
+  // CenarioCliente - Clientes do cenário
+  // ============================================
+  
+  getClientes: (token: string, cenarioId: string) =>
+    api.get<CenarioCliente[]>(`/api/v1/orcamento/cenarios/${cenarioId}/clientes`, token),
+  
+  addCliente: (token: string, cenarioId: string, data: CenarioClienteCreate) =>
+    api.post<CenarioCliente>(`/api/v1/orcamento/cenarios/${cenarioId}/clientes`, data, token),
+  
+  deleteCliente: (token: string, cenarioId: string, clienteId: string) =>
+    api.delete(`/api/v1/orcamento/cenarios/${cenarioId}/clientes/${clienteId}`, token),
+  
+  // ============================================
+  // CenarioSecao - Seções de cada cliente
+  // ============================================
+  
+  addClienteSecao: (token: string, cenarioId: string, clienteId: string, data: CenarioSecaoCreate) =>
+    api.post<CenarioSecao>(`/api/v1/orcamento/cenarios/${cenarioId}/clientes/${clienteId}/secoes`, data, token),
+  
+  deleteClienteSecao: (token: string, cenarioId: string, clienteId: string, secaoId: string) =>
+    api.delete(`/api/v1/orcamento/cenarios/${cenarioId}/clientes/${clienteId}/secoes/${secaoId}`, token),
 };
 
 // Types para cálculos
