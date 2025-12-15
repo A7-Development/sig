@@ -1,5 +1,5 @@
-"""
-Schemas do módulo de Orçamento.
+﻿"""
+Schemas do mÃ³dulo de OrÃ§amento.
 """
 
 from datetime import datetime, date
@@ -44,7 +44,7 @@ class DepartamentoComSecoes(DepartamentoResponse):
 
 
 # ============================================
-# Seção
+# SeÃ§Ã£o
 # ============================================
 
 class SecaoBase(BaseModel):
@@ -156,7 +156,7 @@ class FeriadoResponse(FeriadoBase):
 
 
 # ============================================
-# Função
+# FunÃ§Ã£o
 # ============================================
 
 class FuncaoBase(BaseModel):
@@ -296,7 +296,7 @@ class EncargoResponse(EncargoBase):
 
 
 # ============================================
-# Provisão (13º, Férias, Demandas)
+# ProvisÃ£o (13Âº, FÃ©rias, Demandas)
 # ============================================
 
 class ProvisaoBase(BaseModel):
@@ -342,7 +342,7 @@ class EmpresaComTributos(EmpresaResponse):
 
 
 # ============================================
-# Política de Benefício
+# PolÃ­tica de BenefÃ­cio
 # ============================================
 
 class PoliticaBeneficioBase(BaseModel):
@@ -475,16 +475,16 @@ class TabelaSalarialResponse(TabelaSalarialBase):
 
 
 # ============================================
-# Importação do TOTVS
+# ImportaÃ§Ã£o do TOTVS
 # ============================================
 
 class ImportacaoTotvs(BaseModel):
-    """Schema para importação de dados do TOTVS."""
-    codigos: List[str] = Field(..., min_items=1, description="Lista de códigos a importar")
+    """Schema para importaÃ§Ã£o de dados do TOTVS."""
+    codigos: List[str] = Field(..., min_items=1, description="Lista de cÃ³digos a importar")
 
 
 class ImportacaoResultado(BaseModel):
-    """Resultado da importação do TOTVS."""
+    """Resultado da importaÃ§Ã£o do TOTVS."""
     importados: int
     ignorados: int
     erros: List[str] = []
@@ -506,7 +506,7 @@ class ClienteNW(BaseModel):
 
 
 # ============================================
-# Cenário Cliente (Cliente do Cenário)
+# CenÃ¡rio Cliente (Cliente do CenÃ¡rio)
 # ============================================
 
 class CenarioClienteBase(BaseModel):
@@ -536,7 +536,7 @@ class CenarioClienteResponse(CenarioClienteBase):
 
 
 # ============================================
-# Cenário Seção (Seção do Cliente no Cenário)
+# CenÃ¡rio SeÃ§Ã£o (SeÃ§Ã£o do Cliente no CenÃ¡rio)
 # ============================================
 
 class CenarioSecaoBase(BaseModel):
@@ -567,19 +567,19 @@ class CenarioSecaoResponse(CenarioSecaoBase):
 
 
 class CenarioClienteComSecoes(CenarioClienteResponse):
-    """Cliente do cenário com suas seções."""
+    """Cliente do cenÃ¡rio com suas seÃ§Ãµes."""
     secoes: List[CenarioSecaoResponse] = []
 
 
 # ============================================
-# Cenário de Orçamento
+# CenÃ¡rio de OrÃ§amento
 # ============================================
 
 class CenarioBase(BaseModel):
     nome: str = Field(..., min_length=1, max_length=200)
     descricao: Optional[str] = None
-    cliente_nw_codigo: Optional[str] = Field(None, max_length=50, description="Código do cliente no NW")
-    empresa_ids: List[UUID] = Field(default_factory=list)  # Múltiplas empresas
+    cliente_nw_codigo: Optional[str] = Field(None, max_length=50, description="CÃ³digo do cliente no NW")
+    empresa_ids: List[UUID] = Field(default_factory=list)  # MÃºltiplas empresas
     ano_inicio: int = Field(..., ge=2020, le=2100)
     mes_inicio: int = Field(..., ge=1, le=12)
     ano_fim: int = Field(..., ge=2020, le=2100)
@@ -589,7 +589,7 @@ class CenarioBase(BaseModel):
     @field_validator('ano_fim')
     @classmethod
     def validate_ano_fim(cls, v, info):
-        """Valida que o ano final é posterior ou igual ao inicial."""
+        """Valida que o ano final Ã© posterior ou igual ao inicial."""
         if 'ano_inicio' in info.data:
             ano_inicio = info.data['ano_inicio']
             if v < ano_inicio:
@@ -598,25 +598,25 @@ class CenarioBase(BaseModel):
                 mes_inicio = info.data['mes_inicio']
                 mes_fim = info.data.get('mes_fim', 12)
                 if mes_fim < mes_inicio:
-                    raise ValueError("Mês final deve ser posterior ao mês inicial no mesmo ano")
+                    raise ValueError("MÃªs final deve ser posterior ao mÃªs inicial no mesmo ano")
         return v
     
     @field_validator('mes_fim')
     @classmethod
     def validate_mes_fim(cls, v, info):
-        """Valida que o mês final é válido quando no mesmo ano."""
+        """Valida que o mÃªs final Ã© vÃ¡lido quando no mesmo ano."""
         if 'ano_inicio' in info.data and 'ano_fim' in info.data:
             ano_inicio = info.data['ano_inicio']
             ano_fim = info.data['ano_fim']
             if ano_fim == ano_inicio and 'mes_inicio' in info.data:
                 mes_inicio = info.data['mes_inicio']
                 if v < mes_inicio:
-                    raise ValueError("Mês final deve ser posterior ao mês inicial no mesmo ano")
+                    raise ValueError("MÃªs final deve ser posterior ao mÃªs inicial no mesmo ano")
         return v
 
 
 class CenarioCreate(CenarioBase):
-    # Código será gerado automaticamente, não precisa no create
+    # CÃ³digo serÃ¡ gerado automaticamente, nÃ£o precisa no create
     pass
 
 
@@ -812,13 +812,13 @@ class QuadroPessoalComRelacionamentos(QuadroPessoalResponse):
 
 
 # ============================================
-# Função Span (Cálculo Automático de Quantidades)
+# FunÃ§Ã£o Span (CÃ¡lculo AutomÃ¡tico de Quantidades)
 # ============================================
 
 class FuncaoSpanBase(BaseModel):
     cenario_id: UUID
     funcao_id: UUID
-    funcoes_base_ids: List[UUID] = Field(..., min_items=1, description="Lista de IDs das funções base para cálculo")
+    funcoes_base_ids: List[UUID] = Field(..., min_items=1, description="Lista de IDs das funÃ§Ãµes base para cÃ¡lculo")
     span_ratio: float = Field(..., gt=0, description="Ratio do span (ex: 35 = 1 para cada 35)")
     ativo: bool = True
 
@@ -848,7 +848,7 @@ class FuncaoSpanComRelacionamentos(FuncaoSpanResponse):
 
 
 # ============================================
-# Premissa por Função e Mês
+# Premissa por FunÃ§Ã£o e MÃªs
 # ============================================
 
 class PremissaFuncaoMesBase(BaseModel):
@@ -890,10 +890,6 @@ class PremissaFuncaoMesComRelacionamentos(PremissaFuncaoMesResponse):
 DepartamentoComSecoes.model_rebuild()
 CenarioSecaoResponse.model_rebuild()
 CenarioClienteComSecoes.model_rebuild()
-
-
-    cbo: Optional[str] = Field(None, max_length=20)
-    ativo: Optional[bool] = None
 
 
 class FuncaoResponse(FuncaoBase):
@@ -1013,7 +1009,7 @@ class EncargoResponse(EncargoBase):
 
 
 # ============================================
-# Provisão (13º, Férias, Demandas)
+# ProvisÃ£o (13Âº, FÃ©rias, Demandas)
 # ============================================
 
 class ProvisaoBase(BaseModel):
@@ -1059,7 +1055,7 @@ class EmpresaComTributos(EmpresaResponse):
 
 
 # ============================================
-# Política de Benefício
+# PolÃ­tica de BenefÃ­cio
 # ============================================
 
 class PoliticaBeneficioBase(BaseModel):
@@ -1192,16 +1188,16 @@ class TabelaSalarialResponse(TabelaSalarialBase):
 
 
 # ============================================
-# Importação do TOTVS
+# ImportaÃ§Ã£o do TOTVS
 # ============================================
 
 class ImportacaoTotvs(BaseModel):
-    """Schema para importação de dados do TOTVS."""
-    codigos: List[str] = Field(..., min_items=1, description="Lista de códigos a importar")
+    """Schema para importaÃ§Ã£o de dados do TOTVS."""
+    codigos: List[str] = Field(..., min_items=1, description="Lista de cÃ³digos a importar")
 
 
 class ImportacaoResultado(BaseModel):
-    """Resultado da importação do TOTVS."""
+    """Resultado da importaÃ§Ã£o do TOTVS."""
     importados: int
     ignorados: int
     erros: List[str] = []
@@ -1223,7 +1219,7 @@ class ClienteNW(BaseModel):
 
 
 # ============================================
-# Cenário Cliente (Cliente do Cenário)
+# CenÃ¡rio Cliente (Cliente do CenÃ¡rio)
 # ============================================
 
 class CenarioClienteBase(BaseModel):
@@ -1253,7 +1249,7 @@ class CenarioClienteResponse(CenarioClienteBase):
 
 
 # ============================================
-# Cenário Seção (Seção do Cliente no Cenário)
+# CenÃ¡rio SeÃ§Ã£o (SeÃ§Ã£o do Cliente no CenÃ¡rio)
 # ============================================
 
 class CenarioSecaoBase(BaseModel):
@@ -1284,19 +1280,19 @@ class CenarioSecaoResponse(CenarioSecaoBase):
 
 
 class CenarioClienteComSecoes(CenarioClienteResponse):
-    """Cliente do cenário com suas seções."""
+    """Cliente do cenÃ¡rio com suas seÃ§Ãµes."""
     secoes: List[CenarioSecaoResponse] = []
 
 
 # ============================================
-# Cenário de Orçamento
+# CenÃ¡rio de OrÃ§amento
 # ============================================
 
 class CenarioBase(BaseModel):
     nome: str = Field(..., min_length=1, max_length=200)
     descricao: Optional[str] = None
-    cliente_nw_codigo: Optional[str] = Field(None, max_length=50, description="Código do cliente no NW")
-    empresa_ids: List[UUID] = Field(default_factory=list)  # Múltiplas empresas
+    cliente_nw_codigo: Optional[str] = Field(None, max_length=50, description="CÃ³digo do cliente no NW")
+    empresa_ids: List[UUID] = Field(default_factory=list)  # MÃºltiplas empresas
     ano_inicio: int = Field(..., ge=2020, le=2100)
     mes_inicio: int = Field(..., ge=1, le=12)
     ano_fim: int = Field(..., ge=2020, le=2100)
@@ -1306,7 +1302,7 @@ class CenarioBase(BaseModel):
     @field_validator('ano_fim')
     @classmethod
     def validate_ano_fim(cls, v, info):
-        """Valida que o ano final é posterior ou igual ao inicial."""
+        """Valida que o ano final Ã© posterior ou igual ao inicial."""
         if 'ano_inicio' in info.data:
             ano_inicio = info.data['ano_inicio']
             if v < ano_inicio:
@@ -1315,25 +1311,25 @@ class CenarioBase(BaseModel):
                 mes_inicio = info.data['mes_inicio']
                 mes_fim = info.data.get('mes_fim', 12)
                 if mes_fim < mes_inicio:
-                    raise ValueError("Mês final deve ser posterior ao mês inicial no mesmo ano")
+                    raise ValueError("MÃªs final deve ser posterior ao mÃªs inicial no mesmo ano")
         return v
     
     @field_validator('mes_fim')
     @classmethod
     def validate_mes_fim(cls, v, info):
-        """Valida que o mês final é válido quando no mesmo ano."""
+        """Valida que o mÃªs final Ã© vÃ¡lido quando no mesmo ano."""
         if 'ano_inicio' in info.data and 'ano_fim' in info.data:
             ano_inicio = info.data['ano_inicio']
             ano_fim = info.data['ano_fim']
             if ano_fim == ano_inicio and 'mes_inicio' in info.data:
                 mes_inicio = info.data['mes_inicio']
                 if v < mes_inicio:
-                    raise ValueError("Mês final deve ser posterior ao mês inicial no mesmo ano")
+                    raise ValueError("MÃªs final deve ser posterior ao mÃªs inicial no mesmo ano")
         return v
 
 
 class CenarioCreate(CenarioBase):
-    # Código será gerado automaticamente, não precisa no create
+    # CÃ³digo serÃ¡ gerado automaticamente, nÃ£o precisa no create
     pass
 
 
@@ -1529,13 +1525,13 @@ class QuadroPessoalComRelacionamentos(QuadroPessoalResponse):
 
 
 # ============================================
-# Função Span (Cálculo Automático de Quantidades)
+# FunÃ§Ã£o Span (CÃ¡lculo AutomÃ¡tico de Quantidades)
 # ============================================
 
 class FuncaoSpanBase(BaseModel):
     cenario_id: UUID
     funcao_id: UUID
-    funcoes_base_ids: List[UUID] = Field(..., min_items=1, description="Lista de IDs das funções base para cálculo")
+    funcoes_base_ids: List[UUID] = Field(..., min_items=1, description="Lista de IDs das funÃ§Ãµes base para cÃ¡lculo")
     span_ratio: float = Field(..., gt=0, description="Ratio do span (ex: 35 = 1 para cada 35)")
     ativo: bool = True
 
@@ -1565,7 +1561,7 @@ class FuncaoSpanComRelacionamentos(FuncaoSpanResponse):
 
 
 # ============================================
-# Premissa por Função e Mês
+# Premissa por FunÃ§Ã£o e MÃªs
 # ============================================
 
 class PremissaFuncaoMesBase(BaseModel):
