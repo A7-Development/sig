@@ -1,6 +1,6 @@
-"""
-Modelos do módulo de Orçamento.
-Todos os dados são armazenados no PostgreSQL SIG.
+﻿"""
+Modelos do mÃ³dulo de OrÃ§amento.
+Todos os dados sÃ£o armazenados no PostgreSQL SIG.
 """
 
 import uuid
@@ -18,7 +18,7 @@ class Departamento(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     codigo = Column(String(50), unique=True, nullable=False, index=True)
-    codigo_totvs = Column(String(50), nullable=True, index=True)  # Vínculo opcional com GDEPTO
+    codigo_totvs = Column(String(50), nullable=True, index=True)  # VÃ­nculo opcional com GDEPTO
     nome = Column(String(200), nullable=False)
     ativo = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -32,13 +32,13 @@ class Departamento(Base):
 
 
 class Secao(Base):
-    """Seção dentro de um departamento."""
+    """SeÃ§Ã£o dentro de um departamento."""
     __tablename__ = "secoes"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     departamento_id = Column(UUID(as_uuid=True), ForeignKey("departamentos.id", ondelete="CASCADE"), nullable=False)
     codigo = Column(String(50), unique=True, nullable=False, index=True)
-    codigo_totvs = Column(String(50), nullable=True, index=True)  # Vínculo opcional com PSECAO
+    codigo_totvs = Column(String(50), nullable=True, index=True)  # VÃ­nculo opcional com PSECAO
     nome = Column(String(200), nullable=False)
     ativo = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -52,20 +52,20 @@ class Secao(Base):
 
 
 class CentroCusto(Base):
-    """Centro de Custo para alocação de custos."""
+    """Centro de Custo para alocaÃ§Ã£o de custos."""
     __tablename__ = "centros_custo"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     codigo = Column(String(50), unique=True, nullable=False, index=True)
-    codigo_totvs = Column(String(50), nullable=True, index=True)  # Vínculo opcional com PCCUSTO
+    codigo_totvs = Column(String(50), nullable=True, index=True)  # VÃ­nculo opcional com PCCUSTO
     nome = Column(String(200), nullable=False)
     
-    # Classificação
+    # ClassificaÃ§Ã£o
     tipo = Column(String(30), nullable=False, default="OPERACIONAL")  # OPERACIONAL, ADMINISTRATIVO, OVERHEAD
-    cliente = Column(String(200), nullable=True)  # Nome do cliente (quando aplicável)
-    contrato = Column(String(100), nullable=True)  # Referência do contrato
+    cliente = Column(String(200), nullable=True)  # Nome do cliente (quando aplicÃ¡vel)
+    contrato = Column(String(100), nullable=True)  # ReferÃªncia do contrato
     
-    # Localização (para cálculo de feriados)
+    # LocalizaÃ§Ã£o (para cÃ¡lculo de feriados)
     uf = Column(String(2), nullable=True)
     cidade = Column(String(100), nullable=True)
     
@@ -78,7 +78,7 @@ class CentroCusto(Base):
 
 
 class Feriado(Base):
-    """Feriados para cálculo de dias úteis/trabalhados."""
+    """Feriados para cÃ¡lculo de dias Ãºteis/trabalhados."""
     __tablename__ = "feriados"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -95,14 +95,14 @@ class Feriado(Base):
 
 
 class Funcao(Base):
-    """Função/Cargo para o orçamento de pessoal."""
+    """FunÃ§Ã£o/Cargo para o orÃ§amento de pessoal."""
     __tablename__ = "funcoes"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     codigo = Column(String(50), unique=True, nullable=False, index=True)
-    codigo_totvs = Column(String(50), nullable=True, index=True)  # Vínculo opcional com PFUNCAO
+    codigo_totvs = Column(String(50), nullable=True, index=True)  # VÃ­nculo opcional com PFUNCAO
     nome = Column(String(200), nullable=False)
-    cbo = Column(String(20), nullable=True)  # Código Brasileiro de Ocupações
+    cbo = Column(String(20), nullable=True)  # CÃ³digo Brasileiro de OcupaÃ§Ãµes
     ativo = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -112,7 +112,7 @@ class Funcao(Base):
 
 
 class Empresa(Base):
-    """Empresa do grupo para configurações específicas (tributos, encargos, etc.)."""
+    """Empresa do grupo para configuraÃ§Ãµes especÃ­ficas (tributos, encargos, etc.)."""
     __tablename__ = "empresas"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -140,7 +140,7 @@ class Tributo(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     empresa_id = Column(UUID(as_uuid=True), ForeignKey("empresas.id", ondelete="CASCADE"), nullable=False)
     
-    # Identificação
+    # IdentificaÃ§Ã£o
     codigo = Column(String(50), nullable=False)  # PIS, COFINS, ISS, CPREV
     nome = Column(String(200), nullable=False)
     
@@ -168,7 +168,7 @@ class Encargo(Base):
     empresa_id = Column(UUID(as_uuid=True), ForeignKey("empresas.id", ondelete="CASCADE"), nullable=False)
     regime = Column(String(10), nullable=False, default="CLT")  # CLT, PJ
     
-    # Identificação do encargo
+    # IdentificaÃ§Ã£o do encargo
     codigo = Column(String(50), nullable=False)  # INSS_EMPRESA, INSS_TERCEIROS, SAT_RAT
     nome = Column(String(200), nullable=False)
     
@@ -177,7 +177,7 @@ class Encargo(Base):
     base_calculo = Column(String(50), nullable=False, default="SALARIO")  # SALARIO, TOTAL
     
     # Controle
-    ordem = Column(Integer, default=0)  # Ordem de exibição
+    ordem = Column(Integer, default=0)  # Ordem de exibiÃ§Ã£o
     ativo = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -190,19 +190,19 @@ class Encargo(Base):
 
 
 class Provisao(Base):
-    """Provisões de mão de obra (13º, Férias, Demandas Trabalhistas)."""
+    """ProvisÃµes de mÃ£o de obra (13Âº, FÃ©rias, Demandas Trabalhistas)."""
     __tablename__ = "provisoes"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     
-    # Identificação
+    # IdentificaÃ§Ã£o
     codigo = Column(String(50), unique=True, nullable=False, index=True)  # 13_SALARIO, FERIAS, DEMANDAS
     nome = Column(String(200), nullable=False)
     descricao = Column(Text, nullable=True)
     
-    # Valor padrão
-    percentual = Column(Numeric(10, 4), nullable=False)  # Percentual sobre salário
-    incide_encargos = Column(Boolean, default=True)  # Se encargos incidem sobre esta provisão
+    # Valor padrÃ£o
+    percentual = Column(Numeric(10, 4), nullable=False)  # Percentual sobre salÃ¡rio
+    incide_encargos = Column(Boolean, default=True)  # Se encargos incidem sobre esta provisÃ£o
     
     # Controle
     ordem = Column(Integer, default=0)
@@ -215,7 +215,7 @@ class Provisao(Base):
 
 
 class PoliticaBeneficio(Base):
-    """Política/Template de benefícios reutilizável."""
+    """PolÃ­tica/Template de benefÃ­cios reutilizÃ¡vel."""
     __tablename__ = "politicas_beneficio"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -226,19 +226,19 @@ class PoliticaBeneficio(Base):
     
     # Jornada e Escala
     escala = Column(String(20), nullable=False, default="6x1")  # 5x2, 6x1, 12x36
-    jornada_mensal = Column(Integer, nullable=False, default=180)  # Horas/mês
+    jornada_mensal = Column(Integer, nullable=False, default=180)  # Horas/mÃªs
     
-    # Benefícios (valores diários ou mensais)
+    # BenefÃ­cios (valores diÃ¡rios ou mensais)
     vt_dia = Column(Numeric(10, 2), default=0)  # VT por dia trabalhado
     vt_desconto_6pct = Column(Boolean, default=True)  # Aplica desconto 6%?
     vr_dia = Column(Numeric(10, 2), default=0)  # VR por dia trabalhado
     va_dia = Column(Numeric(10, 2), default=0)  # VA por dia trabalhado
-    plano_saude = Column(Numeric(10, 2), default=0)  # Plano saúde mensal
+    plano_saude = Column(Numeric(10, 2), default=0)  # Plano saÃºde mensal
     plano_dental = Column(Numeric(10, 2), default=0)  # Plano dental mensal
     seguro_vida = Column(Numeric(10, 2), default=0)  # Seguro vida mensal
     aux_creche = Column(Numeric(10, 2), default=0)  # Valor aux creche
     aux_creche_percentual = Column(Numeric(5, 2), default=0)  # % do quadro que recebe
-    aux_home_office = Column(Numeric(10, 2), default=0)  # Auxílio home office mensal
+    aux_home_office = Column(Numeric(10, 2), default=0)  # AuxÃ­lio home office mensal
     
     # Treinamento
     dias_treinamento = Column(Integer, default=15)  # Dias de treinamento inicial
@@ -253,13 +253,13 @@ class PoliticaBeneficio(Base):
 
 
 class FaixaSalarial(Base):
-    """Faixa salarial (Júnior, Pleno, Sênior, etc.)."""
+    """Faixa salarial (JÃºnior, Pleno, SÃªnior, etc.)."""
     __tablename__ = "faixas_salariais"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     codigo = Column(String(20), unique=True, nullable=False, index=True)
     nome = Column(String(100), nullable=False)
-    ordem = Column(Integer, default=0)  # Para ordenação
+    ordem = Column(Integer, default=0)  # Para ordenaÃ§Ã£o
     ativo = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
@@ -268,12 +268,12 @@ class FaixaSalarial(Base):
 
 
 class TabelaSalarial(Base):
-    """Tabela salarial: Função + Regime + Faixa + Política = Salário."""
+    """Tabela salarial: FunÃ§Ã£o + Regime + Faixa + PolÃ­tica = SalÃ¡rio."""
     __tablename__ = "tabela_salarial"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     
-    # Vínculos
+    # VÃ­nculos
     funcao_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="CASCADE"), nullable=False)
     faixa_id = Column(UUID(as_uuid=True), ForeignKey("faixas_salariais.id", ondelete="SET NULL"), nullable=True)
     politica_id = Column(UUID(as_uuid=True), ForeignKey("politicas_beneficio.id", ondelete="SET NULL"), nullable=True)
@@ -281,10 +281,10 @@ class TabelaSalarial(Base):
     # Regime
     regime = Column(String(10), nullable=False, default="CLT")  # CLT, PJ
     
-    # Salário
+    # SalÃ¡rio
     salario_base = Column(Numeric(12, 2), nullable=False)
     
-    # Override de benefícios (se diferente da política)
+    # Override de benefÃ­cios (se diferente da polÃ­tica)
     override_vt_dia = Column(Numeric(10, 2), nullable=True)
     override_vr_dia = Column(Numeric(10, 2), nullable=True)
     override_plano_saude = Column(Numeric(10, 2), nullable=True)
@@ -304,12 +304,12 @@ class TabelaSalarial(Base):
 
 
 # ============================================
-# CENÁRIOS DE ORÇAMENTO
+# CENÃRIOS DE ORÃ‡AMENTO
 # ============================================
 
-# Tabela de associação para múltiplas empresas por cenário
+# Tabela de associaÃ§Ã£o para mÃºltiplas empresas por cenÃ¡rio
 class CenarioEmpresa(Base):
-    """Associação many-to-many entre Cenários e Empresas."""
+    """AssociaÃ§Ã£o many-to-many entre CenÃ¡rios e Empresas."""
     __tablename__ = "cenarios_empresas"
     
     cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), primary_key=True)
@@ -322,20 +322,20 @@ class CenarioEmpresa(Base):
 
 
 class Cenario(Base):
-    """Cenário de orçamento de pessoal."""
+    """CenÃ¡rio de orÃ§amento de pessoal."""
     __tablename__ = "cenarios"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     
-    # Identificação
+    # IdentificaÃ§Ã£o
     codigo = Column(String(50), unique=True, nullable=False, index=True)
     nome = Column(String(200), nullable=False)
     descricao = Column(Text, nullable=True)
     
-    # Cliente do NW (código do cliente na tabela clifor)
+    # Cliente do NW (cÃ³digo do cliente na tabela clifor)
     cliente_nw_codigo = Column(String(50), nullable=True, index=True)
     
-    # Período flexível (permite cruzar anos)
+    # PerÃ­odo flexÃ­vel (permite cruzar anos)
     ano_inicio = Column(Integer, nullable=False)
     mes_inicio = Column(Integer, nullable=False)  # 1-12
     ano_fim = Column(Integer, nullable=False)
@@ -368,26 +368,26 @@ class Cenario(Base):
 
 
 class Premissa(Base):
-    """Premissas/índices de um cenário de orçamento."""
+    """Premissas/Ã­ndices de um cenÃ¡rio de orÃ§amento."""
     __tablename__ = "premissas"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False)
     
-    # Índices de Ineficiência (percentuais)
-    absenteismo = Column(Numeric(5, 2), default=3.0)  # % absenteísmo
+    # Ãndices de IneficiÃªncia (percentuais)
+    absenteismo = Column(Numeric(5, 2), default=3.0)  # % absenteÃ­smo
     turnover = Column(Numeric(5, 2), default=5.0)  # % turnover mensal
     ferias_indice = Column(Numeric(5, 2), default=8.33)  # 1/12 = 8.33%
     
     # Treinamento
-    dias_treinamento = Column(Integer, default=15)  # Dias de treinamento por novo funcionário
+    dias_treinamento = Column(Integer, default=15)  # Dias de treinamento por novo funcionÃ¡rio
     
     # Reajustes (data e percentual)
     reajuste_data = Column(Date, nullable=True)  # Data do reajuste
     reajuste_percentual = Column(Numeric(5, 2), default=0)  # % reajuste
     
-    # Dissídio
-    dissidio_mes = Column(Integer, nullable=True)  # Mês do dissídio (1-12)
+    # DissÃ­dio
+    dissidio_mes = Column(Integer, nullable=True)  # MÃªs do dissÃ­dio (1-12)
     dissidio_percentual = Column(Numeric(5, 2), default=0)  # % estimado
     
     # Controle
@@ -402,14 +402,14 @@ class Premissa(Base):
 
 
 class QuadroPessoal(Base):
-    """Posição no quadro de pessoal de um cenário."""
+    """PosiÃ§Ã£o no quadro de pessoal de um cenÃ¡rio."""
     __tablename__ = "quadro_pessoal"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False)
     cenario_secao_id = Column(UUID(as_uuid=True), ForeignKey("cenario_secao.id", ondelete="SET NULL"), nullable=True, index=True)
     
-    # Vínculos
+    # VÃ­nculos
     funcao_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="CASCADE"), nullable=False)
     secao_id = Column(UUID(as_uuid=True), ForeignKey("secoes.id", ondelete="SET NULL"), nullable=True)
     centro_custo_id = Column(UUID(as_uuid=True), ForeignKey("centros_custo.id", ondelete="SET NULL"), nullable=True)
@@ -418,7 +418,7 @@ class QuadroPessoal(Base):
     # Regime
     regime = Column(String(10), nullable=False, default="CLT")  # CLT, PJ
     
-    # Quantidade por mês (12 colunas para flexibilidade)
+    # Quantidade por mÃªs (12 colunas para flexibilidade)
     qtd_jan = Column(Integer, default=0)
     qtd_fev = Column(Integer, default=0)
     qtd_mar = Column(Integer, default=0)
@@ -432,13 +432,13 @@ class QuadroPessoal(Base):
     qtd_nov = Column(Integer, default=0)
     qtd_dez = Column(Integer, default=0)
     
-    # Override de salário (se diferente da tabela salarial)
+    # Override de salÃ¡rio (se diferente da tabela salarial)
     salario_override = Column(Numeric(12, 2), nullable=True)
     
-    # Span de supervisão (para cargos de gestão)
+    # Span de supervisÃ£o (para cargos de gestÃ£o)
     span = Column(Integer, nullable=True)  # Quantidade de subordinados
     
-    # Observações
+    # ObservaÃ§Ãµes
     observacao = Column(Text, nullable=True)
     
     # Controle
@@ -459,18 +459,18 @@ class QuadroPessoal(Base):
 
 
 class FuncaoSpan(Base):
-    """Configuração de span (ratio) para cálculo automático de quantidades de funções."""
+    """ConfiguraÃ§Ã£o de span (ratio) para cÃ¡lculo automÃ¡tico de quantidades de funÃ§Ãµes."""
     __tablename__ = "funcao_span"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False, index=True)
     cenario_secao_id = Column(UUID(as_uuid=True), ForeignKey("cenario_secao.id", ondelete="CASCADE"), nullable=True, index=True)
     
-    # Função que será calculada via span (ex: Supervisor)
+    # FunÃ§Ã£o que serÃ¡ calculada via span (ex: Supervisor)
     funcao_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="CASCADE"), nullable=False)
     
-    # Funções base para cálculo (JSON array de UUIDs)
-    # Ex: [operador_id1, operador_id2] - span será calculado sobre a soma dessas funções
+    # FunÃ§Ãµes base para cÃ¡lculo (JSON array de UUIDs)
+    # Ex: [operador_id1, operador_id2] - span serÃ¡ calculado sobre a soma dessas funÃ§Ãµes
     funcoes_base_ids = Column(JSON, nullable=False)  # JSON array de UUIDs
     
     # Ratio do span (ex: 35 significa 1 supervisor para cada 35 operadores)
@@ -487,17 +487,17 @@ class FuncaoSpan(Base):
     funcao = relationship("Funcao", lazy="selectin")
     
     def __repr__(self):
-        return f"<FuncaoSpan {self.funcao_id} span={self.span_ratio} sobre {len(self.funcoes_base_ids or [])} funções>"
+        return f"<FuncaoSpan {self.funcao_id} span={self.span_ratio} sobre {len(self.funcoes_base_ids or [])} funÃ§Ãµes>"
 
 
 class CenarioCliente(Base):
-    """Cliente associado a um cenário de orçamento."""
+    """Cliente associado a um cenÃ¡rio de orÃ§amento."""
     __tablename__ = "cenario_cliente"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False, index=True)
     cliente_nw_codigo = Column(String(50), nullable=False, index=True)
-    nome_cliente = Column(String(255), nullable=True)  # Cache do nome para exibição
+    nome_cliente = Column(String(255), nullable=True)  # Cache do nome para exibiÃ§Ã£o
     
     ativo = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -516,14 +516,14 @@ class CenarioCliente(Base):
 
 
 class CenarioSecao(Base):
-    """Seção (operação) de um cliente dentro de um cenário."""
+    """SeÃ§Ã£o (operaÃ§Ã£o) de um cliente dentro de um cenÃ¡rio."""
     __tablename__ = "cenario_secao"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     cenario_cliente_id = Column(UUID(as_uuid=True), ForeignKey("cenario_cliente.id", ondelete="CASCADE"), nullable=False, index=True)
     secao_id = Column(UUID(as_uuid=True), ForeignKey("secoes.id", ondelete="CASCADE"), nullable=False, index=True)
     
-    # Configurações específicas da seção no cenário
+    # ConfiguraÃ§Ãµes especÃ­ficas da seÃ§Ã£o no cenÃ¡rio
     fator_pa = Column(Numeric(5, 2), default=3.0)  # Fator para calcular PAs (HC / fator = PAs)
     
     ativo = Column(Boolean, default=True)
@@ -546,7 +546,7 @@ class CenarioSecao(Base):
 
 
 class PremissaFuncaoMes(Base):
-    """Premissas de ineficiência por função e por mês."""
+    """Premissas de ineficiÃªncia por funÃ§Ã£o e por mÃªs."""
     __tablename__ = "premissa_funcao_mes"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -554,17 +554,17 @@ class PremissaFuncaoMes(Base):
     cenario_secao_id = Column(UUID(as_uuid=True), ForeignKey("cenario_secao.id", ondelete="CASCADE"), nullable=True, index=True)
     funcao_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="CASCADE"), nullable=False)
     
-    # Período
+    # PerÃ­odo
     mes = Column(Integer, nullable=False)  # 1-12
     ano = Column(Integer, nullable=False)
     
-    # Índices de Ineficiência (percentuais)
-    absenteismo = Column(Numeric(5, 2), default=3.0)  # % absenteísmo
+    # Ãndices de IneficiÃªncia (percentuais)
+    absenteismo = Column(Numeric(5, 2), default=3.0)  # % absenteÃ­smo
     turnover = Column(Numeric(5, 2), default=5.0)  # % turnover mensal
     ferias_indice = Column(Numeric(5, 2), default=8.33)  # 1/12 = 8.33%
     
     # Treinamento
-    dias_treinamento = Column(Integer, default=15)  # Dias de treinamento por novo funcionário
+    dias_treinamento = Column(Integer, default=15)  # Dias de treinamento por novo funcionÃ¡rio
     
     # Controle
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -575,7 +575,7 @@ class PremissaFuncaoMes(Base):
     cenario_secao = relationship("CenarioSecao", back_populates="premissas_funcao_mes", lazy="selectin")
     funcao = relationship("Funcao", lazy="selectin")
     
-    # Unique constraint: uma premissa por função/mês/ano/cenário/seção
+    # Unique constraint: uma premissa por funÃ§Ã£o/mÃªs/ano/cenÃ¡rio/seÃ§Ã£o
     __table_args__ = (
         UniqueConstraint('cenario_id', 'cenario_secao_id', 'funcao_id', 'mes', 'ano', name='uq_premissa_funcao_mes_v2'),
     )
@@ -583,491 +583,3 @@ class PremissaFuncaoMes(Base):
     def __repr__(self):
         return f"<PremissaFuncaoMes cenario={self.cenario_id} funcao={self.funcao_id} {self.mes:02d}/{self.ano}>"
 
-class Funcao(Base):
-    """Função/Cargo para o orçamento de pessoal."""
-    __tablename__ = "funcoes"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    codigo = Column(String(50), unique=True, nullable=False, index=True)
-    codigo_totvs = Column(String(50), nullable=True, index=True)  # Vínculo opcional com PFUNCAO
-    nome = Column(String(200), nullable=False)
-    cbo = Column(String(20), nullable=True)  # Código Brasileiro de Ocupações
-    ativo = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    def __repr__(self):
-        return f"<Funcao {self.codigo}: {self.nome}>"
-
-
-class Empresa(Base):
-    """Empresa do grupo para configurações específicas (tributos, encargos, etc.)."""
-    __tablename__ = "empresas"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    codigo = Column(String(50), unique=True, nullable=False, index=True)
-    razao_social = Column(String(200), nullable=False)
-    nome_fantasia = Column(String(200), nullable=True)
-    cnpj = Column(String(20), nullable=True, unique=True)
-    ativo = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    tributos = relationship("Tributo", back_populates="empresa", lazy="selectin", cascade="all, delete-orphan")
-    encargos = relationship("Encargo", back_populates="empresa", lazy="selectin", cascade="all, delete-orphan")
-    cenarios_rel = relationship("CenarioEmpresa", back_populates="empresa", lazy="selectin")
-    
-    def __repr__(self):
-        return f"<Empresa {self.codigo}: {self.razao_social}>"
-
-
-class Tributo(Base):
-    """Tributos sobre receita por empresa (PIS, COFINS, ISS, etc.)."""
-    __tablename__ = "tributos"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    empresa_id = Column(UUID(as_uuid=True), ForeignKey("empresas.id", ondelete="CASCADE"), nullable=False)
-    
-    # Identificação
-    codigo = Column(String(50), nullable=False)  # PIS, COFINS, ISS, CPREV
-    nome = Column(String(200), nullable=False)
-    
-    # Valor
-    aliquota = Column(Numeric(10, 4), nullable=False)  # Percentual
-    
-    # Controle
-    ordem = Column(Integer, default=0)
-    ativo = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    empresa = relationship("Empresa", back_populates="tributos", lazy="selectin")
-    
-    def __repr__(self):
-        return f"<Tributo {self.codigo}: {self.nome} ({self.aliquota}%)>"
-
-
-class Encargo(Base):
-    """Encargos patronais sobre folha por empresa (INSS, SAT/RAT, etc.)."""
-    __tablename__ = "encargos"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    empresa_id = Column(UUID(as_uuid=True), ForeignKey("empresas.id", ondelete="CASCADE"), nullable=False)
-    regime = Column(String(10), nullable=False, default="CLT")  # CLT, PJ
-    
-    # Identificação do encargo
-    codigo = Column(String(50), nullable=False)  # INSS_EMPRESA, INSS_TERCEIROS, SAT_RAT
-    nome = Column(String(200), nullable=False)
-    
-    # Valor
-    aliquota = Column(Numeric(10, 4), nullable=False)  # Percentual (ex: 20.0000 = 20%)
-    base_calculo = Column(String(50), nullable=False, default="SALARIO")  # SALARIO, TOTAL
-    
-    # Controle
-    ordem = Column(Integer, default=0)  # Ordem de exibição
-    ativo = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    empresa = relationship("Empresa", back_populates="encargos", lazy="selectin")
-    
-    def __repr__(self):
-        return f"<Encargo {self.codigo}: {self.nome} ({self.aliquota}%)>"
-
-
-class Provisao(Base):
-    """Provisões de mão de obra (13º, Férias, Demandas Trabalhistas)."""
-    __tablename__ = "provisoes"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    
-    # Identificação
-    codigo = Column(String(50), unique=True, nullable=False, index=True)  # 13_SALARIO, FERIAS, DEMANDAS
-    nome = Column(String(200), nullable=False)
-    descricao = Column(Text, nullable=True)
-    
-    # Valor padrão
-    percentual = Column(Numeric(10, 4), nullable=False)  # Percentual sobre salário
-    incide_encargos = Column(Boolean, default=True)  # Se encargos incidem sobre esta provisão
-    
-    # Controle
-    ordem = Column(Integer, default=0)
-    ativo = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    def __repr__(self):
-        return f"<Provisao {self.codigo}: {self.nome} ({self.percentual}%)>"
-
-
-class PoliticaBeneficio(Base):
-    """Política/Template de benefícios reutilizável."""
-    __tablename__ = "politicas_beneficio"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    codigo = Column(String(50), unique=True, nullable=False, index=True)
-    nome = Column(String(200), nullable=False)
-    descricao = Column(Text, nullable=True)
-    regime = Column(String(10), nullable=False, default="CLT")  # CLT, PJ
-    
-    # Jornada e Escala
-    escala = Column(String(20), nullable=False, default="6x1")  # 5x2, 6x1, 12x36
-    jornada_mensal = Column(Integer, nullable=False, default=180)  # Horas/mês
-    
-    # Benefícios (valores diários ou mensais)
-    vt_dia = Column(Numeric(10, 2), default=0)  # VT por dia trabalhado
-    vt_desconto_6pct = Column(Boolean, default=True)  # Aplica desconto 6%?
-    vr_dia = Column(Numeric(10, 2), default=0)  # VR por dia trabalhado
-    va_dia = Column(Numeric(10, 2), default=0)  # VA por dia trabalhado
-    plano_saude = Column(Numeric(10, 2), default=0)  # Plano saúde mensal
-    plano_dental = Column(Numeric(10, 2), default=0)  # Plano dental mensal
-    seguro_vida = Column(Numeric(10, 2), default=0)  # Seguro vida mensal
-    aux_creche = Column(Numeric(10, 2), default=0)  # Valor aux creche
-    aux_creche_percentual = Column(Numeric(5, 2), default=0)  # % do quadro que recebe
-    aux_home_office = Column(Numeric(10, 2), default=0)  # Auxílio home office mensal
-    
-    # Treinamento
-    dias_treinamento = Column(Integer, default=15)  # Dias de treinamento inicial
-    
-    # Controle
-    ativo = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    def __repr__(self):
-        return f"<PoliticaBeneficio {self.codigo}: {self.nome}>"
-
-
-class FaixaSalarial(Base):
-    """Faixa salarial (Júnior, Pleno, Sênior, etc.)."""
-    __tablename__ = "faixas_salariais"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    codigo = Column(String(20), unique=True, nullable=False, index=True)
-    nome = Column(String(100), nullable=False)
-    ordem = Column(Integer, default=0)  # Para ordenação
-    ativo = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    def __repr__(self):
-        return f"<FaixaSalarial {self.codigo}: {self.nome}>"
-
-
-class TabelaSalarial(Base):
-    """Tabela salarial: Função + Regime + Faixa + Política = Salário."""
-    __tablename__ = "tabela_salarial"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    
-    # Vínculos
-    funcao_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="CASCADE"), nullable=False)
-    faixa_id = Column(UUID(as_uuid=True), ForeignKey("faixas_salariais.id", ondelete="SET NULL"), nullable=True)
-    politica_id = Column(UUID(as_uuid=True), ForeignKey("politicas_beneficio.id", ondelete="SET NULL"), nullable=True)
-    
-    # Regime
-    regime = Column(String(10), nullable=False, default="CLT")  # CLT, PJ
-    
-    # Salário
-    salario_base = Column(Numeric(12, 2), nullable=False)
-    
-    # Override de benefícios (se diferente da política)
-    override_vt_dia = Column(Numeric(10, 2), nullable=True)
-    override_vr_dia = Column(Numeric(10, 2), nullable=True)
-    override_plano_saude = Column(Numeric(10, 2), nullable=True)
-    
-    # Controle
-    ativo = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    funcao = relationship("Funcao", lazy="selectin")
-    faixa = relationship("FaixaSalarial", lazy="selectin")
-    politica = relationship("PoliticaBeneficio", lazy="selectin")
-    
-    def __repr__(self):
-        return f"<TabelaSalarial {self.funcao_id} {self.regime} R${self.salario_base}>"
-
-
-# ============================================
-# CENÁRIOS DE ORÇAMENTO
-# ============================================
-
-# Tabela de associação para múltiplas empresas por cenário
-class CenarioEmpresa(Base):
-    """Associação many-to-many entre Cenários e Empresas."""
-    __tablename__ = "cenarios_empresas"
-    
-    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), primary_key=True)
-    empresa_id = Column(UUID(as_uuid=True), ForeignKey("empresas.id", ondelete="CASCADE"), primary_key=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Relationships
-    cenario = relationship("Cenario", back_populates="empresas_rel")
-    empresa = relationship("Empresa", back_populates="cenarios_rel")
-
-
-class Cenario(Base):
-    """Cenário de orçamento de pessoal."""
-    __tablename__ = "cenarios"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    
-    # Identificação
-    codigo = Column(String(50), unique=True, nullable=False, index=True)
-    nome = Column(String(200), nullable=False)
-    descricao = Column(Text, nullable=True)
-    
-    # Cliente do NW (código do cliente na tabela clifor)
-    cliente_nw_codigo = Column(String(50), nullable=True, index=True)
-    
-    # Período flexível (permite cruzar anos)
-    ano_inicio = Column(Integer, nullable=False)
-    mes_inicio = Column(Integer, nullable=False)  # 1-12
-    ano_fim = Column(Integer, nullable=False)
-    mes_fim = Column(Integer, nullable=False)  # 1-12
-    
-    # Status (sempre inicia como RASCUNHO)
-    status = Column(String(20), nullable=False, default="RASCUNHO")  # RASCUNHO, APROVADO, BLOQUEADO
-    versao = Column(Integer, default=1)
-    
-    # Controle
-    ativo = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    empresas_rel = relationship("CenarioEmpresa", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
-    clientes = relationship("CenarioCliente", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
-    premissas = relationship("Premissa", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
-    posicoes = relationship("QuadroPessoal", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
-    spans = relationship("FuncaoSpan", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
-    premissas_funcao_mes = relationship("PremissaFuncaoMes", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
-    
-    @property
-    def empresas(self):
-        """Retorna lista de empresas associadas."""
-        return [rel.empresa for rel in self.empresas_rel]
-    
-    def __repr__(self):
-        return f"<Cenario {self.codigo}: {self.nome} ({self.ano_inicio}/{self.mes_inicio:02d} - {self.ano_fim}/{self.mes_fim:02d})>"
-
-
-class Premissa(Base):
-    """Premissas/índices de um cenário de orçamento."""
-    __tablename__ = "premissas"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False)
-    
-    # Índices de Ineficiência (percentuais)
-    absenteismo = Column(Numeric(5, 2), default=3.0)  # % absenteísmo
-    turnover = Column(Numeric(5, 2), default=5.0)  # % turnover mensal
-    ferias_indice = Column(Numeric(5, 2), default=8.33)  # 1/12 = 8.33%
-    
-    # Treinamento
-    dias_treinamento = Column(Integer, default=15)  # Dias de treinamento por novo funcionário
-    
-    # Reajustes (data e percentual)
-    reajuste_data = Column(Date, nullable=True)  # Data do reajuste
-    reajuste_percentual = Column(Numeric(5, 2), default=0)  # % reajuste
-    
-    # Dissídio
-    dissidio_mes = Column(Integer, nullable=True)  # Mês do dissídio (1-12)
-    dissidio_percentual = Column(Numeric(5, 2), default=0)  # % estimado
-    
-    # Controle
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    cenario = relationship("Cenario", back_populates="premissas", lazy="selectin")
-    
-    def __repr__(self):
-        return f"<Premissa cenario={self.cenario_id} abs={self.absenteismo}% to={self.turnover}%>"
-
-
-class QuadroPessoal(Base):
-    """Posição no quadro de pessoal de um cenário."""
-    __tablename__ = "quadro_pessoal"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False)
-    cenario_secao_id = Column(UUID(as_uuid=True), ForeignKey("cenario_secao.id", ondelete="SET NULL"), nullable=True, index=True)
-    
-    # Vínculos
-    funcao_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="CASCADE"), nullable=False)
-    secao_id = Column(UUID(as_uuid=True), ForeignKey("secoes.id", ondelete="SET NULL"), nullable=True)
-    centro_custo_id = Column(UUID(as_uuid=True), ForeignKey("centros_custo.id", ondelete="SET NULL"), nullable=True)
-    tabela_salarial_id = Column(UUID(as_uuid=True), ForeignKey("tabela_salarial.id", ondelete="SET NULL"), nullable=True)
-    
-    # Regime
-    regime = Column(String(10), nullable=False, default="CLT")  # CLT, PJ
-    
-    # Quantidade por mês (12 colunas para flexibilidade)
-    qtd_jan = Column(Integer, default=0)
-    qtd_fev = Column(Integer, default=0)
-    qtd_mar = Column(Integer, default=0)
-    qtd_abr = Column(Integer, default=0)
-    qtd_mai = Column(Integer, default=0)
-    qtd_jun = Column(Integer, default=0)
-    qtd_jul = Column(Integer, default=0)
-    qtd_ago = Column(Integer, default=0)
-    qtd_set = Column(Integer, default=0)
-    qtd_out = Column(Integer, default=0)
-    qtd_nov = Column(Integer, default=0)
-    qtd_dez = Column(Integer, default=0)
-    
-    # Override de salário (se diferente da tabela salarial)
-    salario_override = Column(Numeric(12, 2), nullable=True)
-    
-    # Span de supervisão (para cargos de gestão)
-    span = Column(Integer, nullable=True)  # Quantidade de subordinados
-    
-    # Observações
-    observacao = Column(Text, nullable=True)
-    
-    # Controle
-    ativo = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    cenario = relationship("Cenario", back_populates="posicoes", lazy="selectin")
-    cenario_secao = relationship("CenarioSecao", back_populates="quadro_pessoal", lazy="selectin")
-    funcao = relationship("Funcao", lazy="selectin")
-    secao = relationship("Secao", lazy="selectin")
-    centro_custo = relationship("CentroCusto", lazy="selectin")
-    tabela_salarial = relationship("TabelaSalarial", lazy="selectin")
-    
-    def __repr__(self):
-        return f"<QuadroPessoal {self.funcao_id} cenario={self.cenario_id}>"
-
-
-class FuncaoSpan(Base):
-    """Configuração de span (ratio) para cálculo automático de quantidades de funções."""
-    __tablename__ = "funcao_span"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False, index=True)
-    cenario_secao_id = Column(UUID(as_uuid=True), ForeignKey("cenario_secao.id", ondelete="CASCADE"), nullable=True, index=True)
-    
-    # Função que será calculada via span (ex: Supervisor)
-    funcao_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="CASCADE"), nullable=False)
-    
-    # Funções base para cálculo (JSON array de UUIDs)
-    # Ex: [operador_id1, operador_id2] - span será calculado sobre a soma dessas funções
-    funcoes_base_ids = Column(JSON, nullable=False)  # JSON array de UUIDs
-    
-    # Ratio do span (ex: 35 significa 1 supervisor para cada 35 operadores)
-    span_ratio = Column(Numeric(10, 2), nullable=False)
-    
-    # Controle
-    ativo = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    cenario = relationship("Cenario", back_populates="spans", lazy="selectin")
-    cenario_secao = relationship("CenarioSecao", back_populates="spans", lazy="selectin")
-    funcao = relationship("Funcao", lazy="selectin")
-    
-    def __repr__(self):
-        return f"<FuncaoSpan {self.funcao_id} span={self.span_ratio} sobre {len(self.funcoes_base_ids or [])} funções>"
-
-
-class CenarioCliente(Base):
-    """Cliente associado a um cenário de orçamento."""
-    __tablename__ = "cenario_cliente"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False, index=True)
-    cliente_nw_codigo = Column(String(50), nullable=False, index=True)
-    nome_cliente = Column(String(255), nullable=True)  # Cache do nome para exibição
-    
-    ativo = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    cenario = relationship("Cenario", back_populates="clientes", lazy="selectin")
-    secoes = relationship("CenarioSecao", back_populates="cenario_cliente", lazy="selectin", cascade="all, delete-orphan")
-    
-    __table_args__ = (
-        UniqueConstraint('cenario_id', 'cliente_nw_codigo', name='uq_cenario_cliente'),
-    )
-    
-    def __repr__(self):
-        return f"<CenarioCliente {self.cliente_nw_codigo} cenario={self.cenario_id}>"
-
-
-class CenarioSecao(Base):
-    """Seção (operação) de um cliente dentro de um cenário."""
-    __tablename__ = "cenario_secao"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    cenario_cliente_id = Column(UUID(as_uuid=True), ForeignKey("cenario_cliente.id", ondelete="CASCADE"), nullable=False, index=True)
-    secao_id = Column(UUID(as_uuid=True), ForeignKey("secoes.id", ondelete="CASCADE"), nullable=False, index=True)
-    
-    # Configurações específicas da seção no cenário
-    fator_pa = Column(Numeric(5, 2), default=3.0)  # Fator para calcular PAs (HC / fator = PAs)
-    
-    ativo = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    cenario_cliente = relationship("CenarioCliente", back_populates="secoes", lazy="selectin")
-    secao = relationship("Secao", lazy="selectin")
-    quadro_pessoal = relationship("QuadroPessoal", back_populates="cenario_secao", lazy="selectin")
-    spans = relationship("FuncaoSpan", back_populates="cenario_secao", lazy="selectin")
-    premissas_funcao_mes = relationship("PremissaFuncaoMes", back_populates="cenario_secao", lazy="selectin")
-    
-    __table_args__ = (
-        UniqueConstraint('cenario_cliente_id', 'secao_id', name='uq_cenario_secao'),
-    )
-    
-    def __repr__(self):
-        return f"<CenarioSecao secao={self.secao_id} cliente={self.cenario_cliente_id}>"
-
-
-class PremissaFuncaoMes(Base):
-    """Premissas de ineficiência por função e por mês."""
-    __tablename__ = "premissa_funcao_mes"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False, index=True)
-    cenario_secao_id = Column(UUID(as_uuid=True), ForeignKey("cenario_secao.id", ondelete="CASCADE"), nullable=True, index=True)
-    funcao_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="CASCADE"), nullable=False)
-    
-    # Período
-    mes = Column(Integer, nullable=False)  # 1-12
-    ano = Column(Integer, nullable=False)
-    
-    # Índices de Ineficiência (percentuais)
-    absenteismo = Column(Numeric(5, 2), default=3.0)  # % absenteísmo
-    turnover = Column(Numeric(5, 2), default=5.0)  # % turnover mensal
-    ferias_indice = Column(Numeric(5, 2), default=8.33)  # 1/12 = 8.33%
-    
-    # Treinamento
-    dias_treinamento = Column(Integer, default=15)  # Dias de treinamento por novo funcionário
-    
-    # Controle
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    cenario = relationship("Cenario", back_populates="premissas_funcao_mes", lazy="selectin")
-    cenario_secao = relationship("CenarioSecao", back_populates="premissas_funcao_mes", lazy="selectin")
-    funcao = relationship("Funcao", lazy="selectin")
-    
-    # Unique constraint: uma premissa por função/mês/ano/cenário/seção
-    __table_args__ = (
-        UniqueConstraint('cenario_id', 'cenario_secao_id', 'funcao_id', 'mes', 'ano', name='uq_premissa_funcao_mes_v2'),
-    )
-    
-    def __repr__(self):
-        return f"<PremissaFuncaoMes cenario={self.cenario_id} funcao={self.funcao_id} {self.mes:02d}/{self.ano}>"
