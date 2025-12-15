@@ -39,6 +39,7 @@ export interface MenuItem {
   name: string;
   href: string;
   icon: LucideIcon;
+  submenu?: MenuItem[];
 }
 
 export interface MenuSection {
@@ -51,48 +52,44 @@ export type ModuleMenus = Record<string, MenuSection[]>;
 export const moduleMenus: ModuleMenus = {
   controladoria: [
     {
-      title: "Geral",
+      title: "Menu Principal",
       items: [
         { name: "Dashboard", href: "/controladoria", icon: LayoutDashboard },
+        { 
+          name: "Relatórios", 
+          href: "/controladoria/relatorios", 
+          icon: FileText,
+          submenu: [
+            { name: "DRE", href: "/controladoria/dre", icon: FileText },
+            { name: "Fluxo de Caixa", href: "/controladoria/fluxo-caixa", icon: DollarSign },
+            { name: "Balancete", href: "/controladoria/balancete", icon: FileSpreadsheet },
+            { name: "Receitas", href: "/controladoria/receitas", icon: TrendingUp },
+            { name: "Despesas", href: "/controladoria/despesas", icon: TrendingUp },
+          ],
+        },
+        { 
+          name: "Orçamento", 
+          href: "/controladoria/orcamento", 
+          icon: Wallet,
+          submenu: [
+            { name: "Visão Geral", href: "/controladoria/orcamento", icon: Wallet },
+            { name: "Cenários", href: "/controladoria/orcamento/cenarios", icon: GitCompare },
+            { name: "Empresas", href: "/controladoria/orcamento/empresas", icon: Building2 },
+            { name: "Cargos e Salários", href: "/controladoria/orcamento/cargos-salarios", icon: Briefcase },
+          ],
+        },
+        { 
+          name: "Cadastros", 
+          href: "/controladoria/cadastros", 
+          icon: ClipboardList,
+          submenu: [
+            { name: "Departamentos", href: "/controladoria/orcamento/cadastros/departamentos", icon: Building2 },
+            { name: "Seções", href: "/controladoria/orcamento/cadastros/secoes", icon: Layers },
+            { name: "Centros de Custo", href: "/controladoria/orcamento/cadastros/centros-custo", icon: CircleDollarSign },
+            { name: "Feriados", href: "/controladoria/orcamento/cadastros/feriados", icon: CalendarDays },
+          ],
+        },
         { name: "Indicadores", href: "/controladoria/indicadores", icon: BarChart3 },
-      ],
-    },
-    {
-      title: "Financeiro",
-      items: [
-        { name: "DRE", href: "/controladoria/dre", icon: FileText },
-        { name: "Fluxo de Caixa", href: "/controladoria/fluxo-caixa", icon: DollarSign },
-        { name: "Receitas", href: "/controladoria/receitas", icon: TrendingUp },
-        { name: "Despesas", href: "/controladoria/despesas", icon: TrendingUp },
-      ],
-    },
-    {
-      title: "Orçamento",
-      items: [
-        { name: "Visão Geral", href: "/controladoria/orcamento", icon: Wallet },
-        { name: "Cenários", href: "/controladoria/orcamento/cenarios", icon: GitCompare },
-        { name: "Empresas", href: "/controladoria/orcamento/empresas", icon: Building2 },
-        { name: "Cargos e Salários", href: "/controladoria/orcamento/cargos-salarios", icon: Briefcase },
-      ],
-    },
-    {
-      title: "Cadastros Orçamento",
-      items: [
-        { name: "Departamentos", href: "/controladoria/orcamento/cadastros/departamentos", icon: Building2 },
-        { name: "Seções", href: "/controladoria/orcamento/cadastros/secoes", icon: Layers },
-        { name: "Centros de Custo", href: "/controladoria/orcamento/cadastros/centros-custo", icon: CircleDollarSign },
-        { name: "Feriados", href: "/controladoria/orcamento/cadastros/feriados", icon: CalendarDays },
-      ],
-    },
-    {
-      title: "Relatórios",
-      items: [
-        { name: "Relatórios", href: "/controladoria/relatorios", icon: FileText },
-      ],
-    },
-    {
-      title: "Configurações",
-      items: [
         { name: "Configurações", href: "/controladoria/configuracoes", icon: Settings },
       ],
     },

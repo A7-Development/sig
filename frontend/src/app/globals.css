@@ -101,15 +101,15 @@
   --chart-4: 30 92% 50%;               /* Laranja Alert */
   --chart-5: 340 82% 52%;              /* Rosa */
   
-  /* Sidebar - Alert Brasil (Laranja) */
-  --sidebar-background: 0 0% 100%;
-  --sidebar-foreground: 210 11% 15%;
-  --sidebar-primary: 30 90% 50%;       /* Laranja Alert */
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 30 100% 95%;       /* Laranja claro hover */
-  --sidebar-accent-foreground: 30 80% 35%;
-  --sidebar-border: 210 20% 90%;
-  --sidebar-ring: 30 90% 50%;
+  /* Sidebar - Estilo Corporativo */
+  --sidebar-background: 0 0% 98%;
+  --sidebar-foreground: 240 5.3% 26.1%;
+  --sidebar-primary: 240 5.9% 10%;
+  --sidebar-primary-foreground: 0 0% 98%;
+  --sidebar-accent: 240 4.8% 95.9%;
+  --sidebar-accent-foreground: 240 5.9% 10%;
+  --sidebar-border: 220 13% 91%;
+  --sidebar-ring: 217.2 91.2% 59.8%;
 }
 
 /* ============================================
@@ -143,15 +143,15 @@
   --chart-4: 30 85% 55%;
   --chart-5: 340 75% 58%;
   
-  /* Sidebar Dark - Laranja */
-  --sidebar-background: 210 11% 8%;
-  --sidebar-foreground: 0 0% 95%;
-  --sidebar-primary: 30 90% 55%;
+  /* Sidebar Dark - Estilo Corporativo */
+  --sidebar-background: 240 5.9% 10%;
+  --sidebar-foreground: 240 4.8% 95.9%;
+  --sidebar-primary: 224.3 76.3% 48%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 30 30% 15%;
-  --sidebar-accent-foreground: 30 90% 70%;
-  --sidebar-border: 210 11% 15%;
-  --sidebar-ring: 30 90% 55%;
+  --sidebar-accent: 240 3.7% 15.9%;
+  --sidebar-accent-foreground: 240 4.8% 95.9%;
+  --sidebar-border: 240 3.7% 15.9%;
+  --sidebar-ring: 217.2 91.2% 59.8%;
 }
 
 /* ============================================

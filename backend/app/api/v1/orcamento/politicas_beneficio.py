@@ -282,3 +282,4 @@ async def delete_politica(
 
 
 
+

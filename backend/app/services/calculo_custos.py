@@ -311,3 +311,4 @@ async def calcular_overhead_ineficiencia(
         "meses": resultado_por_mes,
     }
 
+
