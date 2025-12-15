@@ -199,12 +199,29 @@ export interface EmpresaNW {
   cnpj: string | null;
 }
 
+export interface ClienteNW {
+  codigo: string;
+  razao_social: string;
+  nome_fantasia: string | null;
+  cnpj: string | null;
+}
+
 export const nwApi = {
   getEmpresas: (token: string, busca?: string) =>
     api.get<EmpresaNW[]>(`/api/v1/orcamento/nw/empresas${busca ? `?busca=${busca}` : ''}`, token),
   
   importarEmpresas: (token: string, codigos: string[]) =>
     api.post<ImportacaoResultado>('/api/v1/orcamento/nw/empresas/importar', { codigos }, token),
+  
+  getClientes: (token: string, busca?: string, apenas_ativos: boolean = true) => {
+    const params = new URLSearchParams();
+    if (busca) params.set('busca', busca);
+    params.set('apenas_ativos', String(apenas_ativos));
+    return api.get<ClienteNW[]>(`/api/v1/orcamento/nw/clientes?${params.toString()}`, token);
+  },
+  
+  getCliente: (token: string, codigo: string) =>
+    api.get<ClienteNW>(`/api/v1/orcamento/nw/clientes/${codigo}`, token),
 };
 
 // ============================================
@@ -607,6 +624,7 @@ export interface Cenario {
   codigo: string;
   nome: string;
   descricao: string | null;
+  cliente_nw_codigo: string | null;
   ano_inicio: number;
   mes_inicio: number;
   ano_fim: number;
@@ -670,6 +688,52 @@ export interface QuadroPessoal {
   centro_custo?: { id: string; codigo: string; nome: string } | null;
 }
 
+export interface FuncaoSpan {
+  id: string;
+  cenario_id: string;
+  funcao_id: string;
+  funcoes_base_ids: string[];
+  span_ratio: number;
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+  funcao?: { id: string; codigo: string; nome: string } | null;
+}
+
+export interface FuncaoSpanCreate {
+  cenario_id: string;
+  funcao_id: string;
+  funcoes_base_ids: string[];
+  span_ratio: number;
+  ativo?: boolean;
+}
+
+export interface PremissaFuncaoMes {
+  id: string;
+  cenario_id: string;
+  funcao_id: string;
+  mes: number;
+  ano: number;
+  absenteismo: number;
+  turnover: number;
+  ferias_indice: number;
+  dias_treinamento: number;
+  created_at: string;
+  updated_at: string;
+  funcao?: { id: string; codigo: string; nome: string } | null;
+}
+
+export interface PremissaFuncaoMesCreate {
+  cenario_id: string;
+  funcao_id: string;
+  mes: number;
+  ano: number;
+  absenteismo: number;
+  turnover: number;
+  ferias_indice: number;
+  dias_treinamento: number;
+}
+
 export const cenariosApi = {
   listar: (token: string, params?: { ano_inicio?: number; ano_fim?: number; empresa_id?: string; status?: string; ativo?: boolean }) => {
     const queryParams = new URLSearchParams();
@@ -730,6 +794,51 @@ export const cenariosApi = {
   
   calcularOverhead: (token: string, cenarioId: string) =>
     api.get<OverheadResult>(`/api/v1/orcamento/cenarios/${cenarioId}/calcular-overhead`, token),
+  
+  // Spans
+  getSpans: (token: string, cenarioId: string) =>
+    api.get<FuncaoSpan[]>(`/api/v1/orcamento/cenarios/${cenarioId}/spans`, token),
+  
+  createSpan: (token: string, cenarioId: string, data: FuncaoSpanCreate) =>
+    api.post<FuncaoSpan>(`/api/v1/orcamento/cenarios/${cenarioId}/spans`, data, token),
+  
+  updateSpan: (token: string, cenarioId: string, spanId: string, data: Partial<FuncaoSpan>) =>
+    api.put<FuncaoSpan>(`/api/v1/orcamento/cenarios/${cenarioId}/spans/${spanId}`, data, token),
+  
+  deleteSpan: (token: string, cenarioId: string, spanId: string) =>
+    api.delete(`/api/v1/orcamento/cenarios/${cenarioId}/spans/${spanId}`, token),
+  
+  calcularSpans: (token: string, cenarioId: string, aplicar: boolean = false) => {
+    const params = new URLSearchParams();
+    if (aplicar) params.set('aplicar', 'true');
+    return api.post<{ aplicado: boolean; quantidades?: Record<string, number>; criadas?: number; atualizadas?: number; erros?: string[] }>(
+      `/api/v1/orcamento/cenarios/${cenarioId}/calcular-spans?${params.toString()}`,
+      {},
+      token
+    );
+  },
+  
+  // Premissas por Função/Mês
+  getPremissasFuncao: (token: string, cenarioId: string, params?: { funcao_id?: string; mes?: number; ano?: number }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.funcao_id) queryParams.set('funcao_id', params.funcao_id);
+    if (params?.mes) queryParams.set('mes', String(params.mes));
+    if (params?.ano) queryParams.set('ano', String(params.ano));
+    const query = queryParams.toString();
+    return api.get<PremissaFuncaoMes[]>(`/api/v1/orcamento/cenarios/${cenarioId}/premissas-funcao${query ? `?${query}` : ''}`, token);
+  },
+  
+  createPremissaFuncao: (token: string, cenarioId: string, data: PremissaFuncaoMesCreate) =>
+    api.post<PremissaFuncaoMes>(`/api/v1/orcamento/cenarios/${cenarioId}/premissas-funcao`, data, token),
+  
+  updatePremissaFuncao: (token: string, cenarioId: string, premissaId: string, data: Partial<PremissaFuncaoMes>) =>
+    api.put<PremissaFuncaoMes>(`/api/v1/orcamento/cenarios/${cenarioId}/premissas-funcao/${premissaId}`, data, token),
+  
+  deletePremissaFuncao: (token: string, cenarioId: string, premissaId: string) =>
+    api.delete(`/api/v1/orcamento/cenarios/${cenarioId}/premissas-funcao/${premissaId}`, token),
+  
+  bulkPremissasFuncao: (token: string, cenarioId: string, premissas: PremissaFuncaoMesCreate[]) =>
+    api.post<PremissaFuncaoMes[]>(`/api/v1/orcamento/cenarios/${cenarioId}/premissas-funcao/bulk`, premissas, token),
 };
 
 // Types para cálculos

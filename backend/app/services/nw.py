@@ -17,6 +17,14 @@ class EmpresaNW(BaseModel):
     cnpj: Optional[str] = None
 
 
+class ClienteNW(BaseModel):
+    """Cliente do NW"""
+    codigo: str
+    razao_social: str
+    nome_fantasia: Optional[str] = None
+    cnpj: Optional[str] = None
+
+
 def get_nw_connection():
     """
     Cria conexão com o PostgreSQL NW.
@@ -115,6 +123,92 @@ def buscar_empresa_nw_por_codigo(codigo: str) -> Optional[EmpresaNW]:
     conn.close()
     
     return empresa
+
+
+def listar_clientes_nw(
+    apenas_ativos: bool = True,
+    busca: Optional[str] = None
+) -> List[ClienteNW]:
+    """
+    Lista clientes da tabela clifor no NW.
+    Filtra por cliente = 'S' e ativo = 'S'.
+    SOMENTE LEITURA.
+    """
+    conn = get_nw_connection()
+    cursor = conn.cursor()
+    
+    query = """
+        SELECT 
+            cod_clifor,
+            razao,
+            fantasia
+        FROM clifor
+        WHERE cliente = 'S'
+    """
+    params = []
+    
+    if apenas_ativos:
+        query += " AND ativo = 'S'"
+    
+    if busca:
+        query += " AND (razao ILIKE %s OR fantasia ILIKE %s OR cod_clifor ILIKE %s)"
+        busca_param = f"%{busca}%"
+        params.extend([busca_param, busca_param, busca_param])
+    
+    query += " ORDER BY razao"
+    
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    
+    clientes = []
+    for row in rows:
+        clientes.append(ClienteNW(
+            codigo=row[0].strip() if row[0] else "",
+            razao_social=row[1].strip() if row[1] else "",
+            nome_fantasia=row[2].strip() if row[2] else None,
+            cnpj=None,  # Não disponível na tabela clifor
+        ))
+    
+    cursor.close()
+    conn.close()
+    
+    return clientes
+
+
+def buscar_cliente_nw_por_codigo(codigo: str) -> Optional[ClienteNW]:
+    """
+    Busca um cliente específico pelo código no NW.
+    SOMENTE LEITURA.
+    """
+    conn = get_nw_connection()
+    cursor = conn.cursor()
+    
+    query = """
+        SELECT 
+            cod_clifor,
+            razao,
+            fantasia
+        FROM clifor
+        WHERE cod_clifor = %s
+        AND cliente = 'S'
+    """
+    
+    cursor.execute(query, [codigo])
+    row = cursor.fetchone()
+    
+    cliente = None
+    if row:
+        cliente = ClienteNW(
+            codigo=row[0].strip() if row[0] else "",
+            razao_social=row[1].strip() if row[1] else "",
+            nome_fantasia=row[2].strip() if row[2] else None,
+            cnpj=None,  # Não disponível na tabela clifor
+        )
+    
+    cursor.close()
+    conn.close()
+    
+    return cliente
 
 
 

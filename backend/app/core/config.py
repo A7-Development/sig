@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     
     # Superadmin (created on first run)
     SUPERADMIN_EMAIL: str = "admin@sig.com"
-    SUPERADMIN_PASSWORD: str = "admin123"
+    SUPERADMIN_PASSWORD: str = "123456"
     
     class Config:
         env_file = ".env"

@@ -36,8 +36,13 @@ import {
   DollarSign,
   ChevronDown,
   Building2,
-  Calendar
+  Calendar,
+  Loader2,
+  FileX
 } from "lucide-react";
+import { ClienteNWSelector } from "@/components/orcamento/ClienteNWSelector";
+import { FuncoesQuantidadesTab } from "@/components/orcamento/FuncoesQuantidadesTab";
+import { PremissasFuncaoMesGrid } from "@/components/orcamento/PremissasFuncaoMesGrid";
 import { useAuthStore } from "@/stores/auth-store";
 import { 
   cenariosApi, 
@@ -74,7 +79,7 @@ export default function CenariosPage() {
   const [tabelaSalarial, setTabelaSalarial] = useState<TabelaSalarial[]>([]);
   
   // Abas
-  const [abaAtiva, setAbaAtiva] = useState<'premissas' | 'quadro' | 'custos'>('premissas');
+  const [abaAtiva, setAbaAtiva] = useState<'informacoes' | 'configuracao' | 'funcoes' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custos'>('informacoes');
   const [custos, setCustos] = useState<ResumoCustos | null>(null);
   const [loadingCustos, setLoadingCustos] = useState(false);
   
@@ -84,6 +89,7 @@ export default function CenariosPage() {
   const [formCenario, setFormCenario] = useState({
     nome: "",
     descricao: "",
+    cliente_nw_codigo: null as string | null,
     empresa_ids: [] as string[],
     ano_inicio: new Date().getFullYear() + 1,
     mes_inicio: 1,
@@ -148,10 +154,7 @@ export default function CenariosPage() {
         console.log(`${empresasData.length} empresa(s) carregada(s)`);
       }
       
-      // Seleciona o primeiro cenário automaticamente
-      if (cenariosData.length > 0 && !cenarioSelecionado) {
-        setCenarioSelecionado(cenariosData[0]);
-      }
+      // Não seleciona automaticamente - usuário deve clicar em "Editar" para ver detalhes
     } catch (error: any) {
       console.error("Erro ao carregar dados:", error);
       if (error.message) {
@@ -196,19 +199,27 @@ export default function CenariosPage() {
       return;
     }
     
-    // Validar empresas
-    if (formCenario.empresa_ids.length === 0) {
-      alert("Selecione pelo menos uma empresa");
-      return;
-    }
-    
     try {
       if (editandoCenario) {
-        await cenariosApi.atualizar(token, editandoCenario.id, formCenario);
+        await cenariosApi.atualizar(token, editandoCenario.id, {
+          nome: formCenario.nome,
+          descricao: formCenario.descricao,
+          ano_inicio: formCenario.ano_inicio,
+          mes_inicio: formCenario.mes_inicio,
+          ano_fim: formCenario.ano_fim,
+          mes_fim: formCenario.mes_fim,
+        });
       } else {
         await cenariosApi.criar(token, {
-          ...formCenario,
-          empresa_ids: formCenario.empresa_ids,
+          nome: formCenario.nome,
+          descricao: formCenario.descricao,
+          ano_inicio: formCenario.ano_inicio,
+          mes_inicio: formCenario.mes_inicio,
+          ano_fim: formCenario.ano_fim,
+          mes_fim: formCenario.mes_fim,
+          empresa_ids: [], // Empresas serão configuradas na aba Configuração
+          ativo: formCenario.ativo,
+          cliente_nw_codigo: formCenario.cliente_nw_codigo,
         });
       }
       setShowFormCenario(false);
@@ -315,11 +326,8 @@ export default function CenariosPage() {
            q.qtd_set + q.qtd_out + q.qtd_nov + q.qtd_dez;
   }, 0) / 12;
 
-  const handleCenarioChange = (cenarioId: string) => {
-    const cenario = cenarios.find(c => c.id === cenarioId);
-    if (cenario) {
-      setCenarioSelecionado(cenario);
-    }
+  const handleEditarCenario = (cenario: Cenario) => {
+    setCenarioSelecionado(cenario);
   };
 
   const carregarCustos = async () => {
@@ -335,167 +343,115 @@ export default function CenariosPage() {
     }
   };
 
-  return (
-    <div className="flex flex-col h-[calc(100vh-80px)]">
-      {/* Header compacto com seletor de cenário */}
-      <div className="shrink-0 pb-4 border-b mb-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div>
-              <h1 className="page-title flex items-center gap-2">
-                <GitCompare className="h-6 w-6" />
-                Cenários de Orçamento
-              </h1>
-              <p className="page-subtitle">
-                Análise de premissas, quadro de pessoal e custos
-              </p>
-            </div>
-          </div>
-          
-          {/* Seletor de Cenário */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="filter-label">Cenário:</span>
-              <Select
-                value={cenarioSelecionado?.id || ""}
-                onValueChange={handleCenarioChange}
+  // Se um cenário está selecionado, mostrar tela de parametrização
+  if (cenarioSelecionado) {
+    return (
+      <div className="flex flex-col h-[calc(100vh-80px)]">
+        {/* Header com botão voltar */}
+        <div className="shrink-0 pb-4 border-b mb-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Button 
+                size="sm" 
+                variant="ghost" 
+                onClick={() => setCenarioSelecionado(null)}
+                className="gap-2"
               >
-                <SelectTrigger className="w-[300px] h-9">
-                  <SelectValue placeholder="Selecione um cenário..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {cenarios.map((cenario) => (
-                    <SelectItem key={cenario.id} value={cenario.id}>
-                      <div className="flex items-center gap-2">
-                        {getStatusIcon(cenario.status)}
-                        <span>{cenario.nome}</span>
-                        <span className="text-muted-foreground text-xs">
-                          ({cenario.codigo} • {cenario.mes_inicio.toString().padStart(2, '0')}/{cenario.ano_inicio} - {cenario.mes_fim.toString().padStart(2, '0')}/{cenario.ano_fim})
-                        </span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <ChevronDown className="h-4 w-4 rotate-90" />
+                Voltar
+              </Button>
+              <div>
+                <h1 className="page-title flex items-center gap-2">
+                  <GitCompare className="h-6 w-6" />
+                  {cenarioSelecionado.nome}
+                </h1>
+                <p className="page-subtitle">
+                  {cenarioSelecionado.codigo} • {cenarioSelecionado.mes_inicio.toString().padStart(2, '0')}/{cenarioSelecionado.ano_inicio} - {cenarioSelecionado.mes_fim.toString().padStart(2, '0')}/{cenarioSelecionado.ano_fim}
+                  {cenarioSelecionado.cliente_nw_codigo && (
+                    <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                      Cliente: {cenarioSelecionado.cliente_nw_codigo}
+                    </span>
+                  )}
+                </p>
+              </div>
             </div>
             
-            {cenarioSelecionado && (
-              <div className="flex items-center gap-1">
-                {getStatusBadge(cenarioSelecionado.status)}
-              </div>
-            )}
-            
-            <div className="filter-divider" />
-            
-            {cenarioSelecionado && (
-              <>
-                <Button size="sm" variant="outline" onClick={() => handleDuplicarCenario(cenarioSelecionado)}>
-                  <Copy className="h-4 w-4 mr-1" />
-                  Duplicar
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => {
-                  setEditandoCenario(cenarioSelecionado);
-                  setFormCenario({
-                    nome: cenarioSelecionado.nome,
-                    descricao: cenarioSelecionado.descricao || "",
-                    empresa_ids: cenarioSelecionado.empresas?.map(e => e.id) || [],
-                    ano_inicio: cenarioSelecionado.ano_inicio,
-                    mes_inicio: cenarioSelecionado.mes_inicio,
-                    ano_fim: cenarioSelecionado.ano_fim,
-                    mes_fim: cenarioSelecionado.mes_fim,
-                    ativo: cenarioSelecionado.ativo,
-                  });
-                  setShowFormCenario(true);
-                }}>
-                  <Pencil className="h-4 w-4 mr-1" />
-                  Editar
-                </Button>
-              </>
-            )}
-            
-            <Button size="sm" variant="success" onClick={() => {
-              setEditandoCenario(null);
-              const nextYear = new Date().getFullYear() + 1;
-              setFormCenario({
-                nome: "",
-                descricao: "",
-                empresa_ids: [],
-                ano_inicio: nextYear,
-                mes_inicio: 1,
-                ano_fim: nextYear,
-                mes_fim: 12,
-                ativo: true,
-              });
-              setShowFormCenario(true);
-            }}>
-              <Plus className="h-4 w-4 mr-1" />
-              Novo
-            </Button>
+            <div className="flex items-center gap-2">
+              {getStatusBadge(cenarioSelecionado.status)}
+              <Button size="sm" variant="outline" onClick={() => handleDuplicarCenario(cenarioSelecionado)}>
+                <Copy className="h-4 w-4 mr-1" />
+                Duplicar
+              </Button>
+            </div>
           </div>
         </div>
-        
-        {/* Info do cenário selecionado */}
-        {cenarioSelecionado && (
-          <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <Building2 className="h-3 w-3" />
-              {cenarioSelecionado.empresas && cenarioSelecionado.empresas.length > 0
-                ? cenarioSelecionado.empresas.map(e => e.nome_fantasia || e.razao_social).join(', ')
-                : 'Sem empresa'}
-            </span>
-            <span className="flex items-center gap-1">
-              <Calendar className="h-3 w-3" />
-              {cenarioSelecionado.mes_inicio.toString().padStart(2, '0')}/{cenarioSelecionado.ano_inicio} a {cenarioSelecionado.mes_fim.toString().padStart(2, '0')}/{cenarioSelecionado.ano_fim}
-            </span>
-            <span className="flex items-center gap-1">
-              <Users className="h-3 w-3" />
-              {quadro.length} posições • Média: {totalPessoas.toFixed(0)} pessoas/mês
-            </span>
-          </div>
-        )}
-      </div>
 
-      {/* Área principal com abas */}
-      {loading ? (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <Skeleton className="h-12 w-12 rounded-full mx-auto mb-4" />
-            <Skeleton className="h-4 w-32 mx-auto" />
+        {/* Área principal com abas */}
+        {loadingDetalhes ? (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center">
+              <Skeleton className="h-12 w-12 rounded-full mx-auto mb-4" />
+              <Skeleton className="h-4 w-32 mx-auto" />
+            </div>
           </div>
-        </div>
-      ) : !cenarioSelecionado ? (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center text-muted-foreground">
-            <Settings className="h-16 w-16 mx-auto mb-4 opacity-20" />
-            <p className="text-lg font-medium">Selecione um cenário</p>
-            <p className="text-sm">Use o seletor acima ou crie um novo cenário</p>
-          </div>
-        </div>
-      ) : (
+        ) : (
         <div className="flex-1 flex flex-col min-h-0">
           {/* Abas */}
-          <div className="shrink-0 flex gap-1 border-b bg-muted/30 rounded-t-lg px-2">
+          <div className="shrink-0 flex gap-1 border-b bg-muted/30 rounded-t-lg px-2 overflow-x-auto">
             <button
-              onClick={() => setAbaAtiva('premissas')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                abaAtiva === 'premissas'
+              onClick={() => setAbaAtiva('informacoes')}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                abaAtiva === 'informacoes'
+                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Building2 className="h-4 w-4" />
+              Informações
+            </button>
+            <button
+              onClick={() => setAbaAtiva('configuracao')}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                abaAtiva === 'configuracao'
                   ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
               <Settings className="h-4 w-4" />
+              Configuração
+            </button>
+            <button
+              onClick={() => setAbaAtiva('funcoes')}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                abaAtiva === 'funcoes'
+                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Users className="h-4 w-4" />
+              Funções
+            </button>
+            <button
+              onClick={() => setAbaAtiva('premissas-funcao')}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                abaAtiva === 'premissas-funcao'
+                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <FileEdit className="h-4 w-4" />
               Premissas
             </button>
             <button
               onClick={() => setAbaAtiva('quadro')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
                 abaAtiva === 'quadro'
                   ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
               <Users className="h-4 w-4" />
-              Quadro de Pessoal
+              Quadro
               <Badge variant="secondary" className="text-[10px] ml-1">{quadro.length}</Badge>
             </button>
             <button
@@ -503,7 +459,7 @@ export default function CenariosPage() {
                 setAbaAtiva('custos');
                 if (!custos) carregarCustos();
               }}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
                 abaAtiva === 'custos'
                   ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
                   : "border-transparent text-muted-foreground hover:text-foreground"
@@ -521,6 +477,215 @@ export default function CenariosPage() {
                 <Skeleton className="h-8 w-64" />
                 <Skeleton className="h-48 w-full" />
               </div>
+            ) : abaAtiva === 'informacoes' ? (
+              <div className="h-full overflow-auto p-6">
+                <div className="mb-4">
+                  <h2 className="section-title">Informações do Cenário</h2>
+                  <p className="page-subtitle">Dados básicos e configurações gerais</p>
+                </div>
+                
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm">Dados do Cenário</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="filter-label">Nome</label>
+                        <p className="text-sm font-medium">{cenarioSelecionado.nome}</p>
+                      </div>
+                      <div>
+                        <label className="filter-label">Código</label>
+                        <p className="text-sm font-mono">{cenarioSelecionado.codigo}</p>
+                      </div>
+                      <div>
+                        <label className="filter-label">Período</label>
+                        <p className="text-sm">
+                          {cenarioSelecionado.mes_inicio.toString().padStart(2, '0')}/{cenarioSelecionado.ano_inicio} a{" "}
+                          {cenarioSelecionado.mes_fim.toString().padStart(2, '0')}/{cenarioSelecionado.ano_fim}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="filter-label">Status</label>
+                        <div className="mt-1">
+                          {getStatusBadge(cenarioSelecionado.status)}
+                        </div>
+                      </div>
+                      {cenarioSelecionado.descricao && (
+                        <div className="col-span-2">
+                          <label className="filter-label">Descrição</label>
+                          <p className="text-sm text-muted-foreground">{cenarioSelecionado.descricao}</p>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            ) : abaAtiva === 'configuracao' ? (
+              <div className="h-full overflow-auto p-6">
+                <div className="mb-4">
+                  <h2 className="section-title">Configuração do Cenário</h2>
+                  <p className="page-subtitle">Configure Cliente, Empresas e Seção (Projeto)</p>
+                </div>
+                
+                <div className="space-y-6">
+                  {/* Cliente NW */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-sm">Cliente (NW)</CardTitle>
+                      <CardDescription>Selecione o cliente do banco NW</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <ClienteNWSelector
+                        value={cenarioSelecionado.cliente_nw_codigo || undefined}
+                        onValueChange={async (codigo) => {
+                          if (!token) return;
+                          try {
+                            await cenariosApi.atualizar(token, cenarioSelecionado.id, {
+                              cliente_nw_codigo: codigo
+                            });
+                            // Atualizar o cenário selecionado com o novo cliente
+                            setCenarioSelecionado({
+                              ...cenarioSelecionado,
+                              cliente_nw_codigo: codigo
+                            });
+                            // Também atualizar na lista de cenários
+                            setCenarios(prev => prev.map(c => 
+                              c.id === cenarioSelecionado.id 
+                                ? { ...c, cliente_nw_codigo: codigo }
+                                : c
+                            ));
+                          } catch (error: any) {
+                            alert(error.message || "Erro ao atualizar cliente");
+                          }
+                        }}
+                      />
+                    </CardContent>
+                  </Card>
+
+                  {/* Empresas */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-sm">Empresas</CardTitle>
+                      <CardDescription>Selecione as empresas para este cenário</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {empresas.length === 0 ? (
+                        <div className="text-center py-4">
+                          <p className="text-xs text-muted-foreground mb-2">Nenhuma empresa cadastrada</p>
+                          <p className="text-[10px] text-muted-foreground">
+                            Cadastre empresas em: Cadastros → Empresas
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2 max-h-64 overflow-y-auto border rounded-md p-3 bg-background">
+                          {empresas
+                            .filter(emp => emp.ativo !== false)
+                            .map((emp) => {
+                              const isSelected = cenarioSelecionado.empresas?.some(e => e.id === emp.id) || false;
+                              return (
+                                <label key={emp.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/50 p-2 rounded">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={async (e) => {
+                                      if (!token) return;
+                                      try {
+                                        const currentEmpresas = cenarioSelecionado.empresas?.map(e => e.id) || [];
+                                        let novasEmpresas: string[];
+                                        if (e.target.checked) {
+                                          novasEmpresas = [...currentEmpresas, emp.id];
+                                        } else {
+                                          novasEmpresas = currentEmpresas.filter(id => id !== emp.id);
+                                        }
+                                        
+                                        // Atualizar via API - usar tipo correto
+                                        await cenariosApi.atualizar(token, cenarioSelecionado.id, {
+                                          empresa_ids: novasEmpresas
+                                        } as any);
+                                        await carregarDetalhes(cenarioSelecionado.id);
+                                      } catch (error: any) {
+                                        alert(error.message || "Erro ao atualizar empresas");
+                                      }
+                                    }}
+                                    className="rounded"
+                                  />
+                                  <span className="flex-1">{emp.nome_fantasia || emp.razao_social}</span>
+                                  <span className="text-xs text-muted-foreground">({emp.codigo})</span>
+                                </label>
+                              );
+                            })}
+                        </div>
+                      )}
+                      <p className="text-xs text-muted-foreground mt-2">
+                        {empresas.length > 0 
+                          ? `${empresas.filter(e => e.ativo !== false).length} empresa${empresas.filter(e => e.ativo !== false).length !== 1 ? 's' : ''} disponível${empresas.filter(e => e.ativo !== false).length !== 1 ? 'is' : ''}`
+                          : "Cadastre empresas primeiro"}
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  {/* Seção (Projeto) */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-sm">Seção (Projeto)</CardTitle>
+                      <CardDescription>Selecione a seção que será o projeto deste cenário</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {secoes.length === 0 ? (
+                        <div className="text-center py-4">
+                          <p className="text-xs text-muted-foreground mb-2">Nenhuma seção cadastrada</p>
+                          <p className="text-[10px] text-muted-foreground">
+                            Cadastre seções em: Cadastros → Seções
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <Select
+                            value={""}
+                            onValueChange={(secaoId) => {
+                              // TODO: Implementar quando adicionar campo secao_id ao Cenario
+                              console.log("Seção selecionada:", secaoId);
+                            }}
+                          >
+                            <SelectTrigger className="h-8 text-sm">
+                              <SelectValue placeholder="Selecione a seção (projeto)..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {secoes
+                                .filter(sec => sec.ativo !== false)
+                                .map((sec) => (
+                                  <SelectItem key={sec.id} value={sec.id}>
+                                    {sec.nome} ({sec.codigo})
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            A seção selecionada será usada como projeto padrão para as posições do quadro de pessoal
+                          </p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            ) : abaAtiva === 'funcoes' ? (
+              <FuncoesQuantidadesTab
+                cenarioId={cenarioSelecionado.id}
+                funcoes={funcoes}
+                quadro={quadro}
+                onQuadroChange={() => carregarDetalhes(cenarioSelecionado.id)}
+              />
+            ) : abaAtiva === 'premissas-funcao' ? (
+              <PremissasFuncaoMesGrid
+                cenarioId={cenarioSelecionado.id}
+                funcoes={funcoes.filter(f => quadro.some(q => q.funcao_id === f.id && q.ativo))}
+                anoInicio={cenarioSelecionado.ano_inicio}
+                mesInicio={cenarioSelecionado.mes_inicio}
+                anoFim={cenarioSelecionado.ano_fim}
+                mesFim={cenarioSelecionado.mes_fim}
+              />
             ) : abaAtiva === 'premissas' ? (
               <div className="p-6 h-full overflow-auto">
                 <div className="mb-4">
@@ -875,7 +1040,144 @@ export default function CenariosPage() {
             ) : null}
           </div>
         </div>
-      )}
+        )}
+      </div>
+    );
+  }
+
+  // Tela de listagem de cenários (quando nenhum está selecionado)
+  return (
+    <div className="page-container">
+      {/* Header da página */}
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <div className="flex items-center gap-3 mb-1">
+            <h1 className="page-title flex items-center gap-2">
+              <GitCompare className="h-6 w-6" />
+              Cenários de Orçamento
+            </h1>
+            <Badge variant="info" className="text-[10px]">
+              {cenarios.length} cenários
+            </Badge>
+          </div>
+          <p className="page-subtitle">
+            Gerencie cenários orçamentários e configure premissas, funções e custos
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button 
+            variant="success" 
+            size="sm"
+            onClick={() => {
+              setEditandoCenario(null);
+              const nextYear = new Date().getFullYear() + 1;
+              setFormCenario({
+                nome: "",
+                descricao: "",
+                cliente_nw_codigo: null,
+                empresa_ids: [],
+                ano_inicio: nextYear,
+                mes_inicio: 1,
+                ano_fim: nextYear,
+                mes_fim: 12,
+                ativo: true,
+              });
+              setShowFormCenario(true);
+            }}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Novo Cenário
+          </Button>
+        </div>
+      </div>
+
+      {/* Tabela de Cenários */}
+      <div className="border rounded-lg overflow-hidden">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : cenarios.length === 0 ? (
+          <div className="empty-state my-8">
+            <FileX className="empty-state-icon" />
+            <p className="empty-state-title">Nenhum cenário cadastrado</p>
+            <p className="empty-state-description">
+              Clique em &quot;Novo Cenário&quot; para criar seu primeiro cenário de orçamento.
+            </p>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Nome Cenário</TableHead>
+                <TableHead className="w-32">Código</TableHead>
+                <TableHead className="w-40">Período</TableHead>
+                <TableHead>Descrição</TableHead>
+                <TableHead className="w-28">Cliente</TableHead>
+                <TableHead className="w-28">Status</TableHead>
+                <TableHead className="w-32 text-right">Ações</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {cenarios.map((cenario) => (
+                <TableRow key={cenario.id}>
+                  <TableCell className="font-medium">{cenario.nome}</TableCell>
+                  <TableCell className="font-mono text-xs">{cenario.codigo}</TableCell>
+                  <TableCell className="text-sm">
+                    {cenario.mes_inicio.toString().padStart(2, '0')}/{cenario.ano_inicio} - {cenario.mes_fim.toString().padStart(2, '0')}/{cenario.ano_fim}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {cenario.descricao || '—'}
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {cenario.cliente_nw_codigo ? (
+                      <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">
+                        {cenario.cliente_nw_codigo}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {getStatusBadge(cenario.status)}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleEditarCenario(cenario)}
+                        className="h-7 text-xs hover:bg-orange-50 hover:text-orange-600 hover:border-orange-300"
+                      >
+                        <Pencil className="h-3 w-3 mr-1" />
+                        Editar
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon-xs" 
+                        onClick={() => handleDuplicarCenario(cenario)}
+                        className="hover:bg-blue-50 hover:text-blue-600"
+                        title="Duplicar cenário"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon-xs" 
+                        onClick={() => handleDeleteCenario(cenario.id)}
+                        className="hover:bg-red-50 hover:text-red-600"
+                        title="Excluir cenário"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
 
       {/* Modal Cenário */}
       {showFormCenario && (
@@ -913,50 +1215,6 @@ export default function CenariosPage() {
                   />
                 </div>
 
-                <div className="form-field">
-                  <label className="filter-label">Empresas *</label>
-                  <div className="space-y-2 max-h-32 overflow-y-auto border rounded-md p-2 bg-background">
-                    {empresas.length === 0 ? (
-                      <div className="text-center py-4">
-                        <p className="text-xs text-muted-foreground mb-2">Nenhuma empresa cadastrada</p>
-                        <p className="text-[10px] text-muted-foreground">
-                          Cadastre empresas em: Cadastros → Empresas
-                        </p>
-                      </div>
-                    ) : (
-                      empresas
-                        .filter(emp => emp.ativo !== false)
-                        .map((emp) => (
-                          <label key={emp.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/50 p-1 rounded">
-                            <input
-                              type="checkbox"
-                              checked={formCenario.empresa_ids.includes(emp.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setFormCenario({
-                                    ...formCenario,
-                                    empresa_ids: [...formCenario.empresa_ids, emp.id]
-                                  });
-                                } else {
-                                  setFormCenario({
-                                    ...formCenario,
-                                    empresa_ids: formCenario.empresa_ids.filter(id => id !== emp.id)
-                                  });
-                                }
-                              }}
-                              className="rounded"
-                            />
-                            <span className="flex-1">{emp.nome_fantasia || emp.razao_social}</span>
-                          </label>
-                        ))
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {empresas.length > 0 
-                      ? `Selecione uma ou mais empresas para este cenário (${empresas.filter(e => e.ativo !== false).length} disponível${empresas.filter(e => e.ativo !== false).length !== 1 ? 'is' : ''})`
-                      : "Cadastre empresas primeiro para poder criar cenários"}
-                  </p>
-                </div>
 
                 <div className="border-t pt-4">
                   <label className="filter-label mb-3 block">Período do Cenário *</label>

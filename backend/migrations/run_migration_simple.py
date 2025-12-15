@@ -188,3 +188,4 @@ if __name__ == "__main__":
         print("ERRO: Migracao falhou. Verifique os erros acima.")
         sys.exit(1)
 
+

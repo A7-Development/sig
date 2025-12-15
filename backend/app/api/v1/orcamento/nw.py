@@ -12,11 +12,13 @@ from sqlalchemy import select
 
 from app.db.session import get_db
 from app.db.models.orcamento import Empresa
-from app.schemas.orcamento import ImportacaoTotvs, ImportacaoResultado
+from app.schemas.orcamento import ImportacaoTotvs, ImportacaoResultado, ClienteNW
 from app.services.nw import (
     listar_empresas_nw,
     buscar_empresa_nw_por_codigo,
     EmpresaNW,
+    listar_clientes_nw,
+    buscar_cliente_nw_por_codigo,
 )
 
 router = APIRouter(prefix="/nw", tags=["NW - Consulta"])
@@ -115,6 +117,47 @@ async def importar_empresas_nw(
         ignorados=ignorados,
         erros=erros
     )
+
+
+@router.get("/clientes", response_model=List[ClienteNW])
+async def get_clientes_nw(
+    busca: Optional[str] = Query(None, description="Filtrar por nome ou código"),
+    apenas_ativos: bool = Query(True, description="Apenas clientes ativos")
+):
+    """
+    Lista clientes do NW (tabela clifor onde cliente = 'S').
+    SOMENTE LEITURA - não modifica dados no NW.
+    """
+    try:
+        return listar_clientes_nw(apenas_ativos=apenas_ativos, busca=busca)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao consultar NW: {str(e)}"
+        )
+
+
+@router.get("/clientes/{codigo}", response_model=ClienteNW)
+async def get_cliente_nw(codigo: str):
+    """
+    Busca um cliente específico pelo código no NW.
+    SOMENTE LEITURA.
+    """
+    try:
+        cliente = buscar_cliente_nw_por_codigo(codigo)
+        if not cliente:
+            raise HTTPException(
+                status_code=404,
+                detail="Cliente não encontrado no NW"
+            )
+        return cliente
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao consultar NW: {str(e)}"
+        )
 
 
 

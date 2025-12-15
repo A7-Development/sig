@@ -491,12 +491,28 @@ class ImportacaoResultado(BaseModel):
 
 
 # ============================================
+# Cliente NW
+# ============================================
+
+class ClienteNW(BaseModel):
+    """Cliente do banco NW (tabela clifor)."""
+    codigo: str
+    razao_social: str
+    nome_fantasia: Optional[str] = None
+    cnpj: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
 # Cenário de Orçamento
 # ============================================
 
 class CenarioBase(BaseModel):
     nome: str = Field(..., min_length=1, max_length=200)
     descricao: Optional[str] = None
+    cliente_nw_codigo: Optional[str] = Field(None, max_length=50, description="Código do cliente no NW")
     empresa_ids: List[UUID] = Field(default_factory=list)  # Múltiplas empresas
     ano_inicio: int = Field(..., ge=2020, le=2100)
     mes_inicio: int = Field(..., ge=1, le=12)
@@ -541,6 +557,7 @@ class CenarioCreate(CenarioBase):
 class CenarioUpdate(BaseModel):
     nome: Optional[str] = Field(None, min_length=1, max_length=200)
     descricao: Optional[str] = None
+    cliente_nw_codigo: Optional[str] = Field(None, max_length=50)
     empresa_ids: Optional[List[UUID]] = None
     ano_inicio: Optional[int] = Field(None, ge=2020, le=2100)
     mes_inicio: Optional[int] = Field(None, ge=1, le=12)
@@ -555,6 +572,7 @@ class CenarioResponse(BaseModel):
     codigo: str
     nome: str
     descricao: Optional[str] = None
+    cliente_nw_codigo: Optional[str] = None
     ano_inicio: int
     mes_inicio: int
     ano_fim: int
@@ -725,6 +743,81 @@ class QuadroPessoalComRelacionamentos(QuadroPessoalResponse):
     funcao: Optional[FuncaoSimples] = None
     secao: Optional[SecaoSimples] = None
     centro_custo: Optional[CentroCustoSimples] = None
+
+
+# ============================================
+# Função Span (Cálculo Automático de Quantidades)
+# ============================================
+
+class FuncaoSpanBase(BaseModel):
+    cenario_id: UUID
+    funcao_id: UUID
+    funcoes_base_ids: List[UUID] = Field(..., min_items=1, description="Lista de IDs das funções base para cálculo")
+    span_ratio: float = Field(..., gt=0, description="Ratio do span (ex: 35 = 1 para cada 35)")
+    ativo: bool = True
+
+
+class FuncaoSpanCreate(FuncaoSpanBase):
+    pass
+
+
+class FuncaoSpanUpdate(BaseModel):
+    funcao_id: Optional[UUID] = None
+    funcoes_base_ids: Optional[List[UUID]] = None
+    span_ratio: Optional[float] = Field(None, gt=0)
+    ativo: Optional[bool] = None
+
+
+class FuncaoSpanResponse(FuncaoSpanBase):
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class FuncaoSpanComRelacionamentos(FuncaoSpanResponse):
+    funcao: Optional[FuncaoSimples] = None
+
+
+# ============================================
+# Premissa por Função e Mês
+# ============================================
+
+class PremissaFuncaoMesBase(BaseModel):
+    cenario_id: UUID
+    funcao_id: UUID
+    mes: int = Field(..., ge=1, le=12)
+    ano: int = Field(..., ge=2020, le=2100)
+    absenteismo: float = Field(3.0, ge=0, le=100)
+    turnover: float = Field(5.0, ge=0, le=100)
+    ferias_indice: float = Field(8.33, ge=0, le=100)
+    dias_treinamento: int = Field(15, ge=0, le=180)
+
+
+class PremissaFuncaoMesCreate(PremissaFuncaoMesBase):
+    pass
+
+
+class PremissaFuncaoMesUpdate(BaseModel):
+    absenteismo: Optional[float] = Field(None, ge=0, le=100)
+    turnover: Optional[float] = Field(None, ge=0, le=100)
+    ferias_indice: Optional[float] = Field(None, ge=0, le=100)
+    dias_treinamento: Optional[int] = Field(None, ge=0, le=180)
+
+
+class PremissaFuncaoMesResponse(PremissaFuncaoMesBase):
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PremissaFuncaoMesComRelacionamentos(PremissaFuncaoMesResponse):
+    funcao: Optional[FuncaoSimples] = None
 
 
 # Atualizar forward references

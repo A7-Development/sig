@@ -10,13 +10,16 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import selectinload, noload
 
 from app.db.session import get_db
-from app.db.models.orcamento import Cenario, Premissa, QuadroPessoal, CenarioEmpresa
+from app.db.models.orcamento import Cenario, Premissa, QuadroPessoal, CenarioEmpresa, FuncaoSpan, PremissaFuncaoMes
 from app.schemas.orcamento import (
     CenarioCreate, CenarioUpdate, CenarioResponse, CenarioComRelacionamentos,
     PremissaCreate, PremissaUpdate, PremissaResponse,
-    QuadroPessoalCreate, QuadroPessoalUpdate, QuadroPessoalResponse, QuadroPessoalComRelacionamentos
+    QuadroPessoalCreate, QuadroPessoalUpdate, QuadroPessoalResponse, QuadroPessoalComRelacionamentos,
+    FuncaoSpanCreate, FuncaoSpanUpdate, FuncaoSpanResponse, FuncaoSpanComRelacionamentos,
+    PremissaFuncaoMesCreate, PremissaFuncaoMesUpdate, PremissaFuncaoMesResponse, PremissaFuncaoMesComRelacionamentos
 )
 from app.services.calculo_custos import calcular_custos_cenario, calcular_overhead_ineficiencia
+from app.services.capacity_planning import calcular_quantidades_span, aplicar_spans_ao_quadro
 
 router = APIRouter(prefix="/cenarios", tags=["Cenários"])
 
@@ -398,6 +401,7 @@ async def create_cenario(data: CenarioCreate, db: AsyncSession = Depends(get_db)
         codigo=codigo,
         nome=data.nome,
         descricao=data.descricao,
+        cliente_nw_codigo=data.cliente_nw_codigo if hasattr(data, 'cliente_nw_codigo') and data.cliente_nw_codigo else None,
         ano_inicio=data.ano_inicio,
         mes_inicio=data.mes_inicio,
         ano_fim=data.ano_fim,
@@ -882,4 +886,345 @@ async def get_overhead_cenario(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro no cálculo: {str(e)}")
+
+
+# ============================================
+# FUNÇÃO SPAN (Cálculo Automático de Quantidades)
+# ============================================
+
+@router.get("/{cenario_id}/spans", response_model=List[FuncaoSpanComRelacionamentos])
+async def list_spans(
+    cenario_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """Lista spans configurados para um cenário."""
+    result = await db.execute(
+        select(FuncaoSpan)
+        .options(selectinload(FuncaoSpan.funcao))
+        .where(FuncaoSpan.cenario_id == cenario_id, FuncaoSpan.ativo == True)
+        .order_by(FuncaoSpan.created_at)
+    )
+    spans = result.scalars().all()
+    return spans
+
+
+@router.post("/{cenario_id}/spans", response_model=FuncaoSpanResponse)
+async def create_span(
+    cenario_id: UUID,
+    data: FuncaoSpanCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Cria uma configuração de span para cálculo automático."""
+    # Verificar se cenário existe
+    result = await db.execute(select(Cenario).where(Cenario.id == cenario_id))
+    cenario = result.scalar_one_or_none()
+    if not cenario:
+        raise HTTPException(status_code=404, detail="Cenário não encontrado")
+    
+    # Verificar se função existe
+    from app.db.models.orcamento import Funcao
+    funcao_result = await db.execute(select(Funcao).where(Funcao.id == data.funcao_id))
+    if not funcao_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Função não encontrada")
+    
+    # Verificar se funções base existem
+    funcoes_base_result = await db.execute(
+        select(Funcao).where(Funcao.id.in_(data.funcoes_base_ids))
+    )
+    funcoes_base = funcoes_base_result.scalars().all()
+    if len(funcoes_base) != len(data.funcoes_base_ids):
+        raise HTTPException(status_code=400, detail="Uma ou mais funções base não encontradas")
+    
+    # Verificar se já existe span para esta função neste cenário
+    existing = await db.execute(
+        select(FuncaoSpan).where(
+            FuncaoSpan.cenario_id == cenario_id,
+            FuncaoSpan.funcao_id == data.funcao_id,
+            FuncaoSpan.ativo == True
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Já existe um span configurado para esta função neste cenário")
+    
+    span = FuncaoSpan(
+        cenario_id=cenario_id,
+        funcao_id=data.funcao_id,
+        funcoes_base_ids=data.funcoes_base_ids,  # JSON será serializado automaticamente
+        span_ratio=data.span_ratio,
+        ativo=data.ativo
+    )
+    db.add(span)
+    await db.commit()
+    await db.refresh(span)
+    return span
+
+
+@router.put("/{cenario_id}/spans/{span_id}", response_model=FuncaoSpanResponse)
+async def update_span(
+    cenario_id: UUID,
+    span_id: UUID,
+    data: FuncaoSpanUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Atualiza uma configuração de span."""
+    result = await db.execute(
+        select(FuncaoSpan).where(
+            FuncaoSpan.id == span_id,
+            FuncaoSpan.cenario_id == cenario_id
+        )
+    )
+    span = result.scalar_one_or_none()
+    if not span:
+        raise HTTPException(status_code=404, detail="Span não encontrado")
+    
+    update_data = data.model_dump(exclude_unset=True)
+    
+    # Se atualizando funções base, verificar se existem
+    if 'funcoes_base_ids' in update_data:
+        from app.db.models.orcamento import Funcao
+        funcoes_base_result = await db.execute(
+            select(Funcao).where(Funcao.id.in_(update_data['funcoes_base_ids']))
+        )
+        funcoes_base = funcoes_base_result.scalars().all()
+        if len(funcoes_base) != len(update_data['funcoes_base_ids']):
+            raise HTTPException(status_code=400, detail="Uma ou mais funções base não encontradas")
+    
+    for key, value in update_data.items():
+        setattr(span, key, value)
+    
+    await db.commit()
+    await db.refresh(span)
+    return span
+
+
+@router.delete("/{cenario_id}/spans/{span_id}")
+async def delete_span(
+    cenario_id: UUID,
+    span_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """Remove uma configuração de span (soft delete)."""
+    result = await db.execute(
+        select(FuncaoSpan).where(
+            FuncaoSpan.id == span_id,
+            FuncaoSpan.cenario_id == cenario_id
+        )
+    )
+    span = result.scalar_one_or_none()
+    if not span:
+        raise HTTPException(status_code=404, detail="Span não encontrado")
+    
+    span.ativo = False
+    await db.commit()
+    return {"message": "Span removido com sucesso"}
+
+
+@router.post("/{cenario_id}/calcular-spans")
+async def calcular_spans(
+    cenario_id: UUID,
+    aplicar: bool = Query(False, description="Se True, aplica os cálculos ao quadro de pessoal"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Calcula quantidades baseadas em spans configurados.
+    Se aplicar=True, atualiza o quadro de pessoal com as quantidades calculadas.
+    """
+    # Verificar se cenário existe
+    result = await db.execute(select(Cenario).where(Cenario.id == cenario_id))
+    cenario = result.scalar_one_or_none()
+    if not cenario:
+        raise HTTPException(status_code=404, detail="Cenário não encontrado")
+    
+    if aplicar:
+        # Aplicar spans ao quadro
+        resultado = await aplicar_spans_ao_quadro(db, cenario_id)
+        return {
+            "aplicado": True,
+            **resultado
+        }
+    else:
+        # Apenas calcular (sem aplicar)
+        quantidades = await calcular_quantidades_span(db, cenario_id)
+        return {
+            "aplicado": False,
+            "quantidades": quantidades,
+            "total_funcoes": len(set(k.split('_')[0] for k in quantidades.keys())),
+            "total_meses": len(quantidades)
+        }
+
+
+# ============================================
+# PREMISSAS POR FUNÇÃO E MÊS
+# ============================================
+
+@router.get("/{cenario_id}/premissas-funcao", response_model=List[PremissaFuncaoMesComRelacionamentos])
+async def list_premissas_funcao(
+    cenario_id: UUID,
+    funcao_id: Optional[UUID] = None,
+    mes: Optional[int] = None,
+    ano: Optional[int] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Lista premissas por função e mês de um cenário."""
+    query = select(PremissaFuncaoMes).options(
+        selectinload(PremissaFuncaoMes.funcao)
+    ).where(PremissaFuncaoMes.cenario_id == cenario_id)
+    
+    if funcao_id:
+        query = query.where(PremissaFuncaoMes.funcao_id == funcao_id)
+    if mes:
+        query = query.where(PremissaFuncaoMes.mes == mes)
+    if ano:
+        query = query.where(PremissaFuncaoMes.ano == ano)
+    
+    query = query.order_by(PremissaFuncaoMes.ano, PremissaFuncaoMes.mes, PremissaFuncaoMes.funcao_id)
+    
+    result = await db.execute(query)
+    return result.scalars().all()
+
+
+@router.post("/{cenario_id}/premissas-funcao", response_model=PremissaFuncaoMesResponse)
+async def create_premissa_funcao(
+    cenario_id: UUID,
+    data: PremissaFuncaoMesCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Cria ou atualiza uma premissa por função e mês."""
+    # Verificar se cenário existe
+    result = await db.execute(select(Cenario).where(Cenario.id == cenario_id))
+    cenario = result.scalar_one_or_none()
+    if not cenario:
+        raise HTTPException(status_code=404, detail="Cenário não encontrado")
+    
+    # Verificar se função existe
+    from app.db.models.orcamento import Funcao
+    funcao_result = await db.execute(select(Funcao).where(Funcao.id == data.funcao_id))
+    if not funcao_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Função não encontrada")
+    
+    # Verificar se já existe (upsert)
+    existing = await db.execute(
+        select(PremissaFuncaoMes).where(
+            PremissaFuncaoMes.cenario_id == cenario_id,
+            PremissaFuncaoMes.funcao_id == data.funcao_id,
+            PremissaFuncaoMes.mes == data.mes,
+            PremissaFuncaoMes.ano == data.ano
+        )
+    )
+    premissa = existing.scalar_one_or_none()
+    
+    if premissa:
+        # Atualizar existente
+        update_data = data.model_dump(exclude={'cenario_id', 'funcao_id', 'mes', 'ano'})
+        for key, value in update_data.items():
+            setattr(premissa, key, value)
+    else:
+        # Criar nova
+        premissa = PremissaFuncaoMes(**data.model_dump())
+        db.add(premissa)
+    
+    await db.commit()
+    await db.refresh(premissa)
+    return premissa
+
+
+@router.put("/{cenario_id}/premissas-funcao/{premissa_id}", response_model=PremissaFuncaoMesResponse)
+async def update_premissa_funcao(
+    cenario_id: UUID,
+    premissa_id: UUID,
+    data: PremissaFuncaoMesUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Atualiza uma premissa por função e mês."""
+    result = await db.execute(
+        select(PremissaFuncaoMes).where(
+            PremissaFuncaoMes.id == premissa_id,
+            PremissaFuncaoMes.cenario_id == cenario_id
+        )
+    )
+    premissa = result.scalar_one_or_none()
+    if not premissa:
+        raise HTTPException(status_code=404, detail="Premissa não encontrada")
+    
+    update_data = data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(premissa, key, value)
+    
+    await db.commit()
+    await db.refresh(premissa)
+    return premissa
+
+
+@router.post("/{cenario_id}/premissas-funcao/bulk", response_model=List[PremissaFuncaoMesResponse])
+async def bulk_premissas_funcao(
+    cenario_id: UUID,
+    premissas: List[PremissaFuncaoMesCreate],
+    db: AsyncSession = Depends(get_db)
+):
+    """Cria ou atualiza múltiplas premissas por função e mês."""
+    # Verificar se cenário existe
+    result = await db.execute(select(Cenario).where(Cenario.id == cenario_id))
+    cenario = result.scalar_one_or_none()
+    if not cenario:
+        raise HTTPException(status_code=404, detail="Cenário não encontrado")
+    
+    from app.db.models.orcamento import Funcao
+    resultados = []
+    
+    for data in premissas:
+        # Verificar se função existe
+        funcao_result = await db.execute(select(Funcao).where(Funcao.id == data.funcao_id))
+        if not funcao_result.scalar_one_or_none():
+            continue  # Pular se função não existe
+        
+        # Verificar se já existe
+        existing = await db.execute(
+            select(PremissaFuncaoMes).where(
+                PremissaFuncaoMes.cenario_id == cenario_id,
+                PremissaFuncaoMes.funcao_id == data.funcao_id,
+                PremissaFuncaoMes.mes == data.mes,
+                PremissaFuncaoMes.ano == data.ano
+            )
+        )
+        premissa = existing.scalar_one_or_none()
+        
+        if premissa:
+            # Atualizar
+            update_data = data.model_dump(exclude={'cenario_id', 'funcao_id', 'mes', 'ano'})
+            for key, value in update_data.items():
+                setattr(premissa, key, value)
+        else:
+            # Criar
+            premissa = PremissaFuncaoMes(**data.model_dump())
+            db.add(premissa)
+        
+        resultados.append(premissa)
+    
+    await db.commit()
+    for premissa in resultados:
+        await db.refresh(premissa)
+    
+    return resultados
+
+
+@router.delete("/{cenario_id}/premissas-funcao/{premissa_id}")
+async def delete_premissa_funcao(
+    cenario_id: UUID,
+    premissa_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """Exclui uma premissa por função e mês."""
+    result = await db.execute(
+        select(PremissaFuncaoMes).where(
+            PremissaFuncaoMes.id == premissa_id,
+            PremissaFuncaoMes.cenario_id == cenario_id
+        )
+    )
+    premissa = result.scalar_one_or_none()
+    if not premissa:
+        raise HTTPException(status_code=404, detail="Premissa não encontrada")
+    
+    await db.delete(premissa)
+    await db.commit()
+    return {"message": "Premissa excluída com sucesso"}
 

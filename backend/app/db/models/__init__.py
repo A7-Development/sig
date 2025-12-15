@@ -4,7 +4,7 @@ from .orcamento import (
     Departamento, Secao, CentroCusto, Feriado, Funcao, 
     Empresa, Tributo, Encargo, Provisao,
     PoliticaBeneficio, FaixaSalarial, TabelaSalarial,
-    Cenario, Premissa, QuadroPessoal
+    Cenario, Premissa, QuadroPessoal, FuncaoSpan, PremissaFuncaoMes
 )
 
 __all__ = [
@@ -12,6 +12,6 @@ __all__ = [
     "Departamento", "Secao", "CentroCusto", "Feriado", "Funcao", 
     "Empresa", "Tributo", "Encargo", "Provisao",
     "PoliticaBeneficio", "FaixaSalarial", "TabelaSalarial",
-    "Cenario", "Premissa", "QuadroPessoal",
+    "Cenario", "Premissa", "QuadroPessoal", "FuncaoSpan", "PremissaFuncaoMes",
 ]
 

@@ -4,9 +4,10 @@ Todos os dados são armazenados no PostgreSQL SIG.
 """
 
 import uuid
+import json
 from datetime import datetime, date
-from sqlalchemy import Column, String, Boolean, DateTime, Date, Integer, ForeignKey, Numeric, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, Boolean, DateTime, Date, Integer, ForeignKey, Numeric, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import relationship
 from app.db.session import Base
 
@@ -331,6 +332,9 @@ class Cenario(Base):
     nome = Column(String(200), nullable=False)
     descricao = Column(Text, nullable=True)
     
+    # Cliente do NW (código do cliente na tabela clifor)
+    cliente_nw_codigo = Column(String(50), nullable=True, index=True)
+    
     # Período flexível (permite cruzar anos)
     ano_inicio = Column(Integer, nullable=False)
     mes_inicio = Column(Integer, nullable=False)  # 1-12
@@ -350,6 +354,8 @@ class Cenario(Base):
     empresas_rel = relationship("CenarioEmpresa", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
     premissas = relationship("Premissa", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
     posicoes = relationship("QuadroPessoal", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
+    spans = relationship("FuncaoSpan", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
+    premissas_funcao_mes = relationship("PremissaFuncaoMes", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
     
     @property
     def empresas(self):
@@ -447,3 +453,70 @@ class QuadroPessoal(Base):
     
     def __repr__(self):
         return f"<QuadroPessoal {self.funcao_id} cenario={self.cenario_id}>"
+
+
+class FuncaoSpan(Base):
+    """Configuração de span (ratio) para cálculo automático de quantidades de funções."""
+    __tablename__ = "funcao_span"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # Função que será calculada via span (ex: Supervisor)
+    funcao_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="CASCADE"), nullable=False)
+    
+    # Funções base para cálculo (JSON array de UUIDs)
+    # Ex: [operador_id1, operador_id2] - span será calculado sobre a soma dessas funções
+    funcoes_base_ids = Column(JSON, nullable=False)  # JSON array de UUIDs
+    
+    # Ratio do span (ex: 35 significa 1 supervisor para cada 35 operadores)
+    span_ratio = Column(Numeric(10, 2), nullable=False)
+    
+    # Controle
+    ativo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    cenario = relationship("Cenario", back_populates="spans", lazy="selectin")
+    funcao = relationship("Funcao", lazy="selectin")
+    
+    def __repr__(self):
+        return f"<FuncaoSpan {self.funcao_id} span={self.span_ratio} sobre {len(self.funcoes_base_ids or [])} funções>"
+
+
+class PremissaFuncaoMes(Base):
+    """Premissas de ineficiência por função e por mês."""
+    __tablename__ = "premissa_funcao_mes"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    funcao_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="CASCADE"), nullable=False)
+    
+    # Período
+    mes = Column(Integer, nullable=False)  # 1-12
+    ano = Column(Integer, nullable=False)
+    
+    # Índices de Ineficiência (percentuais)
+    absenteismo = Column(Numeric(5, 2), default=3.0)  # % absenteísmo
+    turnover = Column(Numeric(5, 2), default=5.0)  # % turnover mensal
+    ferias_indice = Column(Numeric(5, 2), default=8.33)  # 1/12 = 8.33%
+    
+    # Treinamento
+    dias_treinamento = Column(Integer, default=15)  # Dias de treinamento por novo funcionário
+    
+    # Controle
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    cenario = relationship("Cenario", back_populates="premissas_funcao_mes", lazy="selectin")
+    funcao = relationship("Funcao", lazy="selectin")
+    
+    # Unique constraint: uma premissa por função/mês/ano/cenário
+    __table_args__ = (
+        UniqueConstraint('cenario_id', 'funcao_id', 'mes', 'ano', name='uq_premissa_funcao_mes'),
+    )
+    
+    def __repr__(self):
+        return f"<PremissaFuncaoMes cenario={self.cenario_id} funcao={self.funcao_id} {self.mes:02d}/{self.ano}>"
