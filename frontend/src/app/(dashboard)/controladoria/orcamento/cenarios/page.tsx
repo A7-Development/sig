@@ -82,14 +82,13 @@ export default function CenariosPage() {
   const [showFormCenario, setShowFormCenario] = useState(false);
   const [editandoCenario, setEditandoCenario] = useState<Cenario | null>(null);
   const [formCenario, setFormCenario] = useState({
-    codigo: "",
     nome: "",
     descricao: "",
-    empresa_id: "" as string | null,
-    ano: new Date().getFullYear() + 1,
+    empresa_ids: [] as string[],
+    ano_inicio: new Date().getFullYear() + 1,
     mes_inicio: 1,
+    ano_fim: new Date().getFullYear() + 1,
     mes_fim: 12,
-    status: "RASCUNHO" as 'RASCUNHO' | 'APROVADO' | 'BLOQUEADO',
     ativo: true,
   });
   
@@ -129,7 +128,7 @@ export default function CenariosPage() {
     try {
       const [cenariosData, empresasData, funcoesData, secoesData, ccData, tsData] = await Promise.all([
         cenariosApi.listar(token),
-        empresasApi.listar(token),
+        empresasApi.listar(token, { ativo: true }),
         funcoesApi.listar(token),
         secoesApi.listar(token),
         centrosCustoApi.listar(token),
@@ -142,12 +141,26 @@ export default function CenariosPage() {
       setCentrosCusto(ccData);
       setTabelaSalarial(tsData);
       
+      // Debug: verificar empresas carregadas
+      if (empresasData.length === 0) {
+        console.warn("Nenhuma empresa encontrada. Verifique se há empresas cadastradas e ativas.");
+      } else {
+        console.log(`${empresasData.length} empresa(s) carregada(s)`);
+      }
+      
       // Seleciona o primeiro cenário automaticamente
       if (cenariosData.length > 0 && !cenarioSelecionado) {
         setCenarioSelecionado(cenariosData[0]);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao carregar dados:", error);
+      if (error.message) {
+        console.error("Detalhes do erro:", error.message);
+      }
+      // Log específico para empresas
+      if (error.response?.data) {
+        console.error("Resposta da API:", error.response.data);
+      }
     } finally {
       setLoading(false);
     }
@@ -175,16 +188,28 @@ export default function CenariosPage() {
     e.preventDefault();
     if (!token) return;
     
+    // Validar período
+    const inicio = new Date(formCenario.ano_inicio, formCenario.mes_inicio - 1);
+    const fim = new Date(formCenario.ano_fim, formCenario.mes_fim - 1);
+    if (fim < inicio) {
+      alert("A data final deve ser posterior à data inicial");
+      return;
+    }
+    
+    // Validar empresas
+    if (formCenario.empresa_ids.length === 0) {
+      alert("Selecione pelo menos uma empresa");
+      return;
+    }
+    
     try {
-      const data = {
-        ...formCenario,
-        empresa_id: formCenario.empresa_id || null,
-      };
-      
       if (editandoCenario) {
-        await cenariosApi.atualizar(token, editandoCenario.id, data);
+        await cenariosApi.atualizar(token, editandoCenario.id, formCenario);
       } else {
-        await cenariosApi.criar(token, data);
+        await cenariosApi.criar(token, {
+          ...formCenario,
+          empresa_ids: formCenario.empresa_ids,
+        });
       }
       setShowFormCenario(false);
       setEditandoCenario(null);
@@ -345,7 +370,7 @@ export default function CenariosPage() {
                         {getStatusIcon(cenario.status)}
                         <span>{cenario.nome}</span>
                         <span className="text-muted-foreground text-xs">
-                          ({cenario.codigo} • {cenario.ano})
+                          ({cenario.codigo} • {cenario.mes_inicio.toString().padStart(2, '0')}/{cenario.ano_inicio} - {cenario.mes_fim.toString().padStart(2, '0')}/{cenario.ano_fim})
                         </span>
                       </div>
                     </SelectItem>
@@ -371,14 +396,13 @@ export default function CenariosPage() {
                 <Button size="sm" variant="outline" onClick={() => {
                   setEditandoCenario(cenarioSelecionado);
                   setFormCenario({
-                    codigo: cenarioSelecionado.codigo,
                     nome: cenarioSelecionado.nome,
                     descricao: cenarioSelecionado.descricao || "",
-                    empresa_id: cenarioSelecionado.empresa_id,
-                    ano: cenarioSelecionado.ano,
+                    empresa_ids: cenarioSelecionado.empresas?.map(e => e.id) || [],
+                    ano_inicio: cenarioSelecionado.ano_inicio,
                     mes_inicio: cenarioSelecionado.mes_inicio,
+                    ano_fim: cenarioSelecionado.ano_fim,
                     mes_fim: cenarioSelecionado.mes_fim,
-                    status: cenarioSelecionado.status,
                     ativo: cenarioSelecionado.ativo,
                   });
                   setShowFormCenario(true);
@@ -391,15 +415,15 @@ export default function CenariosPage() {
             
             <Button size="sm" variant="success" onClick={() => {
               setEditandoCenario(null);
+              const nextYear = new Date().getFullYear() + 1;
               setFormCenario({
-                codigo: "",
                 nome: "",
                 descricao: "",
-                empresa_id: null,
-                ano: new Date().getFullYear() + 1,
+                empresa_ids: [],
+                ano_inicio: nextYear,
                 mes_inicio: 1,
+                ano_fim: nextYear,
                 mes_fim: 12,
-                status: "RASCUNHO",
                 ativo: true,
               });
               setShowFormCenario(true);
@@ -415,11 +439,13 @@ export default function CenariosPage() {
           <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <Building2 className="h-3 w-3" />
-              {cenarioSelecionado.empresa?.nome_fantasia || cenarioSelecionado.empresa?.razao_social || 'Sem empresa'}
+              {cenarioSelecionado.empresas && cenarioSelecionado.empresas.length > 0
+                ? cenarioSelecionado.empresas.map(e => e.nome_fantasia || e.razao_social).join(', ')
+                : 'Sem empresa'}
             </span>
             <span className="flex items-center gap-1">
               <Calendar className="h-3 w-3" />
-              {cenarioSelecionado.ano} (Mês {cenarioSelecionado.mes_inicio} a {cenarioSelecionado.mes_fim})
+              {cenarioSelecionado.mes_inicio.toString().padStart(2, '0')}/{cenarioSelecionado.ano_inicio} a {cenarioSelecionado.mes_fim.toString().padStart(2, '0')}/{cenarioSelecionado.ano_fim}
             </span>
             <span className="flex items-center gap-1">
               <Users className="h-3 w-3" />
@@ -863,91 +889,205 @@ export default function CenariosPage() {
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmitCenario} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="form-field">
-                    <label className="filter-label">Código *</label>
-                    <Input
-                      value={formCenario.codigo}
-                      onChange={(e) => setFormCenario({ ...formCenario, codigo: e.target.value.toUpperCase() })}
-                      placeholder="ORC_2025_V1"
-                      className="h-8 text-sm"
-                      required
-                    />
-                  </div>
-                  <div className="form-field">
-                    <label className="filter-label">Ano *</label>
-                    <Input
-                      type="number"
-                      value={formCenario.ano}
-                      onChange={(e) => setFormCenario({ ...formCenario, ano: parseInt(e.target.value) || 2025 })}
-                      className="h-8 text-sm"
-                      required
-                    />
-                  </div>
-                </div>
                 <div className="form-field">
-                  <label className="filter-label">Nome *</label>
+                  <label className="filter-label">Nome do Cenário *</label>
                   <Input
                     value={formCenario.nome}
                     onChange={(e) => setFormCenario({ ...formCenario, nome: e.target.value })}
-                    placeholder="Orçamento 2025 - Conservador"
+                    placeholder="Orçamento 2026 - Conservador"
                     className="h-8 text-sm"
                     required
                   />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    O código será gerado automaticamente
+                  </p>
                 </div>
+                
                 <div className="form-field">
-                  <label className="filter-label">Empresa</label>
-                  <select
-                    value={formCenario.empresa_id || ""}
-                    onChange={(e) => setFormCenario({ ...formCenario, empresa_id: e.target.value || null })}
-                    className="w-full h-8 px-3 border rounded-md text-sm bg-background"
-                  >
-                    <option value="">Selecione...</option>
-                    {empresas.map((emp) => (
-                      <option key={emp.id} value={emp.id}>
-                        {emp.nome_fantasia || emp.razao_social}
-                      </option>
-                    ))}
-                  </select>
+                  <label className="filter-label">Descrição</label>
+                  <Input
+                    value={formCenario.descricao}
+                    onChange={(e) => setFormCenario({ ...formCenario, descricao: e.target.value })}
+                    placeholder="Descrição opcional do cenário"
+                    className="h-8 text-sm"
+                  />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+
+                <div className="form-field">
+                  <label className="filter-label">Empresas *</label>
+                  <div className="space-y-2 max-h-32 overflow-y-auto border rounded-md p-2 bg-background">
+                    {empresas.length === 0 ? (
+                      <div className="text-center py-4">
+                        <p className="text-xs text-muted-foreground mb-2">Nenhuma empresa cadastrada</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          Cadastre empresas em: Cadastros → Empresas
+                        </p>
+                      </div>
+                    ) : (
+                      empresas
+                        .filter(emp => emp.ativo !== false)
+                        .map((emp) => (
+                          <label key={emp.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/50 p-1 rounded">
+                            <input
+                              type="checkbox"
+                              checked={formCenario.empresa_ids.includes(emp.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setFormCenario({
+                                    ...formCenario,
+                                    empresa_ids: [...formCenario.empresa_ids, emp.id]
+                                  });
+                                } else {
+                                  setFormCenario({
+                                    ...formCenario,
+                                    empresa_ids: formCenario.empresa_ids.filter(id => id !== emp.id)
+                                  });
+                                }
+                              }}
+                              className="rounded"
+                            />
+                            <span className="flex-1">{emp.nome_fantasia || emp.razao_social}</span>
+                          </label>
+                        ))
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {empresas.length > 0 
+                      ? `Selecione uma ou mais empresas para este cenário (${empresas.filter(e => e.ativo !== false).length} disponível${empresas.filter(e => e.ativo !== false).length !== 1 ? 'is' : ''})`
+                      : "Cadastre empresas primeiro para poder criar cenários"}
+                  </p>
+                </div>
+
+                <div className="border-t pt-4">
+                  <label className="filter-label mb-3 block">Período do Cenário *</label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="form-field">
+                      <label className="filter-label text-[10px]">Data Início (mm/aaaa)</label>
+                      <Input
+                        type="text"
+                        value={`${formCenario.mes_inicio.toString().padStart(2, '0')}/${formCenario.ano_inicio}`}
+                        onChange={(e) => {
+                          let value = e.target.value.replace(/\D/g, '');
+                          
+                          // Limitar a 6 dígitos (2 para mês + 4 para ano)
+                          if (value.length > 6) {
+                            value = value.slice(0, 6);
+                          }
+                          
+                          // Separar mês e ano
+                          let mes = formCenario.mes_inicio;
+                          let ano = formCenario.ano_inicio;
+                          
+                          if (value.length >= 2) {
+                            mes = parseInt(value.slice(0, 2));
+                            if (mes < 1) mes = 1;
+                            if (mes > 12) mes = 12;
+                          }
+                          
+                          if (value.length > 2) {
+                            ano = parseInt(value.slice(2));
+                            if (ano < 2020) ano = 2020;
+                            if (ano > 2100) ano = 2100;
+                          }
+                          
+                          setFormCenario({
+                            ...formCenario,
+                            mes_inicio: mes,
+                            ano_inicio: ano
+                          });
+                        }}
+                        onBlur={(e) => {
+                          // Garantir formato correto ao sair do campo
+                          const mes = formCenario.mes_inicio.toString().padStart(2, '0');
+                          const ano = formCenario.ano_inicio.toString();
+                          e.target.value = `${mes}/${ano}`;
+                        }}
+                        placeholder="01/2026"
+                        className="h-8 text-sm font-mono"
+                        maxLength={7}
+                        required
+                      />
+                    </div>
+                    <div className="form-field">
+                      <label className="filter-label text-[10px]">Data Fim (mm/aaaa)</label>
+                      <Input
+                        type="text"
+                        value={`${formCenario.mes_fim.toString().padStart(2, '0')}/${formCenario.ano_fim}`}
+                        onChange={(e) => {
+                          let value = e.target.value.replace(/\D/g, '');
+                          
+                          // Limitar a 6 dígitos (2 para mês + 4 para ano)
+                          if (value.length > 6) {
+                            value = value.slice(0, 6);
+                          }
+                          
+                          // Separar mês e ano
+                          let mes = formCenario.mes_fim;
+                          let ano = formCenario.ano_fim;
+                          
+                          if (value.length >= 2) {
+                            mes = parseInt(value.slice(0, 2));
+                            if (mes < 1) mes = 1;
+                            if (mes > 12) mes = 12;
+                          }
+                          
+                          if (value.length > 2) {
+                            ano = parseInt(value.slice(2));
+                            if (ano < 2020) ano = 2020;
+                            if (ano > 2100) ano = 2100;
+                          }
+                          
+                          setFormCenario({
+                            ...formCenario,
+                            mes_fim: mes,
+                            ano_fim: ano
+                          });
+                        }}
+                        onBlur={(e) => {
+                          // Garantir formato correto ao sair do campo
+                          const mes = formCenario.mes_fim.toString().padStart(2, '0');
+                          const ano = formCenario.ano_fim.toString();
+                          e.target.value = `${mes}/${ano}`;
+                        }}
+                        placeholder="12/2027"
+                        className="h-8 text-sm font-mono"
+                        maxLength={7}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Exemplo: 01/2026 a 12/2027 (24 meses)
+                  </p>
+                </div>
+                
+                {editandoCenario && (
                   <div className="form-field">
-                    <label className="filter-label">Mês Início</label>
+                    <label className="filter-label">Status</label>
                     <select
-                      value={formCenario.mes_inicio}
-                      onChange={(e) => setFormCenario({ ...formCenario, mes_inicio: parseInt(e.target.value) })}
+                      value={editandoCenario.status}
+                      onChange={async (e) => {
+                        if (!token) return;
+                        try {
+                          await cenariosApi.atualizar(token, editandoCenario.id, {
+                            status: e.target.value as 'RASCUNHO' | 'APROVADO' | 'BLOQUEADO'
+                          });
+                          carregarDados();
+                        } catch (error: any) {
+                          alert(error.message || "Erro ao atualizar status");
+                        }
+                      }}
                       className="w-full h-8 px-3 border rounded-md text-sm bg-background"
                     >
-                      {[1,2,3,4,5,6,7,8,9,10,11,12].map((m) => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
+                      <option value="RASCUNHO">Rascunho</option>
+                      <option value="APROVADO">Aprovado</option>
+                      <option value="BLOQUEADO">Bloqueado</option>
                     </select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Cenários novos sempre iniciam como Rascunho
+                    </p>
                   </div>
-                  <div className="form-field">
-                    <label className="filter-label">Mês Fim</label>
-                    <select
-                      value={formCenario.mes_fim}
-                      onChange={(e) => setFormCenario({ ...formCenario, mes_fim: parseInt(e.target.value) })}
-                      className="w-full h-8 px-3 border rounded-md text-sm bg-background"
-                    >
-                      {[1,2,3,4,5,6,7,8,9,10,11,12].map((m) => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="form-field">
-                  <label className="filter-label">Status</label>
-                  <select
-                    value={formCenario.status}
-                    onChange={(e) => setFormCenario({ ...formCenario, status: e.target.value as 'RASCUNHO' | 'APROVADO' | 'BLOQUEADO' })}
-                    className="w-full h-8 px-3 border rounded-md text-sm bg-background"
-                  >
-                    <option value="RASCUNHO">Rascunho</option>
-                    <option value="APROVADO">Aprovado</option>
-                    <option value="BLOQUEADO">Bloqueado</option>
-                  </select>
-                </div>
+                )}
                 <div className="flex gap-2 justify-end pt-4 border-t">
                   <Button type="button" variant="outline" size="sm" onClick={() => setShowFormCenario(false)}>
                     Cancelar

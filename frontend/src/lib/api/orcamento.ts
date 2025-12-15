@@ -607,21 +607,21 @@ export interface Cenario {
   codigo: string;
   nome: string;
   descricao: string | null;
-  empresa_id: string | null;
-  ano: number;
+  ano_inicio: number;
   mes_inicio: number;
+  ano_fim: number;
   mes_fim: number;
   status: 'RASCUNHO' | 'APROVADO' | 'BLOQUEADO';
   versao: number;
   ativo: boolean;
   created_at: string;
   updated_at: string;
-  empresa?: {
+  empresas?: {
     id: string;
     codigo: string;
     razao_social: string;
     nome_fantasia: string | null;
-  } | null;
+  }[];
 }
 
 export interface Premissa {
@@ -671,9 +671,10 @@ export interface QuadroPessoal {
 }
 
 export const cenariosApi = {
-  listar: (token: string, params?: { ano?: number; empresa_id?: string; status?: string; ativo?: boolean }) => {
+  listar: (token: string, params?: { ano_inicio?: number; ano_fim?: number; empresa_id?: string; status?: string; ativo?: boolean }) => {
     const queryParams = new URLSearchParams();
-    if (params?.ano) queryParams.set('ano', String(params.ano));
+    if (params?.ano_inicio) queryParams.set('ano_inicio', String(params.ano_inicio));
+    if (params?.ano_fim) queryParams.set('ano_fim', String(params.ano_fim));
     if (params?.empresa_id) queryParams.set('empresa_id', params.empresa_id);
     if (params?.status) queryParams.set('status', params.status);
     if (params?.ativo !== undefined) queryParams.set('ativo', String(params.ativo));
@@ -684,7 +685,7 @@ export const cenariosApi = {
   buscar: (token: string, id: string) =>
     api.get<Cenario>(`/api/v1/orcamento/cenarios/${id}`, token),
   
-  criar: (token: string, data: Omit<Cenario, 'id' | 'versao' | 'created_at' | 'updated_at' | 'empresa'>) =>
+  criar: (token: string, data: Omit<Cenario, 'id' | 'codigo' | 'versao' | 'created_at' | 'updated_at' | 'empresas' | 'status'> & { empresa_ids: string[] }) =>
     api.post<Cenario>('/api/v1/orcamento/cenarios', data, token),
   
   atualizar: (token: string, id: string, data: Partial<Cenario>) =>
@@ -735,7 +736,10 @@ export const cenariosApi = {
 export interface ResumoCustos {
   cenario_id: string;
   cenario_nome: string;
-  ano: number;
+  ano_inicio: number;
+  mes_inicio: number;
+  ano_fim: number;
+  mes_fim: number;
   total_headcount_medio: number;
   custo_total_anual: number;
   custo_mensal_medio: number;

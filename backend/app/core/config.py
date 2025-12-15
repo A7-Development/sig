@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     
     # Database (PostgreSQL SIG - Leitura e Escrita)
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/sig_db"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:M0eRjmuOjdC@localhost:5432/sig"
     
     # CORPORERM (SQL Server - Somente Leitura)
     CORPORERM_HOST: str = "172.22.0.19"

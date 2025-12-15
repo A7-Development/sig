@@ -5,7 +5,7 @@ Schemas do módulo de Orçamento.
 from datetime import datetime, date
 from typing import Optional, List
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ============================================
@@ -495,36 +495,73 @@ class ImportacaoResultado(BaseModel):
 # ============================================
 
 class CenarioBase(BaseModel):
-    codigo: str = Field(..., min_length=1, max_length=50)
     nome: str = Field(..., min_length=1, max_length=200)
     descricao: Optional[str] = None
-    empresa_id: Optional[UUID] = None
-    ano: int = Field(..., ge=2020, le=2100)
-    mes_inicio: int = Field(1, ge=1, le=12)
-    mes_fim: int = Field(12, ge=1, le=12)
-    status: str = Field("RASCUNHO", pattern="^(RASCUNHO|APROVADO|BLOQUEADO)$")
+    empresa_ids: List[UUID] = Field(default_factory=list)  # Múltiplas empresas
+    ano_inicio: int = Field(..., ge=2020, le=2100)
+    mes_inicio: int = Field(..., ge=1, le=12)
+    ano_fim: int = Field(..., ge=2020, le=2100)
+    mes_fim: int = Field(..., ge=1, le=12)
     ativo: bool = True
+    
+    @field_validator('ano_fim')
+    @classmethod
+    def validate_ano_fim(cls, v, info):
+        """Valida que o ano final é posterior ou igual ao inicial."""
+        if 'ano_inicio' in info.data:
+            ano_inicio = info.data['ano_inicio']
+            if v < ano_inicio:
+                raise ValueError("Ano final deve ser posterior ou igual ao inicial")
+            elif v == ano_inicio and 'mes_inicio' in info.data:
+                mes_inicio = info.data['mes_inicio']
+                mes_fim = info.data.get('mes_fim', 12)
+                if mes_fim < mes_inicio:
+                    raise ValueError("Mês final deve ser posterior ao mês inicial no mesmo ano")
+        return v
+    
+    @field_validator('mes_fim')
+    @classmethod
+    def validate_mes_fim(cls, v, info):
+        """Valida que o mês final é válido quando no mesmo ano."""
+        if 'ano_inicio' in info.data and 'ano_fim' in info.data:
+            ano_inicio = info.data['ano_inicio']
+            ano_fim = info.data['ano_fim']
+            if ano_fim == ano_inicio and 'mes_inicio' in info.data:
+                mes_inicio = info.data['mes_inicio']
+                if v < mes_inicio:
+                    raise ValueError("Mês final deve ser posterior ao mês inicial no mesmo ano")
+        return v
 
 
 class CenarioCreate(CenarioBase):
+    # Código será gerado automaticamente, não precisa no create
     pass
 
 
 class CenarioUpdate(BaseModel):
-    codigo: Optional[str] = Field(None, min_length=1, max_length=50)
     nome: Optional[str] = Field(None, min_length=1, max_length=200)
     descricao: Optional[str] = None
-    empresa_id: Optional[UUID] = None
-    ano: Optional[int] = Field(None, ge=2020, le=2100)
+    empresa_ids: Optional[List[UUID]] = None
+    ano_inicio: Optional[int] = Field(None, ge=2020, le=2100)
     mes_inicio: Optional[int] = Field(None, ge=1, le=12)
+    ano_fim: Optional[int] = Field(None, ge=2020, le=2100)
     mes_fim: Optional[int] = Field(None, ge=1, le=12)
-    status: Optional[str] = None
+    status: Optional[str] = Field(None, pattern="^(RASCUNHO|APROVADO|BLOQUEADO)$")
     ativo: Optional[bool] = None
 
 
-class CenarioResponse(CenarioBase):
+class CenarioResponse(BaseModel):
     id: UUID
+    codigo: str
+    nome: str
+    descricao: Optional[str] = None
+    ano_inicio: int
+    mes_inicio: int
+    ano_fim: int
+    mes_fim: int
+    status: str
     versao: int
+    ativo: bool
     created_at: datetime
     updated_at: datetime
 
@@ -543,7 +580,7 @@ class EmpresaSimples(BaseModel):
 
 
 class CenarioComRelacionamentos(CenarioResponse):
-    empresa: Optional[EmpresaSimples] = None
+    empresas: List[EmpresaSimples] = Field(default_factory=list)
 
 
 # ============================================

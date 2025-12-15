@@ -4,13 +4,13 @@ CRUD de Cenários de Orçamento.
 
 from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, status as http_status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, text
+from sqlalchemy.orm import selectinload, noload
 
 from app.db.session import get_db
-from app.db.models.orcamento import Cenario, Premissa, QuadroPessoal
+from app.db.models.orcamento import Cenario, Premissa, QuadroPessoal, CenarioEmpresa
 from app.schemas.orcamento import (
     CenarioCreate, CenarioUpdate, CenarioResponse, CenarioComRelacionamentos,
     PremissaCreate, PremissaUpdate, PremissaResponse,
@@ -29,61 +29,411 @@ router = APIRouter(prefix="/cenarios", tags=["Cenários"])
 async def list_cenarios(
     skip: int = 0,
     limit: int = 100,
-    ano: Optional[int] = None,
+    ano_inicio: Optional[int] = None,
+    ano_fim: Optional[int] = None,
     empresa_id: Optional[UUID] = None,
     status: Optional[str] = None,
     ativo: Optional[bool] = None,
     db: AsyncSession = Depends(get_db)
 ):
     """Lista todos os cenários."""
-    query = select(Cenario).options(selectinload(Cenario.empresa))
-    
-    if ano:
-        query = query.where(Cenario.ano == ano)
-    if empresa_id:
-        query = query.where(Cenario.empresa_id == empresa_id)
-    if status:
-        query = query.where(Cenario.status == status)
-    if ativo is not None:
-        query = query.where(Cenario.ativo == ativo)
-    
-    query = query.order_by(Cenario.ano.desc(), Cenario.codigo).offset(skip).limit(limit)
-    result = await db.execute(query)
-    return result.scalars().all()
+    try:
+        # Verificar schema do banco consultando informações da tabela
+        # Usar query SQL direta para verificar se as colunas existem
+        schema_check = await db.execute(text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'cenarios' 
+            AND column_name IN ('ano', 'ano_inicio', 'ano_fim')
+        """))
+        columns = [row[0] for row in schema_check.fetchall()]
+        has_ano = 'ano' in columns
+        has_ano_inicio = 'ano_inicio' in columns
+        
+        # Se não tem nenhum, assumir schema antigo
+        if not has_ano and not has_ano_inicio:
+            has_ano = True
+        
+        # Construir query baseada no schema disponível
+        if has_ano_inicio:
+            # Schema novo - usar campos novos com SQLAlchemy ORM
+            query = select(Cenario)
+            if ano_inicio:
+                query = query.where(Cenario.ano_inicio >= ano_inicio)
+            if ano_fim:
+                query = query.where(Cenario.ano_fim <= ano_fim)
+            if status:
+                query = query.where(Cenario.status == status)
+            if ativo is not None:
+                query = query.where(Cenario.ativo == ativo)
+            if empresa_id:
+                try:
+                    query = query.join(CenarioEmpresa).where(CenarioEmpresa.empresa_id == empresa_id)
+                except Exception:
+                    pass
+            query = query.order_by(Cenario.ano_inicio.desc(), Cenario.codigo)
+            query = query.offset(skip).limit(limit)
+            
+            # Carregar empresas relacionadas
+            try:
+                query = query.options(
+                    selectinload(Cenario.empresas_rel).selectinload(CenarioEmpresa.empresa)
+                )
+            except Exception:
+                pass
+            
+            result = await db.execute(query)
+            cenarios = result.scalars().all()
+            
+            # Converter para o formato esperado (schema novo)
+            resultado = []
+            for c in cenarios:
+                empresas_list = []
+                try:
+                    if hasattr(c, 'empresas_rel') and c.empresas_rel:
+                        empresas_list = [rel.empresa for rel in c.empresas_rel if hasattr(rel, 'empresa') and rel.empresa]
+                except Exception:
+                    empresas_list = []
+                
+                resultado.append(
+                    CenarioComRelacionamentos(
+                        id=c.id,
+                        codigo=c.codigo,
+                        nome=c.nome,
+                        descricao=c.descricao,
+                        ano_inicio=c.ano_inicio,
+                        mes_inicio=c.mes_inicio,
+                        ano_fim=c.ano_fim,
+                        mes_fim=c.mes_fim,
+                        status=c.status,
+                        versao=c.versao,
+                        ativo=c.ativo,
+                        created_at=c.created_at,
+                        updated_at=c.updated_at,
+                        empresas=empresas_list
+                    )
+                )
+            
+            return resultado
+        else:
+            # Schema antigo - usar query SQL direta para evitar erro do SQLAlchemy
+            # Selecionar apenas campos que existem no schema antigo
+            sql = """
+                SELECT id, codigo, nome, descricao, empresa_id, ano, mes_inicio, mes_fim, 
+                       status, versao, ativo, created_at, updated_at
+                FROM cenarios 
+                WHERE 1=1
+            """
+            params = {}
+            if ano_inicio:
+                sql += " AND ano >= :ano_inicio"
+                params['ano_inicio'] = ano_inicio
+            if ano_fim:
+                sql += " AND ano <= :ano_fim"
+                params['ano_fim'] = ano_fim
+            if status:
+                sql += " AND status = :status"
+                params['status'] = status
+            if ativo is not None:
+                sql += " AND ativo = :ativo"
+                params['ativo'] = ativo
+            if empresa_id:
+                sql += " AND empresa_id = :empresa_id"
+                params['empresa_id'] = str(empresa_id)
+            
+            sql += " ORDER BY ano DESC, codigo LIMIT :limit OFFSET :offset"
+            params['limit'] = limit
+            params['offset'] = skip
+            
+            result = await db.execute(text(sql), params)
+            rows = result.fetchall()
+            
+            # Converter rows para objetos Cenario manualmente
+            cenarios = []
+            col_names = ['id', 'codigo', 'nome', 'descricao', 'empresa_id', 'ano', 
+                        'mes_inicio', 'mes_fim', 'status', 'versao', 'ativo', 
+                        'created_at', 'updated_at']
+            
+            for row in rows:
+                # Criar objeto Cenario a partir da row
+                c = Cenario()
+                # Mapear campos da row para o objeto
+                for i, col_name in enumerate(col_names):
+                    if i < len(row):
+                        value = row[i]
+                        if hasattr(c, col_name):
+                            setattr(c, col_name, value)
+                cenarios.append(c)
+            
+            # Pular para a conversão
+            resultado = []
+            for c in cenarios:
+                empresas_list = []
+                try:
+                    if hasattr(c, 'empresas_rel') and c.empresas_rel:
+                        empresas_list = [rel.empresa for rel in c.empresas_rel if hasattr(rel, 'empresa') and rel.empresa]
+                except Exception:
+                    empresas_list = []
+                
+                # Converter schema antigo para novo
+                ano_antigo = getattr(c, 'ano', 2025)
+                mes_inicio = getattr(c, 'mes_inicio', 1)
+                mes_fim = getattr(c, 'mes_fim', 12)
+                
+                resultado.append(
+                    CenarioComRelacionamentos(
+                        id=c.id,
+                        codigo=c.codigo,
+                        nome=c.nome,
+                        descricao=c.descricao,
+                        ano_inicio=ano_antigo,
+                        mes_inicio=mes_inicio,
+                        ano_fim=ano_antigo,
+                        mes_fim=mes_fim,
+                        status=c.status,
+                        versao=c.versao,
+                        ativo=c.ativo,
+                        created_at=c.created_at,
+                        updated_at=c.updated_at,
+                        empresas=empresas_list
+                    )
+                )
+            
+            return resultado
+    except Exception as e:
+        # Log do erro para debug
+        import traceback
+        error_msg = f"Erro ao listar cenários: {str(e)}"
+        print(error_msg)
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=error_msg
+        )
 
 
 @router.get("/{cenario_id}", response_model=CenarioComRelacionamentos)
 async def get_cenario(cenario_id: UUID, db: AsyncSession = Depends(get_db)):
     """Busca um cenário por ID."""
-    query = select(Cenario).options(
-        selectinload(Cenario.empresa),
-        selectinload(Cenario.premissas),
-    ).where(Cenario.id == cenario_id)
-    result = await db.execute(query)
-    cenario = result.scalar_one_or_none()
+    # Verificar schema do banco
+    schema_check = await db.execute(
+        text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'cenarios' AND column_name = 'ano_inicio'
+        """)
+    )
+    has_new_schema = schema_check.scalar_one_or_none() is not None
     
-    if not cenario:
-        raise HTTPException(status_code=404, detail="Cenário não encontrado")
-    return cenario
+    if has_new_schema:
+        # Schema novo - usar ORM normal
+        query = select(Cenario).options(
+            selectinload(Cenario.empresas_rel).selectinload(CenarioEmpresa.empresa),
+            selectinload(Cenario.premissas),
+        ).where(Cenario.id == cenario_id)
+        result = await db.execute(query)
+        cenario = result.scalar_one_or_none()
+        
+        if not cenario:
+            raise HTTPException(status_code=404, detail="Cenário não encontrado")
+        
+        return CenarioComRelacionamentos(
+            id=cenario.id,
+            codigo=cenario.codigo,
+            nome=cenario.nome,
+            descricao=cenario.descricao,
+            ano_inicio=cenario.ano_inicio,
+            mes_inicio=cenario.mes_inicio,
+            ano_fim=cenario.ano_fim,
+            mes_fim=cenario.mes_fim,
+            status=cenario.status,
+            versao=cenario.versao,
+            ativo=cenario.ativo,
+            created_at=cenario.created_at,
+            updated_at=cenario.updated_at,
+            empresas=[rel.empresa for rel in cenario.empresas_rel]
+        )
+    else:
+        # Schema antigo - usar query SQL direta
+        result = await db.execute(
+            text("""
+                SELECT id, codigo, nome, descricao, ano, mes_inicio, mes_fim, 
+                       status, versao, ativo, created_at, updated_at
+                FROM cenarios 
+                WHERE id = :cenario_id
+            """),
+            {"cenario_id": cenario_id}
+        )
+        row = result.fetchone()
+        
+        if not row:
+            raise HTTPException(status_code=404, detail="Cenário não encontrado")
+        
+        # Buscar empresas relacionadas (se existir tabela de associação)
+        empresas_list = []
+        try:
+            empresas_result = await db.execute(
+                text("""
+                    SELECT e.id, e.codigo, e.razao_social, e.nome_fantasia
+                    FROM empresas e
+                    JOIN cenarios_empresas ce ON ce.empresa_id = e.id
+                    WHERE ce.cenario_id = :cenario_id
+                """),
+                {"cenario_id": cenario_id}
+            )
+            empresas_rows = empresas_result.fetchall()
+            empresas_list = [
+                type('Empresa', (), {
+                    'id': r[0],
+                    'codigo': r[1],
+                    'razao_social': r[2],
+                    'nome_fantasia': r[3]
+                })() for r in empresas_rows
+            ]
+        except Exception:
+            # Se não existe tabela de associação, tentar empresa_id direto
+            try:
+                empresas_result = await db.execute(
+                    text("""
+                        SELECT id, codigo, razao_social, nome_fantasia
+                        FROM empresas
+                        WHERE id = (SELECT empresa_id FROM cenarios WHERE id = :cenario_id)
+                    """),
+                    {"cenario_id": cenario_id}
+                )
+                empresa_row = empresas_result.fetchone()
+                if empresa_row:
+                    empresas_list = [type('Empresa', (), {
+                        'id': empresa_row[0],
+                        'codigo': empresa_row[1],
+                        'razao_social': empresa_row[2],
+                        'nome_fantasia': empresa_row[3]
+                    })()]
+            except Exception:
+                empresas_list = []
+        
+        # Converter ano para ano_inicio e ano_fim
+        ano = row[4] if row[4] else 2025
+        return CenarioComRelacionamentos(
+            id=row[0],
+            codigo=row[1],
+            nome=row[2],
+            descricao=row[3],
+            ano_inicio=ano,
+            mes_inicio=row[5] if row[5] else 1,
+            ano_fim=ano,
+            mes_fim=row[6] if row[6] else 12,
+            status=row[7],
+            versao=row[8],
+            ativo=row[9],
+            created_at=row[10],
+            updated_at=row[11],
+            empresas=empresas_list
+        )
+
+
+async def gerar_codigo_unico(nome: str, ano_inicio: int, mes_inicio: int, db: AsyncSession) -> str:
+    """Gera um código único para o cenário baseado no nome e período."""
+    from datetime import datetime
+    
+    # Base do código: primeiras 3 letras do nome (maiúsculas) + ano + mês + timestamp
+    base = ''.join([c.upper() for c in nome if c.isalnum()])[:3]
+    if not base:
+        base = "CEN"
+    
+    timestamp = datetime.utcnow().strftime("%H%M%S")
+    codigo_base = f"{base}_{ano_inicio}{mes_inicio:02d}_{timestamp}"
+    
+    # Verificar se já existe e incrementar se necessário
+    # Usar query SQL direta para evitar erro com campos novos
+    codigo = codigo_base
+    counter = 1
+    while True:
+        result = await db.execute(
+            text("SELECT id FROM cenarios WHERE codigo = :codigo"),
+            {"codigo": codigo}
+        )
+        if not result.fetchone():
+            break
+        codigo = f"{codigo_base}_{counter}"
+        counter += 1
+    
+    return codigo
 
 
 @router.post("", response_model=CenarioResponse)
 async def create_cenario(data: CenarioCreate, db: AsyncSession = Depends(get_db)):
-    """Cria um novo cenário."""
-    # Verificar se código já existe
-    existing = await db.execute(select(Cenario).where(Cenario.codigo == data.codigo))
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Código já existe")
+    """Cria um novo cenário com código gerado automaticamente."""
+    # Verificar schema do banco antes de criar
+    schema_check = await db.execute(
+        text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'cenarios' AND column_name = 'ano_inicio'
+        """)
+    )
+    has_new_schema = schema_check.scalar_one_or_none() is not None
     
-    cenario = Cenario(**data.model_dump())
+    if not has_new_schema:
+        raise HTTPException(
+            status_code=400, 
+            detail=(
+                "Criação de cenário requer migração do banco de dados. "
+                "Execute o script SQL em 'backend/migrations/migrate_cenarios_schema.sql' "
+                "para adicionar as colunas: ano_inicio, mes_inicio, ano_fim, mes_fim "
+                "e a tabela cenarios_empresas. "
+                "Veja 'backend/migrations/README.md' para instruções detalhadas."
+            )
+        )
+    
+    # Validar período
+    if data.ano_fim < data.ano_inicio or (data.ano_fim == data.ano_inicio and data.mes_fim < data.mes_inicio):
+        raise HTTPException(status_code=400, detail="Período final deve ser posterior ao inicial")
+    
+    # Gerar código único
+    codigo = await gerar_codigo_unico(data.nome, data.ano_inicio, data.mes_inicio, db)
+    
+    # Criar cenário (sempre como RASCUNHO)
+    cenario = Cenario(
+        codigo=codigo,
+        nome=data.nome,
+        descricao=data.descricao,
+        ano_inicio=data.ano_inicio,
+        mes_inicio=data.mes_inicio,
+        ano_fim=data.ano_fim,
+        mes_fim=data.mes_fim,
+        status="RASCUNHO",
+        ativo=data.ativo
+    )
     db.add(cenario)
-    await db.commit()
-    await db.refresh(cenario)
+    await db.flush()  # Para obter o ID
+    
+    # Associar empresas
+    if data.empresa_ids:
+        for empresa_id in data.empresa_ids:
+            # Verificar se empresa existe
+            from app.db.models.orcamento import Empresa
+            empresa_result = await db.execute(select(Empresa).where(Empresa.id == empresa_id))
+            if not empresa_result.scalar_one_or_none():
+                raise HTTPException(status_code=404, detail=f"Empresa {empresa_id} não encontrada")
+            
+            # Verificar se tabela de associação existe
+            try:
+                rel = CenarioEmpresa(cenario_id=cenario.id, empresa_id=empresa_id)
+                db.add(rel)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Erro ao associar empresa. Tabela cenarios_empresas pode não existir. Erro: {str(e)}"
+                )
     
     # Criar premissa padrão
     premissa = Premissa(cenario_id=cenario.id)
     db.add(premissa)
+    
     await db.commit()
+    # Refresh sem carregar relacionamentos que podem causar erro
+    await db.refresh(cenario, attribute_names=[col.name for col in Cenario.__table__.columns])
     
     return cenario
 
@@ -91,8 +441,28 @@ async def create_cenario(data: CenarioCreate, db: AsyncSession = Depends(get_db)
 @router.put("/{cenario_id}", response_model=CenarioResponse)
 async def update_cenario(cenario_id: UUID, data: CenarioUpdate, db: AsyncSession = Depends(get_db)):
     """Atualiza um cenário."""
-    result = await db.execute(select(Cenario).where(Cenario.id == cenario_id))
-    cenario = result.scalar_one_or_none()
+    # Verificar schema do banco
+    schema_check = await db.execute(
+        text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'cenarios' AND column_name = 'ano_inicio'
+        """)
+    )
+    has_new_schema = schema_check.scalar_one_or_none() is not None
+    
+    if has_new_schema:
+        result = await db.execute(
+            select(Cenario).options(selectinload(Cenario.empresas_rel))
+            .where(Cenario.id == cenario_id)
+        )
+        cenario = result.scalar_one_or_none()
+    else:
+        # Schema antigo - não permitir atualização até migração
+        raise HTTPException(
+            status_code=400, 
+            detail="Atualização de cenário requer migração do banco de dados para o novo schema"
+        )
     
     if not cenario:
         raise HTTPException(status_code=404, detail="Cenário não encontrado")
@@ -101,8 +471,37 @@ async def update_cenario(cenario_id: UUID, data: CenarioUpdate, db: AsyncSession
         raise HTTPException(status_code=400, detail="Cenário bloqueado não pode ser alterado")
     
     update_data = data.model_dump(exclude_unset=True)
+    
+    # Atualizar empresas se fornecido
+    if 'empresa_ids' in update_data:
+        empresa_ids = update_data.pop('empresa_ids')
+        # Remover associações existentes
+        existing_rels = await db.execute(
+            select(CenarioEmpresa).where(CenarioEmpresa.cenario_id == cenario_id)
+        )
+        for rel in existing_rels.scalars().all():
+            await db.delete(rel)
+        # Criar novas associações
+        from app.db.models.orcamento import Empresa
+        for empresa_id in empresa_ids:
+            empresa_result = await db.execute(select(Empresa).where(Empresa.id == empresa_id))
+            if not empresa_result.scalar_one_or_none():
+                raise HTTPException(status_code=404, detail=f"Empresa {empresa_id} não encontrada")
+            rel = CenarioEmpresa(cenario_id=cenario.id, empresa_id=empresa_id)
+            db.add(rel)
+    
+    # Atualizar outros campos
     for key, value in update_data.items():
         setattr(cenario, key, value)
+    
+    # Validar período se foi atualizado
+    if 'ano_fim' in update_data or 'mes_fim' in update_data or 'ano_inicio' in update_data or 'mes_inicio' in update_data:
+        ano_inicio = cenario.ano_inicio
+        mes_inicio = cenario.mes_inicio
+        ano_fim = cenario.ano_fim
+        mes_fim = cenario.mes_fim
+        if ano_fim < ano_inicio or (ano_fim == ano_inicio and mes_fim < mes_inicio):
+            raise HTTPException(status_code=400, detail="Período final deve ser posterior ao inicial")
     
     await db.commit()
     await db.refresh(cenario)
@@ -112,8 +511,29 @@ async def update_cenario(cenario_id: UUID, data: CenarioUpdate, db: AsyncSession
 @router.delete("/{cenario_id}")
 async def delete_cenario(cenario_id: UUID, db: AsyncSession = Depends(get_db)):
     """Exclui um cenário."""
-    result = await db.execute(select(Cenario).where(Cenario.id == cenario_id))
-    cenario = result.scalar_one_or_none()
+    # Verificar schema e buscar cenário
+    schema_check = await db.execute(
+        text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'cenarios' AND column_name = 'ano_inicio'
+        """)
+    )
+    has_new_schema = schema_check.scalar_one_or_none() is not None
+    
+    if has_new_schema:
+        result = await db.execute(select(Cenario).where(Cenario.id == cenario_id))
+        cenario = result.scalar_one_or_none()
+    else:
+        result = await db.execute(
+            text("SELECT id, status FROM cenarios WHERE id = :cenario_id"),
+            {"cenario_id": cenario_id}
+        )
+        row = result.fetchone()
+        if row:
+            cenario = type('Cenario', (), {'id': row[0], 'status': row[1]})()
+        else:
+            cenario = None
     
     if not cenario:
         raise HTTPException(status_code=404, detail="Cenário não encontrado")
@@ -121,7 +541,11 @@ async def delete_cenario(cenario_id: UUID, db: AsyncSession = Depends(get_db)):
     if cenario.status == "APROVADO":
         raise HTTPException(status_code=400, detail="Cenário aprovado não pode ser excluído")
     
-    await db.delete(cenario)
+    # Usar delete SQL direto para compatibilidade
+    await db.execute(
+        text("DELETE FROM cenarios WHERE id = :cenario_id"),
+        {"cenario_id": cenario_id}
+    )
     await db.commit()
     return {"message": "Cenário excluído com sucesso"}
 
@@ -134,9 +558,26 @@ async def duplicar_cenario(
     db: AsyncSession = Depends(get_db)
 ):
     """Duplica um cenário existente com todas as posições."""
+    # Verificar schema do banco
+    schema_check = await db.execute(
+        text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'cenarios' AND column_name = 'ano_inicio'
+        """)
+    )
+    has_new_schema = schema_check.scalar_one_or_none() is not None
+    
+    if not has_new_schema:
+        raise HTTPException(
+            status_code=400, 
+            detail="Duplicação de cenário requer migração do banco de dados para o novo schema"
+        )
+    
     # Buscar cenário original
     result = await db.execute(
         select(Cenario).options(
+            selectinload(Cenario.empresas_rel),
             selectinload(Cenario.premissas),
             selectinload(Cenario.posicoes)
         ).where(Cenario.id == cenario_id)
@@ -146,9 +587,12 @@ async def duplicar_cenario(
     if not original:
         raise HTTPException(status_code=404, detail="Cenário não encontrado")
     
-    # Verificar se novo código já existe
-    existing = await db.execute(select(Cenario).where(Cenario.codigo == novo_codigo))
-    if existing.scalar_one_or_none():
+    # Verificar se novo código já existe - usar query SQL direta
+    existing_result = await db.execute(
+        text("SELECT id FROM cenarios WHERE codigo = :codigo"),
+        {"codigo": novo_codigo}
+    )
+    if existing_result.fetchone():
         raise HTTPException(status_code=400, detail="Código já existe")
     
     # Criar novo cenário
@@ -156,14 +600,20 @@ async def duplicar_cenario(
         codigo=novo_codigo,
         nome=novo_nome,
         descricao=f"Cópia de {original.nome}",
-        empresa_id=original.empresa_id,
-        ano=original.ano,
+        ano_inicio=original.ano_inicio,
         mes_inicio=original.mes_inicio,
+        ano_fim=original.ano_fim,
         mes_fim=original.mes_fim,
         status="RASCUNHO",
         versao=1
     )
     db.add(novo_cenario)
+    await db.flush()
+    
+    # Duplicar associações de empresas
+    for rel_orig in original.empresas_rel:
+        nova_rel = CenarioEmpresa(cenario_id=novo_cenario.id, empresa_id=rel_orig.empresa_id)
+        db.add(nova_rel)
     await db.commit()
     await db.refresh(novo_cenario)
     
@@ -221,8 +671,9 @@ async def duplicar_cenario(
 @router.get("/{cenario_id}/premissas", response_model=List[PremissaResponse])
 async def list_premissas(cenario_id: UUID, db: AsyncSession = Depends(get_db)):
     """Lista premissas de um cenário."""
+    # Desabilitar carregamento do relacionamento cenario para evitar erro com campos novos
     result = await db.execute(
-        select(Premissa).where(Premissa.cenario_id == cenario_id)
+        select(Premissa).options(noload(Premissa.cenario)).where(Premissa.cenario_id == cenario_id)
     )
     return result.scalars().all()
 
@@ -236,7 +687,7 @@ async def update_premissa(
 ):
     """Atualiza uma premissa."""
     result = await db.execute(
-        select(Premissa).where(
+        select(Premissa).options(noload(Premissa.cenario)).where(
             Premissa.id == premissa_id,
             Premissa.cenario_id == cenario_id
         )
@@ -251,7 +702,8 @@ async def update_premissa(
         setattr(premissa, key, value)
     
     await db.commit()
-    await db.refresh(premissa)
+    # Refresh sem carregar relacionamento cenario para evitar erro com campos novos
+    await db.refresh(premissa, attribute_names=[col.name for col in Premissa.__table__.columns])
     return premissa
 
 
@@ -269,7 +721,9 @@ async def list_quadro_pessoal(
     db: AsyncSession = Depends(get_db)
 ):
     """Lista posições do quadro de pessoal de um cenário."""
+    # Desabilitar carregamento do relacionamento cenario para evitar erro com campos novos
     query = select(QuadroPessoal).options(
+        noload(QuadroPessoal.cenario),  # Não carregar cenario para evitar erro com campos novos
         selectinload(QuadroPessoal.funcao),
         selectinload(QuadroPessoal.secao),
         selectinload(QuadroPessoal.centro_custo)
@@ -296,9 +750,33 @@ async def create_posicao(
     db: AsyncSession = Depends(get_db)
 ):
     """Adiciona uma posição ao quadro de pessoal."""
-    # Verificar se cenário existe
-    result = await db.execute(select(Cenario).where(Cenario.id == cenario_id))
-    cenario = result.scalar_one_or_none()
+    # Verificar se cenário existe - usar query compatível com schema antigo
+    # Verificar se existe coluna ano_inicio para determinar schema
+    schema_check = await db.execute(
+        text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'cenarios' AND column_name = 'ano_inicio'
+        """)
+    )
+    has_new_schema = schema_check.scalar_one_or_none() is not None
+    
+    if has_new_schema:
+        # Schema novo - usar ORM normal
+        result = await db.execute(select(Cenario).where(Cenario.id == cenario_id))
+        cenario = result.scalar_one_or_none()
+    else:
+        # Schema antigo - usar query SQL direta
+        result = await db.execute(
+            text("SELECT id, status FROM cenarios WHERE id = :cenario_id"),
+            {"cenario_id": cenario_id}
+        )
+        row = result.fetchone()
+        if row:
+            cenario = type('Cenario', (), {'id': row[0], 'status': row[1]})()
+        else:
+            cenario = None
+    
     if not cenario:
         raise HTTPException(status_code=404, detail="Cenário não encontrado")
     
@@ -309,7 +787,8 @@ async def create_posicao(
     posicao.cenario_id = cenario_id
     db.add(posicao)
     await db.commit()
-    await db.refresh(posicao)
+    # Refresh sem carregar relacionamento cenario para evitar erro com campos novos
+    await db.refresh(posicao, attribute_names=[col.name for col in QuadroPessoal.__table__.columns])
     return posicao
 
 
@@ -322,7 +801,7 @@ async def update_posicao(
 ):
     """Atualiza uma posição do quadro de pessoal."""
     result = await db.execute(
-        select(QuadroPessoal).where(
+        select(QuadroPessoal).options(noload(QuadroPessoal.cenario)).where(
             QuadroPessoal.id == posicao_id,
             QuadroPessoal.cenario_id == cenario_id
         )
@@ -337,7 +816,8 @@ async def update_posicao(
         setattr(posicao, key, value)
     
     await db.commit()
-    await db.refresh(posicao)
+    # Refresh sem carregar relacionamento cenario para evitar erro com campos novos
+    await db.refresh(posicao, attribute_names=[col.name for col in QuadroPessoal.__table__.columns])
     return posicao
 
 
@@ -349,7 +829,7 @@ async def delete_posicao(
 ):
     """Remove uma posição do quadro de pessoal."""
     result = await db.execute(
-        select(QuadroPessoal).where(
+        select(QuadroPessoal).options(noload(QuadroPessoal.cenario)).where(
             QuadroPessoal.id == posicao_id,
             QuadroPessoal.cenario_id == cenario_id
         )

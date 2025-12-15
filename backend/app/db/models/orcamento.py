@@ -126,6 +126,7 @@ class Empresa(Base):
     # Relationships
     tributos = relationship("Tributo", back_populates="empresa", lazy="selectin", cascade="all, delete-orphan")
     encargos = relationship("Encargo", back_populates="empresa", lazy="selectin", cascade="all, delete-orphan")
+    cenarios_rel = relationship("CenarioEmpresa", back_populates="empresa", lazy="selectin")
     
     def __repr__(self):
         return f"<Empresa {self.codigo}: {self.razao_social}>"
@@ -305,6 +306,20 @@ class TabelaSalarial(Base):
 # CENÁRIOS DE ORÇAMENTO
 # ============================================
 
+# Tabela de associação para múltiplas empresas por cenário
+class CenarioEmpresa(Base):
+    """Associação many-to-many entre Cenários e Empresas."""
+    __tablename__ = "cenarios_empresas"
+    
+    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), primary_key=True)
+    empresa_id = Column(UUID(as_uuid=True), ForeignKey("empresas.id", ondelete="CASCADE"), primary_key=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    cenario = relationship("Cenario", back_populates="empresas_rel")
+    empresa = relationship("Empresa", back_populates="cenarios_rel")
+
+
 class Cenario(Base):
     """Cenário de orçamento de pessoal."""
     __tablename__ = "cenarios"
@@ -316,15 +331,13 @@ class Cenario(Base):
     nome = Column(String(200), nullable=False)
     descricao = Column(Text, nullable=True)
     
-    # Vínculos
-    empresa_id = Column(UUID(as_uuid=True), ForeignKey("empresas.id", ondelete="SET NULL"), nullable=True)
+    # Período flexível (permite cruzar anos)
+    ano_inicio = Column(Integer, nullable=False)
+    mes_inicio = Column(Integer, nullable=False)  # 1-12
+    ano_fim = Column(Integer, nullable=False)
+    mes_fim = Column(Integer, nullable=False)  # 1-12
     
-    # Período
-    ano = Column(Integer, nullable=False)
-    mes_inicio = Column(Integer, nullable=False, default=1)  # 1-12
-    mes_fim = Column(Integer, nullable=False, default=12)  # 1-12
-    
-    # Status
+    # Status (sempre inicia como RASCUNHO)
     status = Column(String(20), nullable=False, default="RASCUNHO")  # RASCUNHO, APROVADO, BLOQUEADO
     versao = Column(Integer, default=1)
     
@@ -334,12 +347,17 @@ class Cenario(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    empresa = relationship("Empresa", lazy="selectin")
+    empresas_rel = relationship("CenarioEmpresa", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
     premissas = relationship("Premissa", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
     posicoes = relationship("QuadroPessoal", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
     
+    @property
+    def empresas(self):
+        """Retorna lista de empresas associadas."""
+        return [rel.empresa for rel in self.empresas_rel]
+    
     def __repr__(self):
-        return f"<Cenario {self.codigo}: {self.nome} ({self.ano})>"
+        return f"<Cenario {self.codigo}: {self.nome} ({self.ano_inicio}/{self.mes_inicio:02d} - {self.ano_fim}/{self.mes_fim:02d})>"
 
 
 class Premissa(Base):

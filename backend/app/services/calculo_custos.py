@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.db.models.orcamento import (
     Cenario, Premissa, QuadroPessoal, 
     TabelaSalarial, PoliticaBeneficio,
-    Empresa, Encargo, Tributo, Provisao
+    Empresa, Encargo, Tributo, Provisao, CenarioEmpresa
 )
 
 
@@ -73,7 +73,10 @@ class ResumoCenario:
     """Resumo de custos do cenário."""
     cenario_id: UUID
     cenario_nome: str
-    ano: int
+    ano_inicio: int
+    mes_inicio: int
+    ano_fim: int
+    mes_fim: int
     total_headcount_medio: float
     custo_total_anual: Decimal
     custo_mensal_medio: Decimal
@@ -84,7 +87,10 @@ class ResumoCenario:
         return {
             "cenario_id": str(self.cenario_id),
             "cenario_nome": self.cenario_nome,
-            "ano": self.ano,
+            "ano_inicio": self.ano_inicio,
+            "mes_inicio": self.mes_inicio,
+            "ano_fim": self.ano_fim,
+            "mes_fim": self.mes_fim,
             "total_headcount_medio": self.total_headcount_medio,
             "custo_total_anual": float(self.custo_total_anual),
             "custo_mensal_medio": float(self.custo_mensal_medio),
@@ -106,8 +112,8 @@ async def calcular_custos_cenario(
     # Carregar cenário com relacionamentos
     result = await db.execute(
         select(Cenario).options(
-            selectinload(Cenario.empresa).selectinload(Empresa.encargos),
-            selectinload(Cenario.empresa).selectinload(Empresa.tributos),
+            selectinload(Cenario.empresas_rel).selectinload(CenarioEmpresa.empresa).selectinload(Empresa.encargos),
+            selectinload(Cenario.empresas_rel).selectinload(CenarioEmpresa.empresa).selectinload(Empresa.tributos),
             selectinload(Cenario.premissas),
             selectinload(Cenario.posicoes).selectinload(QuadroPessoal.funcao),
             selectinload(Cenario.posicoes).selectinload(QuadroPessoal.tabela_salarial).selectinload(TabelaSalarial.politica),
@@ -122,16 +128,18 @@ async def calcular_custos_cenario(
     result_prov = await db.execute(select(Provisao).where(Provisao.ativo == True))
     provisoes = result_prov.scalars().all()
     
-    # Encargos da empresa
+    # Encargos das empresas (agora pode ter múltiplas)
     encargos_clt = []
     encargos_pj = []
-    if cenario.empresa:
-        for enc in cenario.empresa.encargos:
-            if enc.ativo:
-                if enc.regime == 'CLT':
-                    encargos_clt.append(enc)
-                else:
-                    encargos_pj.append(enc)
+    for rel in cenario.empresas_rel:
+        empresa = rel.empresa
+        if empresa:
+            for enc in empresa.encargos:
+                if enc.ativo:
+                    if enc.regime == 'CLT':
+                        encargos_clt.append(enc)
+                    else:
+                        encargos_pj.append(enc)
     
     # Premissa do cenário
     premissa = cenario.premissas[0] if cenario.premissas else None
@@ -241,7 +249,10 @@ async def calcular_custos_cenario(
     return ResumoCenario(
         cenario_id=cenario.id,
         cenario_nome=cenario.nome,
-        ano=cenario.ano,
+        ano_inicio=cenario.ano_inicio,
+        mes_inicio=cenario.mes_inicio,
+        ano_fim=cenario.ano_fim,
+        mes_fim=cenario.mes_fim,
         total_headcount_medio=headcount_medio,
         custo_total_anual=custo_total_anual,
         custo_mensal_medio=custo_mensal_medio,
