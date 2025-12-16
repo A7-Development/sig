@@ -381,19 +381,20 @@ class Premissa(Base):
     cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False)
     
     # Ãndices de IneficiÃªncia (percentuais)
-    absenteismo = Column(Numeric(5, 2), default=3.0)  # % absenteÃ­smo
+    absenteismo = Column(Numeric(5, 2), default=3.0)  # % absenteismo total
+    abs_pct_justificado = Column(Numeric(5, 2), default=75.0)  # % do ABS que e justificado
     turnover = Column(Numeric(5, 2), default=5.0)  # % turnover mensal
     ferias_indice = Column(Numeric(5, 2), default=8.33)  # 1/12 = 8.33%
     
     # Treinamento
-    dias_treinamento = Column(Integer, default=15)  # Dias de treinamento por novo funcionÃ¡rio
+    dias_treinamento = Column(Integer, default=15)  # Dias de treinamento
     
     # Reajustes (data e percentual)
     reajuste_data = Column(Date, nullable=True)  # Data do reajuste
     reajuste_percentual = Column(Numeric(5, 2), default=0)  # % reajuste
     
-    # DissÃ­dio
-    dissidio_mes = Column(Integer, nullable=True)  # MÃªs do dissÃ­dio (1-12)
+    # Dissidio
+    dissidio_mes = Column(Integer, nullable=True)  # Mes do dissidio (1-12)
     dissidio_percentual = Column(Numeric(5, 2), default=0)  # % estimado
     
     # Controle
@@ -424,19 +425,19 @@ class QuadroPessoal(Base):
     # Regime
     regime = Column(String(10), nullable=False, default="CLT")  # CLT, PJ
     
-    # Quantidade por mÃªs (12 colunas para flexibilidade)
-    qtd_jan = Column(Integer, default=0)
-    qtd_fev = Column(Integer, default=0)
-    qtd_mar = Column(Integer, default=0)
-    qtd_abr = Column(Integer, default=0)
-    qtd_mai = Column(Integer, default=0)
-    qtd_jun = Column(Integer, default=0)
-    qtd_jul = Column(Integer, default=0)
-    qtd_ago = Column(Integer, default=0)
-    qtd_set = Column(Integer, default=0)
-    qtd_out = Column(Integer, default=0)
-    qtd_nov = Column(Integer, default=0)
-    qtd_dez = Column(Integer, default=0)
+    # Quantidade por mês (12 colunas para flexibilidade) - Numeric para suportar rateio fracionado
+    qtd_jan = Column(Numeric(10, 2), default=0)
+    qtd_fev = Column(Numeric(10, 2), default=0)
+    qtd_mar = Column(Numeric(10, 2), default=0)
+    qtd_abr = Column(Numeric(10, 2), default=0)
+    qtd_mai = Column(Numeric(10, 2), default=0)
+    qtd_jun = Column(Numeric(10, 2), default=0)
+    qtd_jul = Column(Numeric(10, 2), default=0)
+    qtd_ago = Column(Numeric(10, 2), default=0)
+    qtd_set = Column(Numeric(10, 2), default=0)
+    qtd_out = Column(Numeric(10, 2), default=0)
+    qtd_nov = Column(Numeric(10, 2), default=0)
+    qtd_dez = Column(Numeric(10, 2), default=0)
     
     # Override de salÃ¡rio (se diferente da tabela salarial)
     salario_override = Column(Numeric(12, 2), nullable=True)
@@ -446,6 +447,18 @@ class QuadroPessoal(Base):
     
     # Fator PA - para cálculo de Posições de Atendimento (HC / fator = PAs)
     fator_pa = Column(Numeric(5, 2), default=1.0)
+    
+    # Tipo de cálculo: manual, span, rateio
+    tipo_calculo = Column(String(20), default='manual')  # manual | span | rateio
+    
+    # Campos para SPAN (cálculo baseado em outras funções)
+    span_ratio = Column(Numeric(10, 2), nullable=True)  # Ex: 35 = 1 para cada 35
+    span_funcoes_base_ids = Column(JSON, nullable=True)  # Lista de IDs das funções base
+    
+    # Campos para RATEIO (compartilhamento entre seções)
+    rateio_grupo_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Agrupa posições rateadas
+    rateio_percentual = Column(Numeric(5, 2), nullable=True)  # % desta seção (ex: 40.00)
+    rateio_qtd_total = Column(Integer, nullable=True)  # Qtd total a ratear (só na principal)
     
     # Observações
     observacao = Column(Text, nullable=True)
@@ -567,12 +580,13 @@ class PremissaFuncaoMes(Base):
     ano = Column(Integer, nullable=False)
     
     # Ãndices de IneficiÃªncia (percentuais)
-    absenteismo = Column(Numeric(5, 2), default=3.0)  # % absenteÃ­smo
+    absenteismo = Column(Numeric(5, 2), default=3.0)  # % absenteismo total
+    abs_pct_justificado = Column(Numeric(5, 2), default=75.0)  # % do ABS que e justificado
     turnover = Column(Numeric(5, 2), default=5.0)  # % turnover mensal
     ferias_indice = Column(Numeric(5, 2), default=8.33)  # 1/12 = 8.33%
     
     # Treinamento
-    dias_treinamento = Column(Integer, default=15)  # Dias de treinamento por novo funcionÃ¡rio
+    dias_treinamento = Column(Integer, default=15)  # Dias de treinamento
     
     # Controle
     created_at = Column(DateTime, default=datetime.utcnow)

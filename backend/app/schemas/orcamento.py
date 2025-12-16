@@ -527,8 +527,8 @@ class CenarioEmpresaResponse(CenarioEmpresaBase):
 
 
 class CenarioEmpresaComClientes(CenarioEmpresaResponse):
-    """Empresa com seus clientes carregados."""
-    clientes: list["CenarioClienteResponse"] = []
+    """Empresa com seus clientes e seções carregados."""
+    clientes: list["CenarioClienteComSecoes"] = []
     empresa: Optional["EmpresaResponse"] = None
 
 
@@ -698,7 +698,8 @@ class CenarioComRelacionamentos(CenarioResponse):
 
 class PremissaBase(BaseModel):
     cenario_id: UUID
-    absenteismo: float = Field(3.0, ge=0, le=100)
+    absenteismo: float = Field(3.0, ge=0, le=100, description="% absenteismo total")
+    abs_pct_justificado: float = Field(75.0, ge=0, le=100, description="% do ABS que e justificado")
     turnover: float = Field(5.0, ge=0, le=100)
     ferias_indice: float = Field(8.33, ge=0, le=100)
     dias_treinamento: int = Field(15, ge=0, le=180)
@@ -714,6 +715,7 @@ class PremissaCreate(PremissaBase):
 
 class PremissaUpdate(BaseModel):
     absenteismo: Optional[float] = Field(None, ge=0, le=100)
+    abs_pct_justificado: Optional[float] = Field(None, ge=0, le=100)
     turnover: Optional[float] = Field(None, ge=0, le=100)
     ferias_indice: Optional[float] = Field(None, ge=0, le=100)
     dias_treinamento: Optional[int] = Field(None, ge=0, le=180)
@@ -742,25 +744,39 @@ class QuadroPessoalBase(BaseModel):
     secao_id: Optional[UUID] = None
     centro_custo_id: Optional[UUID] = None
     tabela_salarial_id: Optional[UUID] = None
+    cenario_secao_id: Optional[UUID] = None  # Referência para CenarioSecao (estrutura hierárquica)
     regime: str = Field("CLT", pattern="^(CLT|PJ)$")
     
-    # Quantidades mensais
-    qtd_jan: int = Field(0, ge=0)
-    qtd_fev: int = Field(0, ge=0)
-    qtd_mar: int = Field(0, ge=0)
-    qtd_abr: int = Field(0, ge=0)
-    qtd_mai: int = Field(0, ge=0)
-    qtd_jun: int = Field(0, ge=0)
-    qtd_jul: int = Field(0, ge=0)
-    qtd_ago: int = Field(0, ge=0)
-    qtd_set: int = Field(0, ge=0)
-    qtd_out: int = Field(0, ge=0)
-    qtd_nov: int = Field(0, ge=0)
-    qtd_dez: int = Field(0, ge=0)
+    # Quantidades mensais (float para suportar rateio fracionado)
+    qtd_jan: float = Field(0, ge=0)
+    qtd_fev: float = Field(0, ge=0)
+    qtd_mar: float = Field(0, ge=0)
+    qtd_abr: float = Field(0, ge=0)
+    qtd_mai: float = Field(0, ge=0)
+    qtd_jun: float = Field(0, ge=0)
+    qtd_jul: float = Field(0, ge=0)
+    qtd_ago: float = Field(0, ge=0)
+    qtd_set: float = Field(0, ge=0)
+    qtd_out: float = Field(0, ge=0)
+    qtd_nov: float = Field(0, ge=0)
+    qtd_dez: float = Field(0, ge=0)
     
     salario_override: Optional[float] = None
     span: Optional[int] = None
     fator_pa: float = Field(1.0, ge=0, description="Fator para calcular PAs (HC / fator = PAs)")
+    
+    # Tipo de cálculo: manual, span, rateio
+    tipo_calculo: str = Field("manual", pattern="^(manual|span|rateio)$", description="Tipo de cálculo da quantidade")
+    
+    # Campos para SPAN
+    span_ratio: Optional[float] = Field(None, gt=0, description="Ratio do span (ex: 35 = 1 para cada 35)")
+    span_funcoes_base_ids: Optional[List[UUID]] = Field(None, description="IDs das funções base para cálculo do span")
+    
+    # Campos para RATEIO
+    rateio_grupo_id: Optional[UUID] = Field(None, description="ID do grupo de rateio (agrupa posições rateadas)")
+    rateio_percentual: Optional[float] = Field(None, ge=0, le=100, description="Percentual desta seção no rateio")
+    rateio_qtd_total: Optional[int] = Field(None, ge=0, description="Quantidade total a ser rateada")
+    
     observacao: Optional[str] = None
     ativo: bool = True
 
@@ -774,24 +790,38 @@ class QuadroPessoalUpdate(BaseModel):
     secao_id: Optional[UUID] = None
     centro_custo_id: Optional[UUID] = None
     tabela_salarial_id: Optional[UUID] = None
+    cenario_secao_id: Optional[UUID] = None
     regime: Optional[str] = None
     
-    qtd_jan: Optional[int] = Field(None, ge=0)
-    qtd_fev: Optional[int] = Field(None, ge=0)
-    qtd_mar: Optional[int] = Field(None, ge=0)
-    qtd_abr: Optional[int] = Field(None, ge=0)
-    qtd_mai: Optional[int] = Field(None, ge=0)
-    qtd_jun: Optional[int] = Field(None, ge=0)
-    qtd_jul: Optional[int] = Field(None, ge=0)
-    qtd_ago: Optional[int] = Field(None, ge=0)
-    qtd_set: Optional[int] = Field(None, ge=0)
-    qtd_out: Optional[int] = Field(None, ge=0)
-    qtd_nov: Optional[int] = Field(None, ge=0)
-    qtd_dez: Optional[int] = Field(None, ge=0)
+    qtd_jan: Optional[float] = Field(None, ge=0)
+    qtd_fev: Optional[float] = Field(None, ge=0)
+    qtd_mar: Optional[float] = Field(None, ge=0)
+    qtd_abr: Optional[float] = Field(None, ge=0)
+    qtd_mai: Optional[float] = Field(None, ge=0)
+    qtd_jun: Optional[float] = Field(None, ge=0)
+    qtd_jul: Optional[float] = Field(None, ge=0)
+    qtd_ago: Optional[float] = Field(None, ge=0)
+    qtd_set: Optional[float] = Field(None, ge=0)
+    qtd_out: Optional[float] = Field(None, ge=0)
+    qtd_nov: Optional[float] = Field(None, ge=0)
+    qtd_dez: Optional[float] = Field(None, ge=0)
     
     salario_override: Optional[float] = None
     span: Optional[int] = None
     fator_pa: Optional[float] = Field(None, ge=0)
+    
+    # Tipo de cálculo
+    tipo_calculo: Optional[str] = Field(None, pattern="^(manual|span|rateio)$")
+    
+    # Campos para SPAN
+    span_ratio: Optional[float] = Field(None, gt=0)
+    span_funcoes_base_ids: Optional[List[UUID]] = None
+    
+    # Campos para RATEIO
+    rateio_grupo_id: Optional[UUID] = None
+    rateio_percentual: Optional[float] = Field(None, ge=0, le=100)
+    rateio_qtd_total: Optional[int] = Field(None, ge=0)
+    
     observacao: Optional[str] = None
     ativo: Optional[bool] = None
 
@@ -880,10 +910,12 @@ class FuncaoSpanComRelacionamentos(FuncaoSpanResponse):
 
 class PremissaFuncaoMesBase(BaseModel):
     cenario_id: UUID
+    cenario_secao_id: Optional[UUID] = None
     funcao_id: UUID
     mes: int = Field(..., ge=1, le=12)
     ano: int = Field(..., ge=2020, le=2100)
-    absenteismo: float = Field(3.0, ge=0, le=100)
+    absenteismo: float = Field(3.0, ge=0, le=100, description="% absenteismo total")
+    abs_pct_justificado: float = Field(75.0, ge=0, le=100, description="% do ABS que e justificado")
     turnover: float = Field(5.0, ge=0, le=100)
     ferias_indice: float = Field(8.33, ge=0, le=100)
     dias_treinamento: int = Field(15, ge=0, le=180)
@@ -895,6 +927,7 @@ class PremissaFuncaoMesCreate(PremissaFuncaoMesBase):
 
 class PremissaFuncaoMesUpdate(BaseModel):
     absenteismo: Optional[float] = Field(None, ge=0, le=100)
+    abs_pct_justificado: Optional[float] = Field(None, ge=0, le=100)
     turnover: Optional[float] = Field(None, ge=0, le=100)
     ferias_indice: Optional[float] = Field(None, ge=0, le=100)
     dias_treinamento: Optional[int] = Field(None, ge=0, le=180)
@@ -917,4 +950,5 @@ class PremissaFuncaoMesComRelacionamentos(PremissaFuncaoMesResponse):
 DepartamentoComSecoes.model_rebuild()
 CenarioSecaoResponse.model_rebuild()
 CenarioClienteComSecoes.model_rebuild()
+CenarioEmpresaComClientes.model_rebuild()
 

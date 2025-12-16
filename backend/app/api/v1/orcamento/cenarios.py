@@ -22,7 +22,10 @@ from app.schemas.orcamento import (
     CenarioSecaoCreate, CenarioSecaoUpdate, CenarioSecaoResponse
 )
 from app.services.calculo_custos import calcular_custos_cenario, calcular_overhead_ineficiencia
-from app.services.capacity_planning import calcular_quantidades_span, aplicar_spans_ao_quadro
+from app.services.capacity_planning import (
+    calcular_quantidades_span, aplicar_spans_ao_quadro,
+    aplicar_calculo_span, recalcular_spans_afetados, recalcular_spans_afetados_sem_commit
+)
 
 router = APIRouter(prefix="/cenarios", tags=["Cenários"])
 
@@ -790,9 +793,22 @@ async def create_posicao(
     if cenario.status == "BLOQUEADO":
         raise HTTPException(status_code=400, detail="Cenário bloqueado não pode ser alterado")
     
-    posicao = QuadroPessoal(**data.model_dump())
+    # Preparar dados para inserção
+    data_dict = data.model_dump()
+    
+    # Converter span_funcoes_base_ids de List[UUID] para List[str] para o JSONB
+    if data_dict.get('span_funcoes_base_ids'):
+        data_dict['span_funcoes_base_ids'] = [str(uid) for uid in data_dict['span_funcoes_base_ids']]
+    
+    posicao = QuadroPessoal(**data_dict)
     posicao.cenario_id = cenario_id
     db.add(posicao)
+    await db.flush()  # Flush para obter o ID antes do cálculo
+    
+    # Se for tipo SPAN, calcular as quantidades automaticamente
+    if posicao.tipo_calculo == 'span':
+        await aplicar_calculo_span(db, posicao)
+    
     await db.commit()
     # Refresh sem carregar relacionamento cenario para evitar erro com campos novos
     await db.refresh(posicao, attribute_names=[col.name for col in QuadroPessoal.__table__.columns])
@@ -807,25 +823,50 @@ async def update_posicao(
     db: AsyncSession = Depends(get_db)
 ):
     """Atualiza uma posição do quadro de pessoal."""
-    result = await db.execute(
-        select(QuadroPessoal).options(noload(QuadroPessoal.cenario)).where(
-            QuadroPessoal.id == posicao_id,
-            QuadroPessoal.cenario_id == cenario_id
+    try:
+        result = await db.execute(
+            select(QuadroPessoal).options(noload(QuadroPessoal.cenario)).where(
+                QuadroPessoal.id == posicao_id,
+                QuadroPessoal.cenario_id == cenario_id
+            )
         )
-    )
-    posicao = result.scalar_one_or_none()
-    
-    if not posicao:
-        raise HTTPException(status_code=404, detail="Posição não encontrada")
-    
-    update_data = data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(posicao, key, value)
-    
-    await db.commit()
-    # Refresh sem carregar relacionamento cenario para evitar erro com campos novos
-    await db.refresh(posicao, attribute_names=[col.name for col in QuadroPessoal.__table__.columns])
-    return posicao
+        posicao = result.scalar_one_or_none()
+        
+        if not posicao:
+            raise HTTPException(status_code=404, detail="Posição não encontrada")
+        
+        update_data = data.model_dump(exclude_unset=True)
+        
+        # Converter span_funcoes_base_ids de List[UUID] para List[str] para o JSONB
+        if 'span_funcoes_base_ids' in update_data and update_data['span_funcoes_base_ids']:
+            update_data['span_funcoes_base_ids'] = [str(uid) for uid in update_data['span_funcoes_base_ids']]
+        
+        # Verificar se quantidades foram alteradas (para recalcular SPANs)
+        qtd_fields = [f'qtd_{m}' for m in ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']]
+        qtd_changed = any(field in update_data for field in qtd_fields)
+        funcao_id = posicao.funcao_id
+        cenario_secao_id = posicao.cenario_secao_id
+        
+        for key, value in update_data.items():
+            setattr(posicao, key, value)
+        
+        # Se quantidades foram alteradas e não é uma posição SPAN, recalcular SPANs afetados
+        # Fazer tudo numa única transação
+        if qtd_changed and posicao.tipo_calculo != 'span':
+            await recalcular_spans_afetados_sem_commit(db, cenario_id, funcao_id, cenario_secao_id)
+        
+        await db.commit()
+        
+        # Refresh sem carregar relacionamento cenario para evitar erro com campos novos
+        await db.refresh(posicao, attribute_names=[col.name for col in QuadroPessoal.__table__.columns])
+        return posicao
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro ao atualizar posição: {str(e)}")
 
 
 @router.delete("/{cenario_id}/quadro/{posicao_id}")
@@ -1064,6 +1105,7 @@ async def calcular_spans(
 async def list_premissas_funcao(
     cenario_id: UUID,
     funcao_id: Optional[UUID] = None,
+    cenario_secao_id: Optional[UUID] = None,
     mes: Optional[int] = None,
     ano: Optional[int] = None,
     db: AsyncSession = Depends(get_db)
@@ -1075,6 +1117,8 @@ async def list_premissas_funcao(
     
     if funcao_id:
         query = query.where(PremissaFuncaoMes.funcao_id == funcao_id)
+    if cenario_secao_id:
+        query = query.where(PremissaFuncaoMes.cenario_secao_id == cenario_secao_id)
     if mes:
         query = query.where(PremissaFuncaoMes.mes == mes)
     if ano:
@@ -1105,20 +1149,24 @@ async def create_premissa_funcao(
     if not funcao_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Função não encontrada")
     
-    # Verificar se já existe (upsert)
-    existing = await db.execute(
-        select(PremissaFuncaoMes).where(
-            PremissaFuncaoMes.cenario_id == cenario_id,
-            PremissaFuncaoMes.funcao_id == data.funcao_id,
-            PremissaFuncaoMes.mes == data.mes,
-            PremissaFuncaoMes.ano == data.ano
-        )
+    # Verificar se já existe (upsert) - incluindo cenario_secao_id na verificação
+    query = select(PremissaFuncaoMes).where(
+        PremissaFuncaoMes.cenario_id == cenario_id,
+        PremissaFuncaoMes.funcao_id == data.funcao_id,
+        PremissaFuncaoMes.mes == data.mes,
+        PremissaFuncaoMes.ano == data.ano
     )
+    if data.cenario_secao_id:
+        query = query.where(PremissaFuncaoMes.cenario_secao_id == data.cenario_secao_id)
+    else:
+        query = query.where(PremissaFuncaoMes.cenario_secao_id.is_(None))
+    
+    existing = await db.execute(query)
     premissa = existing.scalar_one_or_none()
     
     if premissa:
         # Atualizar existente
-        update_data = data.model_dump(exclude={'cenario_id', 'funcao_id', 'mes', 'ano'})
+        update_data = data.model_dump(exclude={'cenario_id', 'funcao_id', 'mes', 'ano', 'cenario_secao_id'})
         for key, value in update_data.items():
             setattr(premissa, key, value)
     else:
@@ -1180,20 +1228,24 @@ async def bulk_premissas_funcao(
         if not funcao_result.scalar_one_or_none():
             continue  # Pular se função não existe
         
-        # Verificar se já existe
-        existing = await db.execute(
-            select(PremissaFuncaoMes).where(
-                PremissaFuncaoMes.cenario_id == cenario_id,
-                PremissaFuncaoMes.funcao_id == data.funcao_id,
-                PremissaFuncaoMes.mes == data.mes,
-                PremissaFuncaoMes.ano == data.ano
-            )
+        # Verificar se já existe (incluindo cenario_secao_id)
+        query = select(PremissaFuncaoMes).where(
+            PremissaFuncaoMes.cenario_id == cenario_id,
+            PremissaFuncaoMes.funcao_id == data.funcao_id,
+            PremissaFuncaoMes.mes == data.mes,
+            PremissaFuncaoMes.ano == data.ano
         )
+        if data.cenario_secao_id:
+            query = query.where(PremissaFuncaoMes.cenario_secao_id == data.cenario_secao_id)
+        else:
+            query = query.where(PremissaFuncaoMes.cenario_secao_id.is_(None))
+        
+        existing = await db.execute(query)
         premissa = existing.scalar_one_or_none()
         
         if premissa:
             # Atualizar
-            update_data = data.model_dump(exclude={'cenario_id', 'funcao_id', 'mes', 'ano'})
+            update_data = data.model_dump(exclude={'cenario_id', 'funcao_id', 'mes', 'ano', 'cenario_secao_id'})
             for key, value in update_data.items():
                 setattr(premissa, key, value)
         else:

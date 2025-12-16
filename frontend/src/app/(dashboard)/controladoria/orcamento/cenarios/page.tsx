@@ -37,12 +37,14 @@ import {
   ChevronDown,
   Calendar,
   Loader2,
-  FileX
+  FileX,
+  User
 } from "lucide-react";
 import { MasterDetailTree } from "@/components/orcamento/MasterDetailTree";
 import { CapacityPlanningPanel } from "@/components/orcamento/CapacityPlanningPanel";
-import { FuncoesQuantidadesTab } from "@/components/orcamento/FuncoesQuantidadesTab";
 import { PremissasFuncaoMesGrid } from "@/components/orcamento/PremissasFuncaoMesGrid";
+import { PremissasTree, type SelectedNodePremissas } from "@/components/orcamento/PremissasTree";
+import { PremissasFuncaoGridPanel } from "@/components/orcamento/PremissasFuncaoGridPanel";
 import type { CenarioEmpresa, CenarioCliente, CenarioSecao } from "@/lib/api/orcamento";
 import { useAuthStore } from "@/stores/auth-store";
 import { 
@@ -80,7 +82,7 @@ export default function CenariosPage() {
   const [tabelaSalarial, setTabelaSalarial] = useState<TabelaSalarial[]>([]);
   
   // Abas
-  const [abaAtiva, setAbaAtiva] = useState<'estrutura' | 'funcoes' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custos'>('estrutura');
+  const [abaAtiva, setAbaAtiva] = useState<'estrutura' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custos'>('estrutura');
   const [custos, setCustos] = useState<ResumoCustos | null>(null);
   const [loadingCustos, setLoadingCustos] = useState(false);
   
@@ -91,6 +93,12 @@ export default function CenariosPage() {
     cliente?: CenarioCliente;
     secao?: CenarioSecao;
   } | null>(null);
+  
+  // Estado para seleção na árvore de Premissas (inclui funções)
+  const [selectedNodePremissas, setSelectedNodePremissas] = useState<SelectedNodePremissas | null>(null);
+  
+  // Estado para todas as seções do cenário (para rateio)
+  const [todasSecoescentario, setTodasSecoesCenario] = useState<CenarioSecao[]>([]);
   
   // Modal Cenário
   const [showFormCenario, setShowFormCenario] = useState(false);
@@ -115,12 +123,20 @@ export default function CenariosPage() {
     secao_id: "" as string | null,
     centro_custo_id: "" as string | null,
     tabela_salarial_id: "" as string | null,
+    cenario_secao_id: null as string | null,
     regime: "CLT" as 'CLT' | 'PJ',
     qtd_jan: 0, qtd_fev: 0, qtd_mar: 0, qtd_abr: 0,
     qtd_mai: 0, qtd_jun: 0, qtd_jul: 0, qtd_ago: 0,
     qtd_set: 0, qtd_out: 0, qtd_nov: 0, qtd_dez: 0,
     salario_override: null as number | null,
     span: null as number | null,
+    fator_pa: 1,
+    tipo_calculo: "manual" as 'manual' | 'span' | 'rateio',
+    span_ratio: null as number | null,
+    span_funcoes_base_ids: null as string[] | null,
+    rateio_grupo_id: null as string | null,
+    rateio_percentual: null as number | null,
+    rateio_qtd_total: null as number | null,
     observacao: "",
     ativo: true,
   });
@@ -416,23 +432,12 @@ export default function CenariosPage() {
               }`}
             >
               <Settings className="h-4 w-4" />
-              Estrutura
+              Capacity
             </button>
             <button
-              onClick={() => setAbaAtiva('funcoes')}
+              onClick={() => setAbaAtiva('premissas')}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                abaAtiva === 'funcoes'
-                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Users className="h-4 w-4" />
-              Funções
-            </button>
-            <button
-              onClick={() => setAbaAtiva('premissas-funcao')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                abaAtiva === 'premissas-funcao'
+                abaAtiva === 'premissas'
                   ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
@@ -483,6 +488,7 @@ export default function CenariosPage() {
                   <MasterDetailTree
                     cenarioId={cenarioSelecionado.id}
                     onNodeSelect={setSelectedNode}
+                    onSecoesLoaded={setTodasSecoesCenario}
                     selectedSecaoId={selectedNode?.secao?.id}
                   />
                 </div>
@@ -495,6 +501,14 @@ export default function CenariosPage() {
                       empresa={selectedNode.empresa}
                       cliente={selectedNode.cliente!}
                       secao={selectedNode.secao}
+                      todasSecoes={todasSecoescentario}
+                      premissas={premissas.length > 0 ? {
+                        absenteismo: premissas[0].absenteismo,
+                        abs_pct_justificado: premissas[0].abs_pct_justificado || 75,
+                        turnover: premissas[0].turnover,
+                        ferias_indice: premissas[0].ferias_indice,
+                        dias_treinamento: premissas[0].dias_treinamento,
+                      } : undefined}
                       anoInicio={cenarioSelecionado.ano_inicio}
                       mesInicio={cenarioSelecionado.mes_inicio}
                       anoFim={cenarioSelecionado.ano_fim}
@@ -511,13 +525,6 @@ export default function CenariosPage() {
                   )}
                 </div>
               </div>
-            ) : abaAtiva === 'funcoes' ? (
-              <FuncoesQuantidadesTab
-                cenarioId={cenarioSelecionado.id}
-                funcoes={funcoes}
-                quadro={quadro}
-                onQuadroChange={() => carregarDetalhes(cenarioSelecionado.id)}
-              />
             ) : abaAtiva === 'premissas-funcao' ? (
               <PremissasFuncaoMesGrid
                 cenarioId={cenarioSelecionado.id}
@@ -528,89 +535,44 @@ export default function CenariosPage() {
                 mesFim={cenarioSelecionado.mes_fim}
               />
             ) : abaAtiva === 'premissas' ? (
-              <div className="p-6 h-full overflow-auto">
-                <div className="mb-4">
-                  <h2 className="section-title">Premissas e Índices</h2>
-                  <p className="page-subtitle">Defina os índices de ineficiência e premissas do cenário</p>
+              <div className="h-full flex">
+                {/* Painel Esquerdo: Árvore de navegação com Funções */}
+                <div className="w-72 border-r bg-muted/5 flex flex-col">
+                  <div className="p-3 border-b bg-muted/10">
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Estrutura / Funções</h3>
+                  </div>
+                  <PremissasTree
+                    cenarioId={cenarioSelecionado.id}
+                    onNodeSelect={setSelectedNodePremissas}
+                  />
                 </div>
                 
-                {premissas.length === 0 ? (
-                  <div className="empty-state">
-                    <Settings className="empty-state-icon" />
-                    <p className="empty-state-title">Nenhuma premissa configurada</p>
-                    <p className="empty-state-description">As premissas são criadas automaticamente ao criar o cenário</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                    {premissas.map((premissa) => (
-                      <Card key={premissa.id} className="shadow-sm">
-                        <CardContent className="p-4 space-y-4">
-                          <div className="form-field">
-                            <label className="filter-label">Absenteísmo (%)</label>
-                            <Input
-                              type="number"
-                              step="0.1"
-                              value={premissa.absenteismo}
-                              onChange={(e) => handleUpdatePremissa(premissa.id, 'absenteismo', parseFloat(e.target.value) || 0)}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                          <div className="form-field">
-                            <label className="filter-label">Turnover (%)</label>
-                            <Input
-                              type="number"
-                              step="0.1"
-                              value={premissa.turnover}
-                              onChange={(e) => handleUpdatePremissa(premissa.id, 'turnover', parseFloat(e.target.value) || 0)}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                          <div className="form-field">
-                            <label className="filter-label">Férias Índice (%)</label>
-                            <Input
-                              type="number"
-                              step="0.01"
-                              value={premissa.ferias_indice}
-                              onChange={(e) => handleUpdatePremissa(premissa.id, 'ferias_indice', parseFloat(e.target.value) || 0)}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                          <div className="form-field">
-                            <label className="filter-label">Dias Treinamento</label>
-                            <Input
-                              type="number"
-                              value={premissa.dias_treinamento}
-                              onChange={(e) => handleUpdatePremissa(premissa.id, 'dias_treinamento', parseInt(e.target.value) || 0)}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                          <div className="form-field">
-                            <label className="filter-label">Reajuste (%)</label>
-                            <Input
-                              type="number"
-                              step="0.1"
-                              value={premissa.reajuste_percentual}
-                              onChange={(e) => handleUpdatePremissa(premissa.id, 'reajuste_percentual', parseFloat(e.target.value) || 0)}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                          <div className="form-field">
-                            <label className="filter-label">Dissídio Mês</label>
-                            <Input
-                              type="number"
-                              min="1"
-                              max="12"
-                              value={premissa.dissidio_mes || ""}
-                              onChange={(e) => handleUpdatePremissa(premissa.id, 'dissidio_mes', parseInt(e.target.value) || 0)}
-                              className="h-8 text-sm"
-                              placeholder="1-12"
-                            />
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                )}
+                {/* Painel Direito: Editor de Premissas por Função */}
+                <div className="flex-1 overflow-auto">
+                  {selectedNodePremissas?.type === 'funcao' && selectedNodePremissas.funcao && selectedNodePremissas.quadroItem ? (
+                    <PremissasFuncaoGridPanel
+                      cenarioId={cenarioSelecionado.id}
+                      empresa={selectedNodePremissas.empresa}
+                      cliente={selectedNodePremissas.cliente!}
+                      secao={selectedNodePremissas.secao!}
+                      funcao={selectedNodePremissas.funcao}
+                      quadroItem={selectedNodePremissas.quadroItem}
+                      premissaGeral={premissas.length > 0 ? premissas[0] : undefined}
+                      anoInicio={cenarioSelecionado.ano_inicio}
+                      mesInicio={cenarioSelecionado.mes_inicio}
+                      anoFim={cenarioSelecionado.ano_fim}
+                      mesFim={cenarioSelecionado.mes_fim}
+                    />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
+                      <User className="h-12 w-12 mb-4 opacity-30" />
+                      <h3 className="text-lg font-medium mb-2">Selecione uma função</h3>
+                      <p className="text-sm max-w-md text-center">
+                        Navegue pela estrutura à esquerda, expanda uma seção e clique em uma <strong>função</strong> para configurar as premissas por mês
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : abaAtiva === 'quadro' ? (
               <div className="h-full flex flex-col">
@@ -627,12 +589,20 @@ export default function CenariosPage() {
                       secao_id: null,
                       centro_custo_id: null,
                       tabela_salarial_id: null,
+                      cenario_secao_id: null,
                       regime: "CLT",
                       qtd_jan: 0, qtd_fev: 0, qtd_mar: 0, qtd_abr: 0,
                       qtd_mai: 0, qtd_jun: 0, qtd_jul: 0, qtd_ago: 0,
                       qtd_set: 0, qtd_out: 0, qtd_nov: 0, qtd_dez: 0,
                       salario_override: null,
                       span: null,
+                      fator_pa: 1,
+                      tipo_calculo: "manual",
+                      span_ratio: null,
+                      span_funcoes_base_ids: null,
+                      rateio_grupo_id: null,
+                      rateio_percentual: null,
+                      rateio_qtd_total: null,
                       observacao: "",
                       ativo: true,
                     });
@@ -711,6 +681,7 @@ export default function CenariosPage() {
                                     secao_id: posicao.secao_id,
                                     centro_custo_id: posicao.centro_custo_id,
                                     tabela_salarial_id: posicao.tabela_salarial_id,
+                                    cenario_secao_id: posicao.cenario_secao_id,
                                     regime: posicao.regime,
                                     qtd_jan: posicao.qtd_jan,
                                     qtd_fev: posicao.qtd_fev,
@@ -726,6 +697,13 @@ export default function CenariosPage() {
                                     qtd_dez: posicao.qtd_dez,
                                     salario_override: posicao.salario_override,
                                     span: posicao.span,
+                                    fator_pa: posicao.fator_pa,
+                                    tipo_calculo: posicao.tipo_calculo,
+                                    span_ratio: posicao.span_ratio,
+                                    span_funcoes_base_ids: posicao.span_funcoes_base_ids,
+                                    rateio_grupo_id: posicao.rateio_grupo_id,
+                                    rateio_percentual: posicao.rateio_percentual,
+                                    rateio_qtd_total: posicao.rateio_qtd_total,
                                     observacao: posicao.observacao || "",
                                     ativo: posicao.ativo,
                                   });

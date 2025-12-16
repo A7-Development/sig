@@ -64,8 +64,18 @@ interface SelectedNode {
 interface MasterDetailTreeProps {
   cenarioId: string;
   onNodeSelect?: (node: SelectedNode | null) => void;
+  onSecoesLoaded?: (secoes: CenarioSecao[]) => void;  // Callback com todas as seções
   selectedSecaoId?: string | null;
 }
+
+// ============================================
+// Helpers
+// ============================================
+
+const truncateText = (text: string | undefined | null, maxLength: number = 15): string => {
+  if (!text) return "";
+  return text.length > maxLength ? text.substring(0, maxLength) + "…" : text;
+};
 
 // ============================================
 // Componente Principal
@@ -74,6 +84,7 @@ interface MasterDetailTreeProps {
 export function MasterDetailTree({ 
   cenarioId, 
   onNodeSelect,
+  onSecoesLoaded,
   selectedSecaoId 
 }: MasterDetailTreeProps) {
   const { accessToken: token } = useAuthStore();
@@ -102,7 +113,7 @@ export function MasterDetailTree({
   const [clienteSelecionado, setClienteSelecionado] = useState<CenarioCliente | null>(null);
   const [selectedEmpresaId, setSelectedEmpresaId] = useState<string>("");
   const [selectedClienteNW, setSelectedClienteNW] = useState<string>("");
-  const [selectedSecaoId, setSelectedSecaoId] = useState<string>("");
+  const [selectedSecaoIdModal, setSelectedSecaoIdModal] = useState<string>("");
   
   // Busca
   const [buscaCliente, setBuscaCliente] = useState("");
@@ -124,12 +135,27 @@ export function MasterDetailTree({
       setEmpresas(data);
       // Expandir todas as empresas por padrão
       setExpandedEmpresas(new Set(data.map(e => e.id)));
+      
+      // Coletar todas as seções e notificar o pai
+      if (onSecoesLoaded) {
+        const todasSecoes: CenarioSecao[] = [];
+        data.forEach(empresa => {
+          empresa.clientes?.forEach(cliente => {
+            cliente.secoes?.forEach(secao => {
+              if (secao.ativo) {
+                todasSecoes.push(secao);
+              }
+            });
+          });
+        });
+        onSecoesLoaded(todasSecoes);
+      }
     } catch (err: any) {
       setError(err.message || "Erro ao carregar estrutura");
     } finally {
       setLoading(false);
     }
-  }, [token, cenarioId]);
+  }, [token, cenarioId, onSecoesLoaded]);
 
   useEffect(() => {
     carregarEstrutura();
@@ -257,13 +283,13 @@ export function MasterDetailTree({
 
   const handleAddCliente = async () => {
     if (!token || !empresaSelecionada || !selectedClienteNW) return;
-    const clienteNW = clientesNW.find(c => c.cod_clifor === selectedClienteNW);
+    const clienteNW = clientesNW.find(c => c.codigo === selectedClienteNW);
     if (!clienteNW) return;
     
     setSaving(true);
     try {
       await cenariosApi.addCliente(token, cenarioId, empresaSelecionada.id, {
-        cliente_nw_codigo: clienteNW.cod_clifor,
+        cliente_nw_codigo: clienteNW.codigo,
         nome_cliente: clienteNW.razao_social || clienteNW.nome_fantasia
       });
       await carregarEstrutura();
@@ -295,17 +321,17 @@ export function MasterDetailTree({
   const openAddSecao = (empresa: CenarioEmpresa, cliente: CenarioCliente) => {
     setEmpresaSelecionada(empresa);
     setClienteSelecionado(cliente);
-    setSelectedSecaoId("");
+    setSelectedSecaoIdModal("");
     setShowAddSecao(true);
   };
 
   const handleAddSecao = async () => {
-    if (!token || !empresaSelecionada || !clienteSelecionado || !selectedSecaoId) return;
+    if (!token || !empresaSelecionada || !clienteSelecionado || !selectedSecaoIdModal) return;
     
     setSaving(true);
     try {
       await cenariosApi.addSecao(token, cenarioId, empresaSelecionada.id, clienteSelecionado.id, {
-        secao_id: selectedSecaoId
+        secao_id: selectedSecaoIdModal
       });
       await carregarEstrutura();
       // Expandir cliente para mostrar nova seção
@@ -419,7 +445,7 @@ export function MasterDetailTree({
                     {/* Empresa */}
                     <div 
                       className={cn(
-                        "flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer group",
+                        "flex items-center gap-1 px-1.5 py-1 rounded-md cursor-pointer group",
                         "hover:bg-orange-50 hover:text-orange-700",
                         "transition-colors"
                       )}
@@ -429,22 +455,26 @@ export function MasterDetailTree({
                         className="p-0.5 hover:bg-orange-100 rounded"
                       >
                         {isExpanded ? (
-                          <ChevronDown className="h-4 w-4" />
+                          <ChevronDown className="h-3 w-3" />
                         ) : (
-                          <ChevronRight className="h-4 w-4" />
+                          <ChevronRight className="h-3 w-3" />
                         )}
                       </button>
-                      <Building2 className="h-4 w-4 text-orange-600" />
-                      <span className="flex-1 text-sm font-medium truncate">
-                        {empresa.empresa?.nome_fantasia || empresa.empresa?.razao_social || "Empresa"}
+                      <Building2 className="h-3 w-3 text-orange-600" />
+                      <span 
+                        className="flex-1 text-xs font-medium"
+                        title={empresa.empresa?.nome_fantasia || empresa.empresa?.razao_social || "Empresa"}
+                      >
+                        {truncateText(empresa.empresa?.nome_fantasia || empresa.empresa?.razao_social || "Empresa")}
                       </span>
-                      <Badge variant="secondary" className="text-[10px] h-5">
-                        {totais.totalClientes}C / {totais.totalSecoes}S
+                      <Badge variant="secondary" className="text-[9px] h-4 px-1">
+                        {totais.totalClientes}C/{totais.totalSecoes}S
                       </Badge>
-                      <div className="hidden group-hover:flex items-center gap-1">
+                      <div className="flex items-center gap-0.5">
                         <Button 
                           size="icon-xs" 
                           variant="ghost"
+                          className="h-5 w-5 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                           onClick={(e) => {
                             e.stopPropagation();
                             openAddCliente(empresa);
@@ -456,7 +486,7 @@ export function MasterDetailTree({
                         <Button 
                           size="icon-xs" 
                           variant="ghost"
-                          className="text-red-500 hover:text-red-600"
+                          className="h-5 w-5 text-red-500 hover:text-red-600 hover:bg-red-50"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleDeleteEmpresa(empresa);
@@ -470,7 +500,7 @@ export function MasterDetailTree({
 
                     {/* Clientes da Empresa */}
                     {isExpanded && (
-                      <div className="ml-6 border-l border-muted pl-2 mt-1 space-y-1">
+                      <div className="ml-4 border-l border-muted pl-1 mt-0.5 space-y-0.5">
                         {clientes.length === 0 ? (
                           <div className="text-xs text-muted-foreground py-2 px-2 italic">
                             Nenhum cliente associado
@@ -486,7 +516,7 @@ export function MasterDetailTree({
                                 {/* Cliente */}
                                 <div 
                                   className={cn(
-                                    "flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer group",
+                                    "flex items-center gap-1 px-1.5 py-1 rounded-md cursor-pointer group",
                                     "hover:bg-blue-50 hover:text-blue-700",
                                     "transition-colors"
                                   )}
@@ -497,25 +527,29 @@ export function MasterDetailTree({
                                   >
                                     {secoes.length > 0 ? (
                                       isClienteExpanded ? (
-                                        <ChevronDown className="h-4 w-4" />
+                                        <ChevronDown className="h-3 w-3" />
                                       ) : (
-                                        <ChevronRight className="h-4 w-4" />
+                                        <ChevronRight className="h-3 w-3" />
                                       )
                                     ) : (
-                                      <div className="w-4" />
+                                      <div className="w-3" />
                                     )}
                                   </button>
-                                  <Users className="h-4 w-4 text-blue-600" />
-                                  <span className="flex-1 text-sm truncate">
-                                    {cliente.nome_cliente || cliente.cliente_nw_codigo}
+                                  <Users className="h-3 w-3 text-blue-600" />
+                                  <span 
+                                    className="flex-1 text-xs"
+                                    title={cliente.nome_cliente || cliente.cliente_nw_codigo}
+                                  >
+                                    {truncateText(cliente.nome_cliente || cliente.cliente_nw_codigo)}
                                   </span>
-                                  <Badge variant="outline" className="text-[10px] h-5">
-                                    {totalSecoes} seções
+                                  <Badge variant="outline" className="text-[9px] h-4 px-1">
+                                    {totalSecoes}S
                                   </Badge>
-                                  <div className="hidden group-hover:flex items-center gap-1">
+                                  <div className="flex items-center gap-0.5">
                                     <Button 
                                       size="icon-xs" 
                                       variant="ghost"
+                                      className="h-5 w-5 text-green-600 hover:text-green-700 hover:bg-green-50"
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         openAddSecao(empresa, cliente);
@@ -527,7 +561,7 @@ export function MasterDetailTree({
                                     <Button 
                                       size="icon-xs" 
                                       variant="ghost"
-                                      className="text-red-500 hover:text-red-600"
+                                      className="h-5 w-5 text-red-500 hover:text-red-600 hover:bg-red-50"
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         handleDeleteCliente(empresa, cliente);
@@ -539,14 +573,24 @@ export function MasterDetailTree({
                                   </div>
                                 </div>
 
+                                {/* Indicação para adicionar seção quando não há nenhuma */}
+                                {secoes.length === 0 && (
+                                  <div 
+                                    className="ml-10 py-2 px-3 text-xs text-muted-foreground italic cursor-pointer hover:text-green-600 hover:bg-green-50/50 rounded transition-colors"
+                                    onClick={() => openAddSecao(empresa, cliente)}
+                                  >
+                                    + Clique aqui para adicionar uma seção
+                                  </div>
+                                )}
+
                                 {/* Seções do Cliente */}
                                 {isClienteExpanded && secoes.length > 0 && (
-                                  <div className="ml-6 border-l border-muted pl-2 mt-1 space-y-1">
+                                  <div className="ml-4 border-l border-muted pl-1 mt-0.5 space-y-0.5">
                                     {secoes.map(secao => (
                                       <div 
                                         key={secao.id}
                                         className={cn(
-                                          "flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer group",
+                                          "flex items-center gap-1 px-1.5 py-1 rounded-md cursor-pointer group",
                                           "hover:bg-green-50 hover:text-green-700",
                                           selectedSecaoId === secao.id && "bg-green-100 text-green-800",
                                           "transition-colors"
@@ -558,28 +602,29 @@ export function MasterDetailTree({
                                           secao
                                         })}
                                       >
-                                        <div className="w-4" />
-                                        <FolderTree className="h-4 w-4 text-green-600" />
-                                        <span className="flex-1 text-sm truncate">
-                                          {secao.secao?.nome || "Seção"}
+                                        <div className="w-3" />
+                                        <FolderTree className="h-3 w-3 text-green-600" />
+                                        <span 
+                                          className="flex-1 text-xs"
+                                          title={secao.secao?.nome || "Seção"}
+                                        >
+                                          {truncateText(secao.secao?.nome || "Seção")}
                                         </span>
-                                        <Badge variant="outline" className="text-[10px] h-5 font-mono">
+                                        <Badge variant="outline" className="text-[9px] h-4 px-1 font-mono">
                                           {secao.secao?.codigo}
                                         </Badge>
-                                        <div className="hidden group-hover:flex items-center gap-1">
-                                          <Button 
-                                            size="icon-xs" 
-                                            variant="ghost"
-                                            className="text-red-500 hover:text-red-600"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleDeleteSecao(empresa, cliente, secao);
-                                            }}
-                                            title="Remover Seção"
-                                          >
-                                            <Trash2 className="h-3 w-3" />
-                                          </Button>
-                                        </div>
+                                        <Button 
+                                          size="icon-xs" 
+                                          variant="ghost"
+                                          className="h-5 w-5 text-red-500 hover:text-red-600"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDeleteSecao(empresa, cliente, secao);
+                                          }}
+                                          title="Remover Seção"
+                                        >
+                                          <Trash2 className="h-2.5 w-2.5" />
+                                        </Button>
                                       </div>
                                     ))}
                                   </div>
@@ -666,8 +711,8 @@ export function MasterDetailTree({
                 </SelectTrigger>
                 <SelectContent>
                   {clientesNW.map(cli => (
-                    <SelectItem key={cli.cod_clifor} value={cli.cod_clifor}>
-                      {cli.razao_social || cli.nome_fantasia} ({cli.cod_clifor})
+                    <SelectItem key={cli.codigo} value={cli.codigo}>
+                      {cli.razao_social || cli.nome_fantasia} ({cli.codigo})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -702,7 +747,7 @@ export function MasterDetailTree({
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
-            <Select value={selectedSecaoId} onValueChange={setSelectedSecaoId}>
+            <Select value={selectedSecaoIdModal} onValueChange={setSelectedSecaoIdModal}>
               <SelectTrigger>
                 <SelectValue placeholder="Selecione uma seção..." />
               </SelectTrigger>
@@ -721,7 +766,7 @@ export function MasterDetailTree({
             <Button variant="outline" onClick={() => setShowAddSecao(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleAddSecao} disabled={!selectedSecaoId || saving}>
+            <Button onClick={handleAddSecao} disabled={!selectedSecaoIdModal || saving}>
               {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Adicionar
             </Button>
@@ -731,4 +776,5 @@ export function MasterDetailTree({
     </div>
   );
 }
+
 

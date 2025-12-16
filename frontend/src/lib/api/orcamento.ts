@@ -646,6 +646,7 @@ export interface Premissa {
   id: string;
   cenario_id: string;
   absenteismo: number;
+  abs_pct_justificado: number;  // % do ABS que e justificado
   turnover: number;
   ferias_indice: number;
   dias_treinamento: number;
@@ -664,6 +665,7 @@ export interface QuadroPessoal {
   secao_id: string | null;
   centro_custo_id: string | null;
   tabela_salarial_id: string | null;
+  cenario_secao_id: string | null;  // Referência para CenarioSecao (estrutura hierárquica)
   regime: 'CLT' | 'PJ';
   qtd_jan: number;
   qtd_fev: number;
@@ -679,6 +681,20 @@ export interface QuadroPessoal {
   qtd_dez: number;
   salario_override: number | null;
   span: number | null;
+  fator_pa: number;
+  
+  // Tipo de cálculo: manual, span, rateio
+  tipo_calculo: 'manual' | 'span' | 'rateio';
+  
+  // Campos para SPAN
+  span_ratio: number | null;
+  span_funcoes_base_ids: string[] | null;
+  
+  // Campos para RATEIO
+  rateio_grupo_id: string | null;
+  rateio_percentual: number | null;
+  rateio_qtd_total: number | null;
+  
   observacao: string | null;
   ativo: boolean;
   created_at: string;
@@ -759,10 +775,12 @@ export interface FuncaoSpanCreate {
 export interface PremissaFuncaoMes {
   id: string;
   cenario_id: string;
+  cenario_secao_id?: string | null;
   funcao_id: string;
   mes: number;
   ano: number;
   absenteismo: number;
+  abs_pct_justificado: number;  // % do ABS que e justificado
   turnover: number;
   ferias_indice: number;
   dias_treinamento: number;
@@ -773,10 +791,12 @@ export interface PremissaFuncaoMes {
 
 export interface PremissaFuncaoMesCreate {
   cenario_id: string;
+  cenario_secao_id?: string | null;
   funcao_id: string;
   mes: number;
   ano: number;
   absenteismo: number;
+  abs_pct_justificado: number;
   turnover: number;
   ferias_indice: number;
   dias_treinamento: number;
@@ -830,10 +850,22 @@ export const cenariosApi = {
   addPosicao: (token: string, cenarioId: string, data: Omit<QuadroPessoal, 'id' | 'created_at' | 'updated_at' | 'funcao' | 'secao' | 'centro_custo'>) =>
     api.post<QuadroPessoal>(`/api/v1/orcamento/cenarios/${cenarioId}/quadro`, data, token),
   
+  // Alias para addPosicao (usado no CapacityPlanningPanel)
+  addQuadro: (token: string, cenarioId: string, data: Omit<QuadroPessoal, 'id' | 'created_at' | 'updated_at' | 'funcao' | 'secao' | 'centro_custo'>) =>
+    api.post<QuadroPessoal>(`/api/v1/orcamento/cenarios/${cenarioId}/quadro`, data, token),
+  
   updatePosicao: (token: string, cenarioId: string, posicaoId: string, data: Partial<QuadroPessoal>) =>
     api.put<QuadroPessoal>(`/api/v1/orcamento/cenarios/${cenarioId}/quadro/${posicaoId}`, data, token),
   
+  // Alias para updatePosicao
+  updateQuadro: (token: string, cenarioId: string, posicaoId: string, data: Partial<QuadroPessoal>) =>
+    api.put<QuadroPessoal>(`/api/v1/orcamento/cenarios/${cenarioId}/quadro/${posicaoId}`, data, token),
+  
   deletePosicao: (token: string, cenarioId: string, posicaoId: string) =>
+    api.delete(`/api/v1/orcamento/cenarios/${cenarioId}/quadro/${posicaoId}`, token),
+  
+  // Alias para deletePosicao
+  deleteQuadro: (token: string, cenarioId: string, posicaoId: string) =>
     api.delete(`/api/v1/orcamento/cenarios/${cenarioId}/quadro/${posicaoId}`, token),
   
   // Cálculos

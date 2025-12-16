@@ -98,3 +98,5 @@ WHERE fator_pa IS NULL OR fator_pa = 1.0;
 
 COMMIT;
 
+
+
