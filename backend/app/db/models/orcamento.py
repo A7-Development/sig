@@ -307,18 +307,24 @@ class TabelaSalarial(Base):
 # CENÃRIOS DE ORÃ‡AMENTO
 # ============================================
 
-# Tabela de associaÃ§Ã£o para mÃºltiplas empresas por cenÃ¡rio
+# Tabela de associação para múltiplas empresas por cenário
 class CenarioEmpresa(Base):
-    """AssociaÃ§Ã£o many-to-many entre CenÃ¡rios e Empresas."""
+    """Associação entre Cenários e Empresas. Cada empresa do cenário pode ter múltiplos clientes."""
     __tablename__ = "cenarios_empresas"
     
-    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), primary_key=True)
-    empresa_id = Column(UUID(as_uuid=True), ForeignKey("empresas.id", ondelete="CASCADE"), primary_key=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    empresa_id = Column(UUID(as_uuid=True), ForeignKey("empresas.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
     cenario = relationship("Cenario", back_populates="empresas_rel")
     empresa = relationship("Empresa", back_populates="cenarios_rel")
+    clientes = relationship("CenarioCliente", back_populates="cenario_empresa", lazy="selectin", cascade="all, delete-orphan")
+    
+    __table_args__ = (
+        UniqueConstraint('cenario_id', 'empresa_id', name='uq_cenario_empresa'),
+    )
 
 
 class Cenario(Base):
@@ -352,7 +358,7 @@ class Cenario(Base):
     
     # Relationships
     empresas_rel = relationship("CenarioEmpresa", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
-    clientes = relationship("CenarioCliente", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
+    # Nota: clientes agora são acessados via empresas_rel -> clientes (hierarquia Empresa > Cliente > Seção)
     premissas = relationship("Premissa", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
     posicoes = relationship("QuadroPessoal", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
     spans = relationship("FuncaoSpan", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
@@ -435,10 +441,13 @@ class QuadroPessoal(Base):
     # Override de salÃ¡rio (se diferente da tabela salarial)
     salario_override = Column(Numeric(12, 2), nullable=True)
     
-    # Span de supervisÃ£o (para cargos de gestÃ£o)
+    # Span de supervisão (para cargos de gestão)
     span = Column(Integer, nullable=True)  # Quantidade de subordinados
     
-    # ObservaÃ§Ãµes
+    # Fator PA - para cálculo de Posições de Atendimento (HC / fator = PAs)
+    fator_pa = Column(Numeric(5, 2), default=1.0)
+    
+    # Observações
     observacao = Column(Text, nullable=True)
     
     # Controle
@@ -491,40 +500,39 @@ class FuncaoSpan(Base):
 
 
 class CenarioCliente(Base):
-    """Cliente associado a um cenÃ¡rio de orÃ§amento."""
+    """Cliente associado a uma empresa dentro de um cenário de orçamento."""
     __tablename__ = "cenario_cliente"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    cenario_empresa_id = Column(UUID(as_uuid=True), ForeignKey("cenarios_empresas.id", ondelete="CASCADE"), nullable=False, index=True)
     cliente_nw_codigo = Column(String(50), nullable=False, index=True)
-    nome_cliente = Column(String(255), nullable=True)  # Cache do nome para exibiÃ§Ã£o
+    nome_cliente = Column(String(255), nullable=True)  # Cache do nome para exibição
     
     ativo = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    cenario = relationship("Cenario", back_populates="clientes", lazy="selectin")
+    cenario_empresa = relationship("CenarioEmpresa", back_populates="clientes", lazy="selectin")
     secoes = relationship("CenarioSecao", back_populates="cenario_cliente", lazy="selectin", cascade="all, delete-orphan")
     
     __table_args__ = (
-        UniqueConstraint('cenario_id', 'cliente_nw_codigo', name='uq_cenario_cliente'),
+        UniqueConstraint('cenario_empresa_id', 'cliente_nw_codigo', name='uq_cenario_empresa_cliente'),
     )
     
     def __repr__(self):
-        return f"<CenarioCliente {self.cliente_nw_codigo} cenario={self.cenario_id}>"
+        return f"<CenarioCliente {self.cliente_nw_codigo} empresa={self.cenario_empresa_id}>"
 
 
 class CenarioSecao(Base):
-    """SeÃ§Ã£o (operaÃ§Ã£o) de um cliente dentro de um cenÃ¡rio."""
+    """Seção (operação) de um cliente dentro de um cenário."""
     __tablename__ = "cenario_secao"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     cenario_cliente_id = Column(UUID(as_uuid=True), ForeignKey("cenario_cliente.id", ondelete="CASCADE"), nullable=False, index=True)
     secao_id = Column(UUID(as_uuid=True), ForeignKey("secoes.id", ondelete="CASCADE"), nullable=False, index=True)
     
-    # ConfiguraÃ§Ãµes especÃ­ficas da seÃ§Ã£o no cenÃ¡rio
-    fator_pa = Column(Numeric(5, 2), default=3.0)  # Fator para calcular PAs (HC / fator = PAs)
+    # Nota: fator_pa foi movido para QuadroPessoal (por função)
     
     ativo = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)

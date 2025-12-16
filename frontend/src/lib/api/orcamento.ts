@@ -708,7 +708,7 @@ export interface CenarioSecao {
   id: string;
   cenario_cliente_id: string;
   secao_id: string;
-  fator_pa: number;
+  // Nota: fator_pa foi movido para QuadroPessoal
   ativo: boolean;
   created_at: string;
   updated_at: string;
@@ -717,13 +717,26 @@ export interface CenarioSecao {
 
 export interface CenarioCliente {
   id: string;
-  cenario_id: string;
+  cenario_empresa_id: string;
   cliente_nw_codigo: string;
   nome_cliente: string | null;
   ativo: boolean;
   created_at: string;
   updated_at: string;
   secoes?: CenarioSecao[];
+}
+
+export interface CenarioEmpresa {
+  id: string;
+  cenario_id: string;
+  empresa_id: string;
+  created_at: string;
+  empresa?: Empresa;
+  clientes?: CenarioCliente[];
+}
+
+export interface CenarioEmpresaCreate {
+  empresa_id: string;
 }
 
 export interface CenarioClienteCreate {
@@ -733,7 +746,6 @@ export interface CenarioClienteCreate {
 
 export interface CenarioSecaoCreate {
   secao_id: string;
-  fator_pa?: number;
 }
 
 export interface FuncaoSpanCreate {
@@ -880,24 +892,38 @@ export const cenariosApi = {
   // CenarioCliente - Clientes do cenário
   // ============================================
   
-  getClientes: (token: string, cenarioId: string) =>
-    api.get<CenarioCliente[]>(`/api/v1/orcamento/cenarios/${cenarioId}/clientes`, token),
+  // ============================================
+  // CenarioEmpresa - Empresas do cenário (hierarquia Master-Detail)
+  // ============================================
   
-  addCliente: (token: string, cenarioId: string, data: CenarioClienteCreate) =>
-    api.post<CenarioCliente>(`/api/v1/orcamento/cenarios/${cenarioId}/clientes`, data, token),
+  getEmpresas: (token: string, cenarioId: string) =>
+    api.get<CenarioEmpresa[]>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas`, token),
   
-  deleteCliente: (token: string, cenarioId: string, clienteId: string) =>
-    api.delete(`/api/v1/orcamento/cenarios/${cenarioId}/clientes/${clienteId}`, token),
+  addEmpresa: (token: string, cenarioId: string, data: CenarioEmpresaCreate) =>
+    api.post<CenarioEmpresa>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas`, data, token),
+  
+  deleteEmpresa: (token: string, cenarioId: string, cenarioEmpresaId: string) =>
+    api.delete(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${cenarioEmpresaId}`, token),
+  
+  // ============================================
+  // CenarioCliente - Clientes de cada empresa
+  // ============================================
+  
+  addCliente: (token: string, cenarioId: string, cenarioEmpresaId: string, data: CenarioClienteCreate) =>
+    api.post<CenarioCliente>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${cenarioEmpresaId}/clientes`, data, token),
+  
+  deleteCliente: (token: string, cenarioId: string, cenarioEmpresaId: string, clienteId: string) =>
+    api.delete(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${cenarioEmpresaId}/clientes/${clienteId}`, token),
   
   // ============================================
   // CenarioSecao - Seções de cada cliente
   // ============================================
   
-  addClienteSecao: (token: string, cenarioId: string, clienteId: string, data: CenarioSecaoCreate) =>
-    api.post<CenarioSecao>(`/api/v1/orcamento/cenarios/${cenarioId}/clientes/${clienteId}/secoes`, data, token),
+  addSecao: (token: string, cenarioId: string, cenarioEmpresaId: string, clienteId: string, data: CenarioSecaoCreate) =>
+    api.post<CenarioSecao>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${cenarioEmpresaId}/clientes/${clienteId}/secoes`, data, token),
   
-  deleteClienteSecao: (token: string, cenarioId: string, clienteId: string, secaoId: string) =>
-    api.delete(`/api/v1/orcamento/cenarios/${cenarioId}/clientes/${clienteId}/secoes/${secaoId}`, token),
+  deleteSecao: (token: string, cenarioId: string, cenarioEmpresaId: string, clienteId: string, secaoId: string) =>
+    api.delete(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${cenarioEmpresaId}/clientes/${clienteId}/secoes/${secaoId}`, token),
 };
 
 // Types para cálculos

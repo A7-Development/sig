@@ -39,10 +39,11 @@ import {
   Loader2,
   FileX
 } from "lucide-react";
-import { ClienteNWSelector } from "@/components/orcamento/ClienteNWSelector";
-import { ClientesSecoesTree } from "@/components/orcamento/ClientesSecoesTree";
+import { MasterDetailTree } from "@/components/orcamento/MasterDetailTree";
+import { CapacityPlanningPanel } from "@/components/orcamento/CapacityPlanningPanel";
 import { FuncoesQuantidadesTab } from "@/components/orcamento/FuncoesQuantidadesTab";
 import { PremissasFuncaoMesGrid } from "@/components/orcamento/PremissasFuncaoMesGrid";
+import type { CenarioEmpresa, CenarioCliente, CenarioSecao } from "@/lib/api/orcamento";
 import { useAuthStore } from "@/stores/auth-store";
 import { 
   cenariosApi, 
@@ -79,9 +80,17 @@ export default function CenariosPage() {
   const [tabelaSalarial, setTabelaSalarial] = useState<TabelaSalarial[]>([]);
   
   // Abas
-  const [abaAtiva, setAbaAtiva] = useState<'configuracao' | 'funcoes' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custos'>('configuracao');
+  const [abaAtiva, setAbaAtiva] = useState<'estrutura' | 'funcoes' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custos'>('estrutura');
   const [custos, setCustos] = useState<ResumoCustos | null>(null);
   const [loadingCustos, setLoadingCustos] = useState(false);
+  
+  // Estado para seleção na árvore Master-Detail
+  const [selectedNode, setSelectedNode] = useState<{
+    type: 'empresa' | 'cliente' | 'secao';
+    empresa: CenarioEmpresa;
+    cliente?: CenarioCliente;
+    secao?: CenarioSecao;
+  } | null>(null);
   
   // Modal Cenário
   const [showFormCenario, setShowFormCenario] = useState(false);
@@ -399,15 +408,15 @@ export default function CenariosPage() {
           {/* Abas */}
           <div className="shrink-0 flex gap-1 border-b bg-muted/30 rounded-t-lg px-2 overflow-x-auto">
             <button
-              onClick={() => setAbaAtiva('configuracao')}
+              onClick={() => setAbaAtiva('estrutura')}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                abaAtiva === 'configuracao'
+                abaAtiva === 'estrutura'
                   ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
               <Settings className="h-4 w-4" />
-              Configuração
+              Estrutura
             </button>
             <button
               onClick={() => setAbaAtiva('funcoes')}
@@ -466,114 +475,40 @@ export default function CenariosPage() {
                 <Skeleton className="h-8 w-64" />
                 <Skeleton className="h-48 w-full" />
               </div>
-            ) : abaAtiva === 'configuracao' ? (
-              <div className="h-full overflow-auto p-6">
-                <div className="mb-4">
-                  <h2 className="section-title">Configuração do Cenário</h2>
-                  <p className="page-subtitle">Configure Cliente, Empresas e Seção (Projeto)</p>
+            ) : abaAtiva === 'estrutura' ? (
+              /* Layout Master-Detail: Árvore à esquerda, Painel de detalhes à direita */
+              <div className="h-full flex">
+                {/* Painel Esquerdo: Árvore de Navegação */}
+                <div className="w-80 border-r bg-muted/10 flex-shrink-0">
+                  <MasterDetailTree
+                    cenarioId={cenarioSelecionado.id}
+                    onNodeSelect={setSelectedNode}
+                    selectedSecaoId={selectedNode?.secao?.id}
+                  />
                 </div>
                 
-                <div className="space-y-6">
-                  {/* Cliente NW */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">Cliente (NW)</CardTitle>
-                      <CardDescription>Selecione o cliente do banco NW</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <ClienteNWSelector
-                        value={cenarioSelecionado.cliente_nw_codigo || undefined}
-                        onValueChange={async (codigo) => {
-                          if (!token) return;
-                          try {
-                            await cenariosApi.atualizar(token, cenarioSelecionado.id, {
-                              cliente_nw_codigo: codigo
-                            });
-                            // Atualizar o cenário selecionado com o novo cliente
-                            setCenarioSelecionado({
-                              ...cenarioSelecionado,
-                              cliente_nw_codigo: codigo
-                            });
-                            // Também atualizar na lista de cenários
-                            setCenarios(prev => prev.map(c => 
-                              c.id === cenarioSelecionado.id 
-                                ? { ...c, cliente_nw_codigo: codigo }
-                                : c
-                            ));
-                          } catch (error: any) {
-                            alert(error.message || "Erro ao atualizar cliente");
-                          }
-                        }}
-                      />
-                    </CardContent>
-                  </Card>
-
-                  {/* Empresas */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">Empresas</CardTitle>
-                      <CardDescription>Selecione as empresas para este cenário</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {empresas.length === 0 ? (
-                        <div className="text-center py-4">
-                          <p className="text-xs text-muted-foreground mb-2">Nenhuma empresa cadastrada</p>
-                          <p className="text-[10px] text-muted-foreground">
-                            Cadastre empresas em: Cadastros → Empresas
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2 max-h-64 overflow-y-auto border rounded-md p-3 bg-background">
-                          {empresas
-                            .filter(emp => emp.ativo !== false)
-                            .map((emp) => {
-                              const isSelected = cenarioSelecionado.empresas?.some(e => e.id === emp.id) || false;
-                              return (
-                                <label key={emp.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/50 p-2 rounded">
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    onChange={async (e) => {
-                                      if (!token) return;
-                                      try {
-                                        const currentEmpresas = cenarioSelecionado.empresas?.map(e => e.id) || [];
-                                        let novasEmpresas: string[];
-                                        if (e.target.checked) {
-                                          novasEmpresas = [...currentEmpresas, emp.id];
-                                        } else {
-                                          novasEmpresas = currentEmpresas.filter(id => id !== emp.id);
-                                        }
-                                        
-                                        // Atualizar via API - usar tipo correto
-                                        await cenariosApi.atualizar(token, cenarioSelecionado.id, {
-                                          empresa_ids: novasEmpresas
-                                        } as any);
-                                        await carregarDetalhes(cenarioSelecionado.id);
-                                      } catch (error: any) {
-                                        alert(error.message || "Erro ao atualizar empresas");
-                                      }
-                                    }}
-                                    className="rounded"
-                                  />
-                                  <span className="flex-1">{emp.nome_fantasia || emp.razao_social}</span>
-                                  <span className="text-xs text-muted-foreground">({emp.codigo})</span>
-                                </label>
-                              );
-                            })}
-                        </div>
-                      )}
-                      <p className="text-xs text-muted-foreground mt-2">
-                        {empresas.length > 0 
-                          ? `${empresas.filter(e => e.ativo !== false).length} empresa${empresas.filter(e => e.ativo !== false).length !== 1 ? 's' : ''} disponível${empresas.filter(e => e.ativo !== false).length !== 1 ? 'is' : ''}`
-                          : "Cadastre empresas primeiro"}
+                {/* Painel Direito: Detalhes / Capacity Planning */}
+                <div className="flex-1 overflow-auto">
+                  {selectedNode?.type === 'secao' && selectedNode.secao ? (
+                    <CapacityPlanningPanel
+                      cenarioId={cenarioSelecionado.id}
+                      empresa={selectedNode.empresa}
+                      cliente={selectedNode.cliente!}
+                      secao={selectedNode.secao}
+                      anoInicio={cenarioSelecionado.ano_inicio}
+                      mesInicio={cenarioSelecionado.mes_inicio}
+                      anoFim={cenarioSelecionado.ano_fim}
+                      mesFim={cenarioSelecionado.mes_fim}
+                    />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
+                      <Settings className="h-12 w-12 mb-4 opacity-30" />
+                      <h3 className="text-lg font-medium mb-2">Selecione uma seção</h3>
+                      <p className="text-sm max-w-md text-center">
+                        Navegue pela estrutura à esquerda e clique em uma seção para configurar o quadro de pessoal
                       </p>
-                    </CardContent>
-                  </Card>
-
-                  {/* Estrutura Clientes > Seções */}
-                  <ClientesSecoesTree
-                    cenarioId={cenarioSelecionado.id}
-                  />
+                    </div>
+                  )}
                 </div>
               </div>
             ) : abaAtiva === 'funcoes' ? (

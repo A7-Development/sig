@@ -506,11 +506,38 @@ class ClienteNW(BaseModel):
 
 
 # ============================================
-# CenÃ¡rio Cliente (Cliente do CenÃ¡rio)
+# Cenário Empresa (Empresa do Cenário)
+# ============================================
+
+class CenarioEmpresaBase(BaseModel):
+    cenario_id: UUID
+    empresa_id: UUID
+
+
+class CenarioEmpresaCreate(BaseModel):
+    empresa_id: UUID
+
+
+class CenarioEmpresaResponse(CenarioEmpresaBase):
+    id: UUID
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class CenarioEmpresaComClientes(CenarioEmpresaResponse):
+    """Empresa com seus clientes carregados."""
+    clientes: list["CenarioClienteResponse"] = []
+    empresa: Optional["EmpresaResponse"] = None
+
+
+# ============================================
+# Cenário Cliente (Cliente do Cenário)
 # ============================================
 
 class CenarioClienteBase(BaseModel):
-    cenario_id: UUID
+    cenario_empresa_id: UUID
     cliente_nw_codigo: str = Field(..., min_length=1, max_length=50)
     nome_cliente: Optional[str] = Field(None, max_length=255)
     ativo: bool = True
@@ -542,17 +569,15 @@ class CenarioClienteResponse(CenarioClienteBase):
 class CenarioSecaoBase(BaseModel):
     cenario_cliente_id: UUID
     secao_id: UUID
-    fator_pa: float = Field(3.0, ge=0, description="Fator para calcular PAs (HC / fator = PAs)")
+    # Nota: fator_pa foi movido para QuadroPessoal (por função)
     ativo: bool = True
 
 
 class CenarioSecaoCreate(BaseModel):
     secao_id: UUID
-    fator_pa: float = Field(3.0, ge=0)
 
 
 class CenarioSecaoUpdate(BaseModel):
-    fator_pa: Optional[float] = Field(None, ge=0)
     ativo: Optional[bool] = None
 
 
@@ -735,6 +760,7 @@ class QuadroPessoalBase(BaseModel):
     
     salario_override: Optional[float] = None
     span: Optional[int] = None
+    fator_pa: float = Field(1.0, ge=0, description="Fator para calcular PAs (HC / fator = PAs)")
     observacao: Optional[str] = None
     ativo: bool = True
 
@@ -765,6 +791,7 @@ class QuadroPessoalUpdate(BaseModel):
     
     salario_override: Optional[float] = None
     span: Optional[int] = None
+    fator_pa: Optional[float] = Field(None, ge=0)
     observacao: Optional[str] = None
     ativo: Optional[bool] = None
 

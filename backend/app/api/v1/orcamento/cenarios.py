@@ -17,6 +17,7 @@ from app.schemas.orcamento import (
     QuadroPessoalCreate, QuadroPessoalUpdate, QuadroPessoalResponse, QuadroPessoalComRelacionamentos,
     FuncaoSpanCreate, FuncaoSpanUpdate, FuncaoSpanResponse, FuncaoSpanComRelacionamentos,
     PremissaFuncaoMesCreate, PremissaFuncaoMesUpdate, PremissaFuncaoMesResponse, PremissaFuncaoMesComRelacionamentos,
+    CenarioEmpresaCreate, CenarioEmpresaResponse, CenarioEmpresaComClientes,
     CenarioClienteCreate, CenarioClienteUpdate, CenarioClienteResponse, CenarioClienteComSecoes,
     CenarioSecaoCreate, CenarioSecaoUpdate, CenarioSecaoResponse
 )
@@ -1232,38 +1233,42 @@ async def delete_premissa_funcao(
 
 
 # ============================================
-# CLIENTES DO CENÁRIO (CenarioCliente)
+# EMPRESAS DO CENÁRIO (Hierarquia Master-Detail)
+# Cenário > Empresa > Cliente > Seção
 # ============================================
 
-@router.get("/{cenario_id}/clientes", response_model=List[CenarioClienteComSecoes])
-async def list_clientes_cenario(
+@router.get("/{cenario_id}/empresas", response_model=List[CenarioEmpresaComClientes])
+async def list_empresas_cenario(
     cenario_id: UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    """Lista os clientes associados a um cenário, com suas seções."""
+    """Lista as empresas do cenário com clientes e seções (estrutura hierárquica completa)."""
     # Verificar se cenário existe
     cenario_result = await db.execute(select(Cenario).where(Cenario.id == cenario_id))
     if not cenario_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Cenário não encontrado")
     
     result = await db.execute(
-        select(CenarioCliente)
+        select(CenarioEmpresa)
         .options(
-            selectinload(CenarioCliente.secoes).selectinload(CenarioSecao.secao)
+            selectinload(CenarioEmpresa.empresa),
+            selectinload(CenarioEmpresa.clientes)
+            .selectinload(CenarioCliente.secoes)
+            .selectinload(CenarioSecao.secao)
         )
-        .where(CenarioCliente.cenario_id == cenario_id, CenarioCliente.ativo == True)
-        .order_by(CenarioCliente.created_at)
+        .where(CenarioEmpresa.cenario_id == cenario_id)
+        .order_by(CenarioEmpresa.created_at)
     )
     return result.scalars().all()
 
 
-@router.post("/{cenario_id}/clientes", response_model=CenarioClienteResponse)
-async def add_cliente_cenario(
+@router.post("/{cenario_id}/empresas", response_model=CenarioEmpresaResponse)
+async def add_empresa_cenario(
     cenario_id: UUID,
-    data: CenarioClienteCreate,
+    data: CenarioEmpresaCreate,
     db: AsyncSession = Depends(get_db)
 ):
-    """Adiciona um cliente ao cenário."""
+    """Adiciona uma empresa ao cenário."""
     # Verificar se cenário existe
     cenario_result = await db.execute(select(Cenario).where(Cenario.id == cenario_id))
     cenario = cenario_result.scalar_one_or_none()
@@ -1273,19 +1278,84 @@ async def add_cliente_cenario(
     if cenario.status == "BLOQUEADO":
         raise HTTPException(status_code=400, detail="Cenário bloqueado não pode ser alterado")
     
-    # Verificar se cliente já existe no cenário
+    # Verificar se empresa já existe no cenário
+    existing = await db.execute(
+        select(CenarioEmpresa).where(
+            CenarioEmpresa.cenario_id == cenario_id,
+            CenarioEmpresa.empresa_id == data.empresa_id
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Empresa já existe neste cenário")
+    
+    cenario_empresa = CenarioEmpresa(
+        cenario_id=cenario_id,
+        empresa_id=data.empresa_id
+    )
+    db.add(cenario_empresa)
+    await db.commit()
+    await db.refresh(cenario_empresa)
+    return cenario_empresa
+
+
+@router.delete("/{cenario_id}/empresas/{cenario_empresa_id}")
+async def delete_empresa_cenario(
+    cenario_id: UUID,
+    cenario_empresa_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """Remove uma empresa do cenário (e todos os clientes/seções associados)."""
+    result = await db.execute(
+        select(CenarioEmpresa).where(
+            CenarioEmpresa.id == cenario_empresa_id,
+            CenarioEmpresa.cenario_id == cenario_id
+        )
+    )
+    cenario_empresa = result.scalar_one_or_none()
+    if not cenario_empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada no cenário")
+    
+    await db.delete(cenario_empresa)
+    await db.commit()
+    return {"message": "Empresa removida do cenário com sucesso"}
+
+
+# ============================================
+# CLIENTES DA EMPRESA (CenarioCliente)
+# ============================================
+
+@router.post("/{cenario_id}/empresas/{cenario_empresa_id}/clientes", response_model=CenarioClienteResponse)
+async def add_cliente_empresa(
+    cenario_id: UUID,
+    cenario_empresa_id: UUID,
+    data: CenarioClienteCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Adiciona um cliente a uma empresa do cenário."""
+    # Verificar se empresa existe no cenário
+    empresa_result = await db.execute(
+        select(CenarioEmpresa).where(
+            CenarioEmpresa.id == cenario_empresa_id,
+            CenarioEmpresa.cenario_id == cenario_id
+        )
+    )
+    cenario_empresa = empresa_result.scalar_one_or_none()
+    if not cenario_empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada no cenário")
+    
+    # Verificar se cliente já existe nesta empresa
     existing = await db.execute(
         select(CenarioCliente).where(
-            CenarioCliente.cenario_id == cenario_id,
+            CenarioCliente.cenario_empresa_id == cenario_empresa_id,
             CenarioCliente.cliente_nw_codigo == data.cliente_nw_codigo,
             CenarioCliente.ativo == True
         )
     )
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Cliente já existe neste cenário")
+        raise HTTPException(status_code=400, detail="Cliente já existe nesta empresa")
     
     cliente = CenarioCliente(
-        cenario_id=cenario_id,
+        cenario_empresa_id=cenario_empresa_id,
         cliente_nw_codigo=data.cliente_nw_codigo,
         nome_cliente=data.nome_cliente
     )
@@ -1295,52 +1365,54 @@ async def add_cliente_cenario(
     return cliente
 
 
-@router.delete("/{cenario_id}/clientes/{cliente_id}")
-async def delete_cliente_cenario(
+@router.delete("/{cenario_id}/empresas/{cenario_empresa_id}/clientes/{cliente_id}")
+async def delete_cliente_empresa(
     cenario_id: UUID,
+    cenario_empresa_id: UUID,
     cliente_id: UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    """Remove um cliente do cenário (e suas seções)."""
+    """Remove um cliente da empresa (e suas seções)."""
     result = await db.execute(
         select(CenarioCliente).where(
             CenarioCliente.id == cliente_id,
-            CenarioCliente.cenario_id == cenario_id
+            CenarioCliente.cenario_empresa_id == cenario_empresa_id
         )
     )
     cliente = result.scalar_one_or_none()
     if not cliente:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado no cenário")
+        raise HTTPException(status_code=404, detail="Cliente não encontrado na empresa")
     
     # Soft delete - marca como inativo
     cliente.ativo = False
     await db.commit()
-    return {"message": "Cliente removido do cenário com sucesso"}
+    return {"message": "Cliente removido da empresa com sucesso"}
 
 
 # ============================================
 # SEÇÕES DO CLIENTE (CenarioSecao)
 # ============================================
 
-@router.post("/{cenario_id}/clientes/{cliente_id}/secoes", response_model=CenarioSecaoResponse)
+@router.post("/{cenario_id}/empresas/{cenario_empresa_id}/clientes/{cliente_id}/secoes", response_model=CenarioSecaoResponse)
 async def add_secao_cliente(
     cenario_id: UUID,
+    cenario_empresa_id: UUID,
     cliente_id: UUID,
     data: CenarioSecaoCreate,
     db: AsyncSession = Depends(get_db)
 ):
-    """Adiciona uma seção a um cliente do cenário."""
-    # Verificar se cliente existe no cenário
+    """Adiciona uma seção a um cliente."""
+    # Verificar se cliente existe na empresa
     cliente_result = await db.execute(
         select(CenarioCliente).where(
             CenarioCliente.id == cliente_id,
-            CenarioCliente.cenario_id == cenario_id,
+            CenarioCliente.cenario_empresa_id == cenario_empresa_id,
             CenarioCliente.ativo == True
         )
     )
     cliente = cliente_result.scalar_one_or_none()
     if not cliente:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado no cenário")
+        raise HTTPException(status_code=404, detail="Cliente não encontrado na empresa")
     
     # Verificar se seção existe
     secao_result = await db.execute(select(Secao).where(Secao.id == data.secao_id))
@@ -1360,8 +1432,7 @@ async def add_secao_cliente(
     
     cenario_secao = CenarioSecao(
         cenario_cliente_id=cliente_id,
-        secao_id=data.secao_id,
-        fator_pa=data.fator_pa
+        secao_id=data.secao_id
     )
     db.add(cenario_secao)
     await db.commit()
@@ -1372,23 +1443,24 @@ async def add_secao_cliente(
     return cenario_secao
 
 
-@router.delete("/{cenario_id}/clientes/{cliente_id}/secoes/{secao_id}")
+@router.delete("/{cenario_id}/empresas/{cenario_empresa_id}/clientes/{cliente_id}/secoes/{secao_id}")
 async def delete_secao_cliente(
     cenario_id: UUID,
+    cenario_empresa_id: UUID,
     cliente_id: UUID,
     secao_id: UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    """Remove uma seção de um cliente do cenário."""
-    # Verificar se cliente existe no cenário
+    """Remove uma seção de um cliente."""
+    # Verificar se cliente existe na empresa
     cliente_result = await db.execute(
         select(CenarioCliente).where(
             CenarioCliente.id == cliente_id,
-            CenarioCliente.cenario_id == cenario_id
+            CenarioCliente.cenario_empresa_id == cenario_empresa_id
         )
     )
     if not cliente_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Cliente não encontrado no cenário")
+        raise HTTPException(status_code=404, detail="Cliente não encontrado na empresa")
     
     # Buscar a seção
     result = await db.execute(
