@@ -95,14 +95,20 @@ class Feriado(Base):
 
 
 class Funcao(Base):
-    """FunÃ§Ã£o/Cargo para o orÃ§amento de pessoal."""
+    """Função/Cargo para o orçamento de pessoal."""
     __tablename__ = "funcoes"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     codigo = Column(String(50), unique=True, nullable=False, index=True)
-    codigo_totvs = Column(String(50), nullable=True, index=True)  # VÃ­nculo opcional com PFUNCAO
+    codigo_totvs = Column(String(50), nullable=True, index=True)  # Vínculo opcional com PFUNCAO
     nome = Column(String(200), nullable=False)
-    cbo = Column(String(20), nullable=True)  # CÃ³digo Brasileiro de OcupaÃ§Ãµes
+    cbo = Column(String(20), nullable=True)  # Código Brasileiro de Ocupações
+    
+    # Campos para cálculo de custos
+    jornada_mensal = Column(Integer, nullable=False, default=180)  # Horas/mês (180 ou 220)
+    is_home_office = Column(Boolean, default=False)  # Se função é home office (não recebe VT)
+    is_pj = Column(Boolean, default=False)  # Se função é PJ (honorários)
+    
     ativo = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -243,6 +249,11 @@ class PoliticaBeneficio(Base):
     # Treinamento
     dias_treinamento = Column(Integer, default=15)  # Dias de treinamento inicial
     
+    # Descontos de benefícios (percentuais sobre o valor do benefício)
+    pct_desconto_vt = Column(Numeric(5, 2), default=6.0)  # 6% do salário, limitado ao VT
+    pct_desconto_vr = Column(Numeric(5, 2), default=0)  # % sobre valor do VR
+    pct_desconto_am = Column(Numeric(5, 2), default=0)  # % sobre valor do plano
+    
     # Controle
     ativo = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -363,6 +374,8 @@ class Cenario(Base):
     posicoes = relationship("QuadroPessoal", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
     spans = relationship("FuncaoSpan", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
     premissas_funcao_mes = relationship("PremissaFuncaoMes", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
+    custos_calculados = relationship("CustoCalculado", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
+    parametros_custo = relationship("ParametroCusto", back_populates="cenario", lazy="selectin", cascade="all, delete-orphan")
     
     @property
     def empresas(self):
@@ -604,4 +617,137 @@ class PremissaFuncaoMes(Base):
     
     def __repr__(self):
         return f"<PremissaFuncaoMes cenario={self.cenario_id} funcao={self.funcao_id} {self.mes:02d}/{self.ano}>"
+
+
+# ============================================
+# MÓDULO DE CUSTOS
+# ============================================
+
+class TipoCusto(Base):
+    """Rubrica de custo pré-definida (30 tipos padrão)."""
+    __tablename__ = "tipos_custo"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    codigo = Column(String(50), unique=True, nullable=False, index=True)
+    nome = Column(String(200), nullable=False)
+    descricao = Column(Text, nullable=True)
+    
+    # Categoria da rubrica
+    categoria = Column(String(30), nullable=False)  # REMUNERACAO, BENEFICIO, ENCARGO, PROVISAO, PREMIO, DESCONTO
+    
+    # Tipo de cálculo
+    tipo_calculo = Column(String(30), nullable=False)  # HC_X_SALARIO, HC_X_VALOR, PERCENTUAL_RUBRICA, PERCENTUAL_RECEITA, FORMULA
+    
+    # Vínculo com conta contábil (código da view NW)
+    conta_contabil_codigo = Column(String(50), nullable=True, index=True)
+    conta_contabil_descricao = Column(String(255), nullable=True)  # Cache da descrição
+    
+    # Flags de incidência - determinam se esta rubrica entra na base de cálculo de outras
+    incide_fgts = Column(Boolean, default=False)  # Entra na base de FGTS?
+    incide_inss = Column(Boolean, default=False)  # Entra na base de INSS?
+    reflexo_ferias = Column(Boolean, default=False)  # Reflete em férias?
+    reflexo_13 = Column(Boolean, default=False)  # Reflete em 13º?
+    
+    # Alíquota/Percentual padrão (para rubricas de percentual)
+    aliquota_padrao = Column(Numeric(10, 4), nullable=True)  # Ex: 8.0 para FGTS
+    
+    # Rubrica base para cálculo (quando tipo_calculo = PERCENTUAL_RUBRICA)
+    rubrica_base_id = Column(UUID(as_uuid=True), ForeignKey("tipos_custo.id", ondelete="SET NULL"), nullable=True)
+    
+    # Ordem de exibição e cálculo (importante para dependências)
+    ordem = Column(Integer, default=0)
+    ativo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Self-referential relationship
+    rubrica_base = relationship("TipoCusto", remote_side=[id], lazy="selectin")
+    
+    def __repr__(self):
+        return f"<TipoCusto {self.codigo}: {self.nome} ({self.categoria})>"
+
+
+class CustoCalculado(Base):
+    """Resultado do cálculo de custo por rubrica/função/mês."""
+    __tablename__ = "custos_calculados"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    
+    # Vínculos com cenário
+    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    cenario_secao_id = Column(UUID(as_uuid=True), ForeignKey("cenario_secao.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # Vínculo com função e faixa
+    funcao_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="CASCADE"), nullable=False, index=True)
+    faixa_id = Column(UUID(as_uuid=True), ForeignKey("faixas_salariais.id", ondelete="SET NULL"), nullable=True)
+    
+    # Tipo de custo (rubrica)
+    tipo_custo_id = Column(UUID(as_uuid=True), ForeignKey("tipos_custo.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # Período
+    mes = Column(Integer, nullable=False)  # 1-12
+    ano = Column(Integer, nullable=False)
+    
+    # Valores do cálculo
+    hc_base = Column(Numeric(10, 2), default=0)  # HC usado no cálculo
+    valor_base = Column(Numeric(14, 2), default=0)  # Base de cálculo (salário, benefício, etc.)
+    indice_aplicado = Column(Numeric(10, 4), default=0)  # Índice/alíquota aplicada
+    valor_calculado = Column(Numeric(14, 2), default=0)  # Resultado final
+    
+    # Memória de cálculo (JSON com detalhes)
+    memoria_calculo = Column(JSON, nullable=True)
+    
+    # Controle
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    cenario = relationship("Cenario", lazy="selectin")
+    cenario_secao = relationship("CenarioSecao", lazy="selectin")
+    funcao = relationship("Funcao", lazy="selectin")
+    faixa = relationship("FaixaSalarial", lazy="selectin")
+    tipo_custo = relationship("TipoCusto", lazy="selectin")
+    
+    __table_args__ = (
+        UniqueConstraint('cenario_id', 'cenario_secao_id', 'funcao_id', 'faixa_id', 'tipo_custo_id', 'mes', 'ano', 
+                        name='uq_custo_calculado'),
+    )
+    
+    def __repr__(self):
+        return f"<CustoCalculado {self.tipo_custo_id} funcao={self.funcao_id} {self.mes:02d}/{self.ano} = R${self.valor_calculado}>"
+
+
+class ParametroCusto(Base):
+    """Parâmetros configuráveis por seção para cálculo de custos."""
+    __tablename__ = "parametros_custo"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    
+    # Vínculo (seção ou cenário global)
+    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    cenario_secao_id = Column(UUID(as_uuid=True), ForeignKey("cenario_secao.id", ondelete="CASCADE"), nullable=True, index=True)
+    
+    # Tipo de custo relacionado (opcional - se null, é parâmetro global)
+    tipo_custo_id = Column(UUID(as_uuid=True), ForeignKey("tipos_custo.id", ondelete="CASCADE"), nullable=True, index=True)
+    
+    # Chave e valor do parâmetro
+    chave = Column(String(100), nullable=False)  # Ex: pct_elegibilidade_am, pct_bonus_receita, pct_deslig_empresa
+    valor = Column(Numeric(14, 4), nullable=False)  # Valor numérico do parâmetro
+    descricao = Column(String(255), nullable=True)  # Descrição do parâmetro
+    
+    # Controle
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    cenario = relationship("Cenario", lazy="selectin")
+    cenario_secao = relationship("CenarioSecao", lazy="selectin")
+    tipo_custo = relationship("TipoCusto", lazy="selectin")
+    
+    __table_args__ = (
+        UniqueConstraint('cenario_id', 'cenario_secao_id', 'tipo_custo_id', 'chave', name='uq_parametro_custo'),
+    )
+    
+    def __repr__(self):
+        return f"<ParametroCusto {self.chave}={self.valor}>"
 

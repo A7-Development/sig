@@ -108,6 +108,9 @@ function FuncoesTab() {
     nome: "",
     codigo_totvs: "",
     cbo: "",
+    jornada_mensal: 180,
+    is_home_office: false,
+    is_pj: false,
     ativo: true,
   });
   
@@ -149,7 +152,7 @@ function FuncoesTab() {
       }
       setShowForm(false);
       setEditando(null);
-      setFormData({ codigo: "", nome: "", codigo_totvs: "", cbo: "", ativo: true });
+      setFormData({ codigo: "", nome: "", codigo_totvs: "", cbo: "", jornada_mensal: 180, is_home_office: false, is_pj: false, ativo: true });
       carregarFuncoes();
     } catch (error) {
       console.error("Erro ao salvar:", error);
@@ -163,6 +166,9 @@ function FuncoesTab() {
       nome: funcao.nome,
       codigo_totvs: funcao.codigo_totvs || "",
       cbo: funcao.cbo || "",
+      jornada_mensal: funcao.jornada_mensal || 180,
+      is_home_office: funcao.is_home_office || false,
+      is_pj: funcao.is_pj || false,
       ativo: funcao.ativo,
     });
     setShowForm(true);
@@ -374,14 +380,43 @@ function FuncoesTab() {
                     onChange={(e) => setFormData({ ...formData, codigo_totvs: e.target.value })}
                   />
                 </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={formData.ativo}
-                    onChange={(e) => setFormData({ ...formData, ativo: e.target.checked })}
-                    className="h-4 w-4"
+                <div>
+                  <label className="text-sm font-medium">Jornada Mensal (horas)</label>
+                  <Input
+                    type="number"
+                    value={formData.jornada_mensal}
+                    onChange={(e) => setFormData({ ...formData, jornada_mensal: parseInt(e.target.value) || 180 })}
+                    placeholder="180 ou 220"
                   />
-                  <label className="text-sm">Ativo</label>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={formData.is_home_office}
+                      onChange={(e) => setFormData({ ...formData, is_home_office: e.target.checked })}
+                      className="h-4 w-4"
+                    />
+                    <label className="text-sm">Home Office</label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={formData.is_pj}
+                      onChange={(e) => setFormData({ ...formData, is_pj: e.target.checked })}
+                      className="h-4 w-4"
+                    />
+                    <label className="text-sm">PJ</label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={formData.ativo}
+                      onChange={(e) => setFormData({ ...formData, ativo: e.target.checked })}
+                      className="h-4 w-4"
+                    />
+                    <label className="text-sm">Ativo</label>
+                  </div>
                 </div>
                 <div className="flex gap-2 justify-end">
                   <Button type="button" variant="outline" onClick={() => setShowForm(false)}>

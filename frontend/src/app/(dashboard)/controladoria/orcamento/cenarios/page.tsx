@@ -45,6 +45,8 @@ import { CapacityPlanningPanel } from "@/components/orcamento/CapacityPlanningPa
 import { PremissasFuncaoMesGrid } from "@/components/orcamento/PremissasFuncaoMesGrid";
 import { PremissasTree, type SelectedNodePremissas } from "@/components/orcamento/PremissasTree";
 import { PremissasFuncaoGridPanel } from "@/components/orcamento/PremissasFuncaoGridPanel";
+import { CustosPanel } from "@/components/orcamento/CustosPanel";
+import { DREPanel } from "@/components/orcamento/DREPanel";
 import type { CenarioEmpresa, CenarioCliente, CenarioSecao } from "@/lib/api/orcamento";
 import { useAuthStore } from "@/stores/auth-store";
 import { 
@@ -62,7 +64,6 @@ import {
   type Secao,
   type CentroCusto,
   type TabelaSalarial,
-  type ResumoCustos,
 } from "@/lib/api/orcamento";
 
 export default function CenariosPage() {
@@ -82,9 +83,7 @@ export default function CenariosPage() {
   const [tabelaSalarial, setTabelaSalarial] = useState<TabelaSalarial[]>([]);
   
   // Abas
-  const [abaAtiva, setAbaAtiva] = useState<'estrutura' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custos'>('estrutura');
-  const [custos, setCustos] = useState<ResumoCustos | null>(null);
-  const [loadingCustos, setLoadingCustos] = useState(false);
+  const [abaAtiva, setAbaAtiva] = useState<'estrutura' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custos' | 'dre'>('estrutura');
   
   // Estado para seleção na árvore Master-Detail
   const [selectedNode, setSelectedNode] = useState<{
@@ -197,7 +196,6 @@ export default function CenariosPage() {
   const carregarDetalhes = async (cenarioId: string) => {
     if (!token) return;
     setLoadingDetalhes(true);
-    setCustos(null);
     try {
       const [premissasData, quadroData] = await Promise.all([
         cenariosApi.getPremissas(token, cenarioId),
@@ -355,19 +353,6 @@ export default function CenariosPage() {
     setCenarioSelecionado(cenario);
   };
 
-  const carregarCustos = async () => {
-    if (!cenarioSelecionado || !token) return;
-    setLoadingCustos(true);
-    try {
-      const data = await cenariosApi.calcularCustos(token, cenarioSelecionado.id);
-      setCustos(data);
-    } catch (error) {
-      console.error("Erro ao calcular custos:", error);
-    } finally {
-      setLoadingCustos(false);
-    }
-  };
-
   // Se um cenário está selecionado, mostrar tela de parametrização
   if (cenarioSelecionado) {
     return (
@@ -458,10 +443,7 @@ export default function CenariosPage() {
               <Badge variant="secondary" className="text-[10px] ml-1">{quadro.length}</Badge>
             </button>
             <button
-              onClick={() => {
-                setAbaAtiva('custos');
-                if (!custos) carregarCustos();
-              }}
+              onClick={() => setAbaAtiva('custos')}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
                 abaAtiva === 'custos'
                   ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
@@ -470,6 +452,17 @@ export default function CenariosPage() {
             >
               <DollarSign className="h-4 w-4" />
               Custos
+            </button>
+            <button
+              onClick={() => setAbaAtiva('dre')}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                abaAtiva === 'dre'
+                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <FileEdit className="h-4 w-4" />
+              DRE
             </button>
           </div>
 
@@ -724,137 +717,19 @@ export default function CenariosPage() {
                 </div>
               </div>
             ) : abaAtiva === 'custos' ? (
-              <div className="h-full overflow-auto p-6">
-                <div className="mb-4">
-                  <h2 className="section-title">Custos Calculados</h2>
-                  <p className="page-subtitle">Resumo de custos do cenário</p>
-                </div>
-                
-                {loadingCustos ? (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-4 gap-4">
-                      {[1,2,3,4].map(i => <Skeleton key={i} className="h-24" />)}
-                    </div>
-                    <Skeleton className="h-32" />
-                    <Skeleton className="h-48" />
-                  </div>
-                ) : !custos ? (
-                  <div className="empty-state">
-                    <AlertCircle className="empty-state-icon" />
-                    <p className="empty-state-title">Não foi possível calcular os custos</p>
-                    <p className="empty-state-description">Verifique se há posições no quadro de pessoal</p>
-                    <Button size="sm" variant="outline" onClick={carregarCustos} className="mt-4">
-                      Tentar novamente
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="space-y-6">
-                    {/* Cards de resumo */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                      <Card className="bg-blue-50 border-blue-200">
-                        <CardContent className="p-4">
-                          <p className="filter-label text-blue-600">Headcount Médio</p>
-                          <p className="text-3xl font-bold text-blue-700 mt-1">{custos.total_headcount_medio.toFixed(0)}</p>
-                        </CardContent>
-                      </Card>
-                      <Card className="bg-green-50 border-green-200">
-                        <CardContent className="p-4">
-                          <p className="filter-label text-green-600">Custo Mensal Médio</p>
-                          <p className="text-2xl font-bold text-green-700 mt-1 font-mono">
-                            {custos.custo_mensal_medio.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                          </p>
-                        </CardContent>
-                      </Card>
-                      <Card className="bg-amber-50 border-amber-200">
-                        <CardContent className="p-4">
-                          <p className="filter-label text-amber-600">Custo Total Anual</p>
-                          <p className="text-2xl font-bold text-amber-700 mt-1 font-mono">
-                            {custos.custo_total_anual.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                          </p>
-                        </CardContent>
-                      </Card>
-                      <Card className="bg-purple-50 border-purple-200">
-                        <CardContent className="p-4">
-                          <p className="filter-label text-purple-600">Funções</p>
-                          <p className="text-3xl font-bold text-purple-700 mt-1">{Object.keys(custos.custos_por_funcao).length}</p>
-                        </CardContent>
-                      </Card>
-                    </div>
-
-                    {/* Custos por mês */}
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm">Custo por Mês</CardTitle>
-                      </CardHeader>
-                      <CardContent className="p-0">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              {['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'].map((mes) => (
-                                <TableHead key={mes} className="text-center">{mes}</TableHead>
-                              ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            <TableRow>
-                              {[1,2,3,4,5,6,7,8,9,10,11,12].map((mes) => (
-                                <TableCell key={mes} className="text-center font-mono text-xs">
-                                  {(custos.custos_por_mes[mes] || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                                </TableCell>
-                              ))}
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </CardContent>
-                    </Card>
-
-                    {/* Custos por função */}
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm">Custo por Função</CardTitle>
-                      </CardHeader>
-                      <CardContent className="p-0">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Função</TableHead>
-                              <TableHead className="text-right">Custo Anual</TableHead>
-                              <TableHead className="w-48">Participação</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {Object.entries(custos.custos_por_funcao)
-                              .sort(([,a], [,b]) => b - a)
-                              .map(([funcao, valor]) => {
-                                const percentual = (valor / custos.custo_total_anual) * 100;
-                                return (
-                                  <TableRow key={funcao}>
-                                    <TableCell className="font-medium">{funcao}</TableCell>
-                                    <TableCell className="text-right font-mono">
-                                      {valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                    </TableCell>
-                                    <TableCell>
-                                      <div className="flex items-center gap-2">
-                                        <div className="flex-1 bg-muted rounded-full h-2">
-                                          <div 
-                                            className="bg-orange-500 h-2 rounded-full" 
-                                            style={{ width: `${percentual}%` }}
-                                          />
-                                        </div>
-                                        <span className="text-xs text-muted-foreground w-12 text-right">
-                                          {percentual.toFixed(1)}%
-                                        </span>
-                                      </div>
-                                    </TableCell>
-                                  </TableRow>
-                                );
-                              })}
-                          </TableBody>
-                        </Table>
-                      </CardContent>
-                    </Card>
-                  </div>
-                )}
+              <div className="h-full overflow-auto">
+                <CustosPanel
+                  cenarioId={cenarioSelecionado.id}
+                  ano={cenarioSelecionado.ano_inicio}
+                />
+              </div>
+            ) : abaAtiva === 'dre' ? (
+              <div className="h-full overflow-auto">
+                <DREPanel
+                  cenarioId={cenarioSelecionado.id}
+                  anoInicio={cenarioSelecionado.ano_inicio}
+                  anoFim={cenarioSelecionado.ano_fim}
+                />
               </div>
             ) : null}
           </div>

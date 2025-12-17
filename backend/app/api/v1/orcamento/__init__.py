@@ -18,6 +18,7 @@ from .politicas_beneficio import router as politicas_beneficio_router
 from .faixas_salariais import router as faixas_salariais_router
 from .tabela_salarial import router as tabela_salarial_router
 from .cenarios import router as cenarios_router
+from .custos import router as custos_router
 
 router = APIRouter(prefix="/orcamento", tags=["Orçamento"])
 
@@ -37,4 +38,5 @@ router.include_router(politicas_beneficio_router)
 router.include_router(faixas_salariais_router)
 router.include_router(tabela_salarial_router)
 router.include_router(cenarios_router)
+router.include_router(custos_router)
 

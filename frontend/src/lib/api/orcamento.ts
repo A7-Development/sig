@@ -62,6 +62,9 @@ export interface Funcao {
   codigo_totvs: string | null;
   nome: string;
   cbo: string | null;
+  jornada_mensal: number;
+  is_home_office: boolean;
+  is_pj: boolean;
   ativo: boolean;
   created_at: string;
   updated_at: string;
@@ -988,4 +991,124 @@ export interface OverheadResult {
     fator: number;
   }>;
 }
+
+// Tipos para o módulo de custos
+export interface TipoCusto {
+  id: string;
+  codigo: string;
+  nome: string;
+  descricao: string | null;
+  categoria: 'REMUNERACAO' | 'BENEFICIO' | 'ENCARGO' | 'PROVISAO' | 'PREMIO' | 'DESCONTO';
+  tipo_calculo: string;
+  conta_contabil_codigo: string | null;
+  conta_contabil_descricao: string | null;
+  incide_fgts: boolean;
+  incide_inss: boolean;
+  reflexo_ferias: boolean;
+  reflexo_13: boolean;
+  aliquota_padrao: number | null;
+  ordem: number;
+  ativo: boolean;
+}
+
+export interface CustoCalculado {
+  id: string;
+  cenario_id: string;
+  cenario_secao_id: string;
+  funcao_id: string;
+  faixa_id: string | null;
+  tipo_custo_id: string;
+  mes: number;
+  ano: number;
+  hc_base: number;
+  valor_base: number;
+  indice_aplicado: number;
+  valor_calculado: number;
+  memoria_calculo: Record<string, any> | null;
+  funcao?: { id: string; codigo: string; nome: string };
+  tipo_custo?: { id: string; codigo: string; nome: string; categoria: string };
+}
+
+export interface DRELinha {
+  conta_contabil_codigo: string;
+  conta_contabil_descricao: string;
+  conta_contabil_completa: string; // Formato "CODIGO - DESCRICAO"
+  tipo_custo_codigo: string | null;
+  tipo_custo_nome: string | null;
+  categoria: string;
+  valores_mensais: number[];
+  total: number;
+}
+
+export interface DREResponse {
+  cenario_id: string;
+  cenario_secao_id: string | null;
+  ano: number;
+  linhas: DRELinha[];
+  total_geral: number;
+}
+
+// API de Custos
+export const custosApi = {
+  // Tipos de custo (rubricas)
+  listarTipos: (token: string, categoria?: string) => {
+    const params = new URLSearchParams();
+    if (categoria) params.append('categoria', categoria);
+    return api.get<TipoCusto[]>(`/api/v1/orcamento/custos/tipos?${params}`, token);
+  },
+
+  atualizarTipo: (token: string, tipoId: string, data: Partial<TipoCusto>) =>
+    api.put<TipoCusto>(`/api/v1/orcamento/custos/tipos/${tipoId}`, data, token),
+
+  // Cálculo de custos
+  calcular: (token: string, cenarioId: string, cenarioSecaoId?: string, ano?: number) => {
+    const params = new URLSearchParams();
+    if (cenarioSecaoId) params.append('cenario_secao_id', cenarioSecaoId);
+    if (ano) params.append('ano', ano.toString());
+    return api.post<{ success: boolean; message: string; quantidade: number }>(
+      `/api/v1/orcamento/custos/cenarios/${cenarioId}/calcular?${params}`, {}, token
+    );
+  },
+
+  // Listar custos calculados
+  listar: (token: string, cenarioId: string, filtros?: {
+    cenario_secao_id?: string;
+    funcao_id?: string;
+    tipo_custo_id?: string;
+    mes?: number;
+    ano?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (filtros) {
+      Object.entries(filtros).forEach(([key, value]) => {
+        if (value !== undefined) params.append(key, value.toString());
+      });
+    }
+    return api.get<CustoCalculado[]>(
+      `/api/v1/orcamento/custos/cenarios/${cenarioId}?${params}`, token
+    );
+  },
+
+  // Resumo por categoria
+  resumo: (token: string, cenarioId: string, cenarioSecaoId?: string, ano?: number) => {
+    const params = new URLSearchParams();
+    if (cenarioSecaoId) params.append('cenario_secao_id', cenarioSecaoId);
+    if (ano) params.append('ano', ano.toString());
+    return api.get<{
+      cenario_id: string;
+      por_categoria: Record<string, number>;
+      total_geral: number;
+    }>(`/api/v1/orcamento/custos/cenarios/${cenarioId}/resumo?${params}`, token);
+  },
+
+  // DRE
+  dre: (token: string, cenarioId: string, cenarioSecaoId?: string, ano?: number) => {
+    const params = new URLSearchParams();
+    if (cenarioSecaoId) params.append('cenario_secao_id', cenarioSecaoId);
+    if (ano) params.append('ano', ano.toString());
+    return api.get<DREResponse>(
+      `/api/v1/orcamento/custos/cenarios/${cenarioId}/dre?${params}`, token
+    );
+  },
+};
 

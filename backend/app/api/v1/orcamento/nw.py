@@ -19,6 +19,9 @@ from app.services.nw import (
     EmpresaNW,
     listar_clientes_nw,
     buscar_cliente_nw_por_codigo,
+    listar_contas_contabeis_nw,
+    buscar_conta_contabil_nw_por_codigo,
+    ContaContabilNW,
 )
 
 router = APIRouter(prefix="/nw", tags=["NW - Consulta"])
@@ -160,5 +163,44 @@ async def get_cliente_nw(codigo: str):
         )
 
 
+@router.get("/contas-contabeis", response_model=List[ContaContabilNW])
+async def get_contas_contabeis_nw(
+    busca: Optional[str] = Query(None, description="Filtrar por código ou descrição"),
+    limit: int = Query(500, ge=1, le=2000, description="Limite de registros")
+):
+    """
+    Lista contas contábeis da view vw_conta_contabil_niveis do NW.
+    SOMENTE LEITURA - não modifica dados no NW.
+    """
+    try:
+        return listar_contas_contabeis_nw(busca=busca, limit=limit)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao consultar NW: {str(e)}"
+        )
+
+
+@router.get("/contas-contabeis/{codigo}", response_model=ContaContabilNW)
+async def get_conta_contabil_nw(codigo: str):
+    """
+    Busca uma conta contábil específica pelo código no NW.
+    SOMENTE LEITURA.
+    """
+    try:
+        conta = buscar_conta_contabil_nw_por_codigo(codigo)
+        if not conta:
+            raise HTTPException(
+                status_code=404,
+                detail="Conta contábil não encontrada no NW"
+            )
+        return conta
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao consultar NW: {str(e)}"
+        )
 
 

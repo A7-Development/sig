@@ -164,6 +164,9 @@ class FuncaoBase(BaseModel):
     nome: str = Field(..., min_length=1, max_length=200)
     codigo_totvs: Optional[str] = Field(None, max_length=50)
     cbo: Optional[str] = Field(None, max_length=20)
+    jornada_mensal: int = Field(180, ge=1, le=300, description="Horas/mês (180 ou 220)")
+    is_home_office: bool = Field(False, description="Se função é home office")
+    is_pj: bool = Field(False, description="Se função é PJ")
     ativo: bool = True
 
 
@@ -176,6 +179,9 @@ class FuncaoUpdate(BaseModel):
     nome: Optional[str] = Field(None, min_length=1, max_length=200)
     codigo_totvs: Optional[str] = Field(None, max_length=50)
     cbo: Optional[str] = Field(None, max_length=20)
+    jornada_mensal: Optional[int] = Field(None, ge=1, le=300)
+    is_home_office: Optional[bool] = None
+    is_pj: Optional[bool] = None
     ativo: Optional[bool] = None
 
 
@@ -363,6 +369,10 @@ class PoliticaBeneficioBase(BaseModel):
     aux_creche_percentual: float = Field(0, ge=0, le=100)
     aux_home_office: float = Field(0, ge=0)
     dias_treinamento: int = Field(15, ge=0)
+    # Descontos de benefícios
+    pct_desconto_vt: float = Field(6.0, ge=0, le=100, description="% desconto VT sobre salário")
+    pct_desconto_vr: float = Field(0, ge=0, le=100, description="% desconto VR sobre benefício")
+    pct_desconto_am: float = Field(0, ge=0, le=100, description="% desconto AM sobre benefício")
     ativo: bool = True
 
 
@@ -388,6 +398,9 @@ class PoliticaBeneficioUpdate(BaseModel):
     aux_creche_percentual: Optional[float] = Field(None, ge=0, le=100)
     aux_home_office: Optional[float] = Field(None, ge=0)
     dias_treinamento: Optional[int] = Field(None, ge=0)
+    pct_desconto_vt: Optional[float] = Field(None, ge=0, le=100)
+    pct_desconto_vr: Optional[float] = Field(None, ge=0, le=100)
+    pct_desconto_am: Optional[float] = Field(None, ge=0, le=100)
     ativo: Optional[bool] = None
 
 
@@ -944,6 +957,178 @@ class PremissaFuncaoMesResponse(PremissaFuncaoMesBase):
 
 class PremissaFuncaoMesComRelacionamentos(PremissaFuncaoMesResponse):
     funcao: Optional[FuncaoSimples] = None
+
+
+# ============================================
+# Tipos de Custo (Rubricas)
+# ============================================
+
+class TipoCustoBase(BaseModel):
+    codigo: str = Field(..., min_length=1, max_length=50)
+    nome: str = Field(..., min_length=1, max_length=200)
+    descricao: Optional[str] = None
+    categoria: str = Field(..., pattern="^(PROVENTO|REMUNERACAO|BENEFICIO|ENCARGO|PROVISAO|PREMIO|DESCONTO)$")
+    tipo_calculo: str = Field(..., pattern="^(HC_X_SALARIO|HC_X_VALOR|PERCENTUAL_RUBRICA|PERCENTUAL_RECEITA|FORMULA)$")
+    conta_contabil_codigo: Optional[str] = Field(None, max_length=50)
+    conta_contabil_descricao: Optional[str] = Field(None, max_length=255)
+    incide_fgts: bool = False
+    incide_inss: bool = False
+    reflexo_ferias: bool = False
+    reflexo_13: bool = False
+    aliquota_padrao: Optional[float] = None
+    rubrica_base_id: Optional[UUID] = None
+    ordem: int = Field(0, ge=0)
+    ativo: bool = True
+
+
+class TipoCustoCreate(TipoCustoBase):
+    pass
+
+
+class TipoCustoUpdate(BaseModel):
+    codigo: Optional[str] = Field(None, min_length=1, max_length=50)
+    nome: Optional[str] = Field(None, min_length=1, max_length=200)
+    descricao: Optional[str] = None
+    categoria: Optional[str] = Field(None, pattern="^(PROVENTO|REMUNERACAO|BENEFICIO|ENCARGO|PROVISAO|PREMIO|DESCONTO)$")
+    tipo_calculo: Optional[str] = Field(None, pattern="^(HC_X_SALARIO|HC_X_VALOR|PERCENTUAL_RUBRICA|PERCENTUAL_RECEITA|FORMULA)$")
+    conta_contabil_codigo: Optional[str] = Field(None, max_length=50)
+    conta_contabil_descricao: Optional[str] = Field(None, max_length=255)
+    incide_fgts: Optional[bool] = None
+    incide_inss: Optional[bool] = None
+    reflexo_ferias: Optional[bool] = None
+    reflexo_13: Optional[bool] = None
+    aliquota_padrao: Optional[float] = None
+    rubrica_base_id: Optional[UUID] = None
+    ordem: Optional[int] = Field(None, ge=0)
+    ativo: Optional[bool] = None
+
+
+class TipoCustoResponse(TipoCustoBase):
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TipoCustoSimples(BaseModel):
+    """Versão simplificada para listagens."""
+    id: UUID
+    codigo: str
+    nome: str
+    categoria: str
+    
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# Custos Calculados
+# ============================================
+
+class CustoCalculadoBase(BaseModel):
+    cenario_id: UUID
+    cenario_secao_id: UUID
+    funcao_id: UUID
+    faixa_id: Optional[UUID] = None
+    tipo_custo_id: UUID
+    mes: int = Field(..., ge=1, le=12)
+    ano: int = Field(..., ge=2020, le=2100)
+    hc_base: float = 0
+    valor_base: float = 0
+    indice_aplicado: float = 0
+    valor_calculado: float = 0
+    memoria_calculo: Optional[dict] = None
+
+
+class CustoCalculadoCreate(CustoCalculadoBase):
+    pass
+
+
+class CustoCalculadoResponse(CustoCalculadoBase):
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CustoCalculadoComRelacionamentos(CustoCalculadoResponse):
+    funcao: Optional[FuncaoSimples] = None
+    tipo_custo: Optional[TipoCustoSimples] = None
+
+
+# ============================================
+# Parâmetros de Custo
+# ============================================
+
+class ParametroCustoBase(BaseModel):
+    cenario_id: UUID
+    cenario_secao_id: Optional[UUID] = None
+    tipo_custo_id: Optional[UUID] = None
+    chave: str = Field(..., min_length=1, max_length=100)
+    valor: float
+    descricao: Optional[str] = Field(None, max_length=255)
+
+
+class ParametroCustoCreate(ParametroCustoBase):
+    pass
+
+
+class ParametroCustoUpdate(BaseModel):
+    valor: Optional[float] = None
+    descricao: Optional[str] = Field(None, max_length=255)
+
+
+class ParametroCustoResponse(ParametroCustoBase):
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# Conta Contábil (view do NW)
+# ============================================
+
+class ContaContabilNW(BaseModel):
+    """Conta contábil da view vw_conta_contabil_niveis do NW."""
+    codigo: str
+    descricao: str
+    nivel1: Optional[str] = None
+    nivel2: Optional[str] = None
+    nivel3: Optional[str] = None
+    nivel4: Optional[str] = None
+    nivel5: Optional[str] = None
+
+
+# ============================================
+# DRE (Demonstrativo de Resultado)
+# ============================================
+
+class DRELinha(BaseModel):
+    """Linha do DRE com valores por mês."""
+    conta_contabil_codigo: str
+    conta_contabil_descricao: str
+    conta_contabil_completa: str  # Formato "CODIGO - DESCRICAO"
+    tipo_custo_codigo: Optional[str] = None
+    tipo_custo_nome: Optional[str] = None
+    categoria: str
+    valores_mensais: List[float]  # 12 valores (jan-dez)
+    total: float
+
+
+class DREResponse(BaseModel):
+    """Resposta do DRE consolidado."""
+    cenario_id: UUID
+    cenario_secao_id: Optional[UUID] = None
+    ano: int
+    linhas: List[DRELinha]
+    total_geral: float
 
 
 # Atualizar forward references
