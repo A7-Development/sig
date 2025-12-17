@@ -100,10 +100,12 @@ export function DREPanel({ cenarioId, cenarioSecaoId, anoInicio, anoFim }: DREPa
   });
 
   // Formatar número com separador de milhar (ponto) - estilo brasileiro
-  // Custos (positivos no banco) são exibidos como negativos
-  const formatNumber = (value: number, invertSign: boolean = true) => {
-    // Se invertSign=true, valores positivos viram negativos (custos)
-    const displayValue = invertSign && value > 0 ? -value : value;
+  // Lógica contábil:
+  // - Custos (positivos no banco) → exibir como NEGATIVOS (saída de caixa)
+  // - Descontos/Créditos (negativos no banco) → exibir como POSITIVOS (entrada de caixa)
+  const formatNumber = (value: number) => {
+    // Inverte o sinal: custos viram negativos, créditos viram positivos
+    const displayValue = -value;
     const absValue = Math.abs(displayValue);
     const formatted = absValue.toLocaleString('pt-BR', { 
       minimumFractionDigits: 0, 
@@ -112,11 +114,13 @@ export function DREPanel({ cenarioId, cenarioSecaoId, anoInicio, anoFim }: DREPa
     return displayValue < 0 ? `-${formatted}` : formatted;
   };
 
-  // Classe de cor: custos (positivos no banco, exibidos negativos) = vermelho, créditos = preto
+  // Classe de cor baseada no valor ORIGINAL do banco:
+  // - Positivos no banco (custos) → vermelho (serão exibidos como negativos)
+  // - Negativos no banco (créditos/descontos) → preto (serão exibidos como positivos)
   const getValueColorClass = (value: number) => {
-    // Valores positivos são custos, devem aparecer em vermelho (serão exibidos como negativos)
-    if (value > 0) return "text-red-600";
-    return "text-slate-900";
+    if (value > 0) return "text-red-600";  // Custo → vermelho
+    if (value < 0) return "text-green-700"; // Crédito/Desconto → verde
+    return "text-slate-900"; // Zero → preto
   };
 
   // Agrupar e ordenar dados por Conta Contábil
