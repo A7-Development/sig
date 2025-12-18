@@ -157,3 +157,5 @@ CREATE TRIGGER update_parametros_custo_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
+
+

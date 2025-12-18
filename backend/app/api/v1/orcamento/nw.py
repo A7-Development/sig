@@ -11,14 +11,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.db.session import get_db
-from app.db.models.orcamento import Empresa
-from app.schemas.orcamento import ImportacaoTotvs, ImportacaoResultado, ClienteNW
+from app.db.models.orcamento import Empresa, Fornecedor
+from app.schemas.orcamento import ImportacaoTotvs, ImportacaoResultado, ClienteNW, FornecedorNW
 from app.services.nw import (
     listar_empresas_nw,
     buscar_empresa_nw_por_codigo,
     EmpresaNW,
     listar_clientes_nw,
     buscar_cliente_nw_por_codigo,
+    listar_fornecedores_nw,
+    buscar_fornecedor_nw_por_codigo,
+    FornecedorNW,
     listar_contas_contabeis_nw,
     buscar_conta_contabil_nw_por_codigo,
     ContaContabilNW,
@@ -161,6 +164,101 @@ async def get_cliente_nw(codigo: str):
             status_code=500,
             detail=f"Erro ao consultar NW: {str(e)}"
         )
+
+
+@router.get("/fornecedores", response_model=List[FornecedorNW])
+async def get_fornecedores_nw(
+    busca: Optional[str] = Query(None, description="Filtrar por nome ou código"),
+    apenas_ativos: bool = Query(True, description="Apenas fornecedores ativos")
+):
+    """
+    Lista fornecedores do NW (tabela clifor onde fornec = 'S').
+    SOMENTE LEITURA - não modifica dados no NW.
+    """
+    try:
+        return listar_fornecedores_nw(apenas_ativos=apenas_ativos, busca=busca)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao consultar NW: {str(e)}"
+        )
+
+
+@router.get("/fornecedores/{codigo}", response_model=FornecedorNW)
+async def get_fornecedor_nw(codigo: str):
+    """
+    Busca um fornecedor específico pelo código no NW.
+    SOMENTE LEITURA.
+    """
+    try:
+        fornecedor = buscar_fornecedor_nw_por_codigo(codigo)
+        if not fornecedor:
+            raise HTTPException(
+                status_code=404,
+                detail="Fornecedor não encontrado no NW"
+            )
+        return fornecedor
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao consultar NW: {str(e)}"
+        )
+
+
+@router.post("/fornecedores/importar", response_model=ImportacaoResultado)
+async def importar_fornecedores_nw(
+    dados: ImportacaoTotvs,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Importa fornecedores selecionados do NW para o SIG.
+    LÊ do NW (somente leitura) e ESCREVE no SIG.
+    """
+    importados = 0
+    ignorados = 0
+    erros = []
+    
+    for codigo in dados.codigos:
+        try:
+            # Verificar se já existe no SIG
+            result = await db.execute(
+                select(Fornecedor).where(
+                    (Fornecedor.codigo == codigo) | (Fornecedor.codigo_nw == codigo)
+                )
+            )
+            if result.scalar_one_or_none():
+                ignorados += 1
+                continue
+            
+            # Buscar dados do NW
+            fornecedor_nw = buscar_fornecedor_nw_por_codigo(codigo)
+            if not fornecedor_nw:
+                erros.append(f"Fornecedor {codigo} não encontrado no NW")
+                continue
+            
+            # Criar novo fornecedor no SIG
+            novo_fornecedor = Fornecedor(
+                codigo=fornecedor_nw.codigo,
+                codigo_nw=fornecedor_nw.codigo,
+                nome=fornecedor_nw.razao_social,
+                nome_fantasia=fornecedor_nw.nome_fantasia,
+                ativo=True
+            )
+            db.add(novo_fornecedor)
+            importados += 1
+            
+        except Exception as e:
+            erros.append(f"Erro ao importar {codigo}: {str(e)}")
+    
+    await db.commit()
+    
+    return ImportacaoResultado(
+        importados=importados,
+        ignorados=ignorados,
+        erros=erros
+    )
 
 
 @router.get("/contas-contabeis", response_model=List[ContaContabilNW])

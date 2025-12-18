@@ -142,6 +142,32 @@ export function CustosPanel({ cenarioId, cenarioSecaoId, ano }: CustosPanelProps
 
   return (
     <div className="p-6 space-y-6">
+      {/* Banner de alerta quando não há custos */}
+      {!isLoading && !temCustos && (
+        <Card className="border-orange-200 bg-orange-50">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 text-orange-600 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-orange-900 mb-1">Custos não calculados</h3>
+                <p className="text-sm text-orange-800 mb-3">
+                  Os custos precisam ser calculados para exibir os dados. Clique no botão abaixo para processar todas as rubricas.
+                </p>
+                <Button 
+                  size="sm" 
+                  onClick={() => calcularMutation.mutate()} 
+                  disabled={calcularMutation.isPending}
+                  className="bg-orange-600 hover:bg-orange-700"
+                >
+                  <Calculator className="h-4 w-4 mr-2" />
+                  {calcularMutation.isPending ? "Calculando..." : "Calcular Custos Agora"}
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Header com ações */}
       <div className="flex items-center justify-between">
         <div>

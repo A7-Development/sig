@@ -58,3 +58,5 @@ try:
 except Exception as e:
     print(f"\n❌ Erro de conexão: {e}")
 
+
+

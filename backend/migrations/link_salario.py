@@ -63,3 +63,5 @@ for qp in quadros:
 conn.close()
 print("\nConcluído!")
 
+
+

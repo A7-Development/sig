@@ -11,15 +11,17 @@ from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
 from app.db.models.orcamento import (
-    TipoCusto, CustoCalculado, ParametroCusto, Cenario
+    TipoCusto, CustoCalculado, CustoTecnologia, ParametroCusto, Cenario
 )
 from app.schemas.orcamento import (
     TipoCustoBase, TipoCustoCreate, TipoCustoUpdate, TipoCustoResponse,
     CustoCalculadoResponse, CustoCalculadoComRelacionamentos,
+    CustoTecnologiaResponse, CustoTecnologiaComRelacionamentos,
     ParametroCustoCreate, ParametroCustoUpdate, ParametroCustoResponse,
     DRELinha, DREResponse
 )
 from app.services.calculo_custos import calcular_e_salvar_custos
+from app.services.calculo_custos_tecnologia import calcular_e_salvar_custos_tecnologia
 
 router = APIRouter(prefix="/custos", tags=["Custos"])
 
@@ -35,15 +37,28 @@ async def listar_tipos_custo(
     db: AsyncSession = Depends(get_db)
 ):
     """Lista todos os tipos de custo (rubricas)."""
-    query = select(TipoCusto).order_by(TipoCusto.ordem, TipoCusto.codigo)
-    
-    if categoria:
-        query = query.where(TipoCusto.categoria == categoria)
-    if ativo is not None:
-        query = query.where(TipoCusto.ativo == ativo)
-    
-    result = await db.execute(query)
-    return result.scalars().all()
+    try:
+        print(f"[DEBUG] Listando tipos de custo: categoria={categoria}, ativo={ativo}")
+        query = select(TipoCusto).order_by(TipoCusto.ordem, TipoCusto.codigo)
+        
+        if categoria:
+            query = query.where(TipoCusto.categoria == categoria)
+        if ativo is not None:
+            query = query.where(TipoCusto.ativo == ativo)
+        
+        print(f"[DEBUG] Executando query de tipos de custo...")
+        result = await db.execute(query)
+        tipos = result.scalars().all()
+        print(f"[DEBUG] Retornando {len(tipos)} tipos de custo")
+        return tipos
+    except Exception as e:
+        print(f"[ERROR] Erro ao listar tipos de custo: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao listar tipos de custo: {str(e)}"
+        )
 
 
 @router.get("/tipos/{tipo_id}", response_model=TipoCustoResponse)
@@ -116,6 +131,72 @@ async def calcular_custos_cenario(
             status_code=500,
             detail=f"Erro ao calcular custos: {str(e)}"
         )
+
+
+@router.post("/cenarios/{cenario_id}/calcular-tecnologia")
+async def calcular_custos_tecnologia_cenario(
+    cenario_id: UUID,
+    cenario_secao_id: Optional[UUID] = Query(None, description="Calcular apenas uma seção"),
+    ano: Optional[int] = Query(None, description="Ano para cálculo"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Calcula os custos de tecnologia de um cenário.
+    Remove custos anteriores e recalcula tudo.
+    """
+    # Verificar se cenário existe
+    cenario = await db.get(Cenario, cenario_id)
+    if not cenario:
+        raise HTTPException(status_code=404, detail="Cenário não encontrado")
+    
+    try:
+        resultado = await calcular_e_salvar_custos_tecnologia(
+            db=db,
+            cenario_id=cenario_id,
+            cenario_secao_id=cenario_secao_id,
+            ano=ano
+        )
+        
+        return {
+            "success": True,
+            "message": "Custos de tecnologia calculados com sucesso",
+            **resultado
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao calcular custos de tecnologia: {str(e)}"
+        )
+
+
+@router.get("/cenarios/{cenario_id}/tecnologia", response_model=List[CustoTecnologiaComRelacionamentos])
+async def listar_custos_tecnologia_cenario(
+    cenario_id: UUID,
+    cenario_secao_id: Optional[UUID] = Query(None, description="Filtrar por seção"),
+    produto_id: Optional[UUID] = Query(None, description="Filtrar por produto"),
+    mes: Optional[int] = Query(None, ge=1, le=12, description="Filtrar por mês"),
+    ano: Optional[int] = Query(None, description="Filtrar por ano"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Lista custos de tecnologia calculados de um cenário."""
+    query = select(CustoTecnologia).options(
+        selectinload(CustoTecnologia.produto),
+        selectinload(CustoTecnologia.alocacao)
+    ).where(CustoTecnologia.cenario_id == cenario_id)
+    
+    if cenario_secao_id:
+        query = query.where(CustoTecnologia.cenario_secao_id == cenario_secao_id)
+    if produto_id:
+        query = query.where(CustoTecnologia.produto_id == produto_id)
+    if mes:
+        query = query.where(CustoTecnologia.mes == mes)
+    if ano:
+        query = query.where(CustoTecnologia.ano == ano)
+    
+    query = query.order_by(CustoTecnologia.ano, CustoTecnologia.mes)
+    
+    result = await db.execute(query)
+    return result.scalars().all()
 
 
 @router.get("/cenarios/{cenario_id}", response_model=List[CustoCalculadoComRelacionamentos])
@@ -205,7 +286,9 @@ async def gerar_dre_cenario(
     if not ano:
         ano = cenario.ano_inicio
     
-    # Buscar custos agrupados por tipo e mês
+    # ============================================
+    # 1. Buscar custos de PESSOAL agrupados por tipo e mês
+    # ============================================
     query = select(
         TipoCusto.codigo,
         TipoCusto.nome,
@@ -259,7 +342,58 @@ async def gerar_dre_cenario(
         rubricas_dict[codigo]["valores_mensais"][mes_idx] = valor
         rubricas_dict[codigo]["total"] += valor
     
-    # Converter para lista de DRELinha
+    # ============================================
+    # 2. Buscar custos de TECNOLOGIA agrupados por produto e mês
+    # ============================================
+    from app.db.models.orcamento import ProdutoTecnologia
+    
+    query_tec = select(
+        ProdutoTecnologia.codigo,
+        ProdutoTecnologia.nome,
+        ProdutoTecnologia.categoria,
+        CustoTecnologia.mes,
+        func.sum(CustoTecnologia.valor_calculado).label("valor")
+    ).join(
+        CustoTecnologia, CustoTecnologia.produto_id == ProdutoTecnologia.id
+    ).where(
+        CustoTecnologia.cenario_id == cenario_id,
+        CustoTecnologia.ano == ano
+    ).group_by(
+        ProdutoTecnologia.codigo,
+        ProdutoTecnologia.nome,
+        ProdutoTecnologia.categoria,
+        CustoTecnologia.mes
+    ).order_by(ProdutoTecnologia.codigo, CustoTecnologia.mes)
+    
+    if cenario_secao_id:
+        query_tec = query_tec.where(CustoTecnologia.cenario_secao_id == cenario_secao_id)
+    
+    result_tec = await db.execute(query_tec)
+    rows_tec = result_tec.fetchall()
+    
+    # Adicionar custos de tecnologia ao dicionário
+    for row in rows_tec:
+        codigo = f"TEC_{row.codigo}"  # Prefixo para diferenciar de custos de pessoal
+        if codigo not in rubricas_dict:
+            rubricas_dict[codigo] = {
+                "tipo_custo_codigo": codigo,
+                "tipo_custo_nome": f"{row.nome} (Tecnologia)",
+                "categoria": f"TECNOLOGIA_{row.categoria}",
+                "conta_contabil_codigo": "",
+                "conta_contabil_descricao": "",
+                "conta_contabil_completa": "",
+                "valores_mensais": [0.0] * 12,
+                "total": 0.0
+            }
+        
+        mes_idx = row.mes - 1
+        valor = float(row.valor or 0)
+        rubricas_dict[codigo]["valores_mensais"][mes_idx] = valor
+        rubricas_dict[codigo]["total"] += valor
+    
+    # ============================================
+    # 3. Converter para lista de DRELinha e calcular totais
+    # ============================================
     linhas = []
     total_geral = 0
     for dados in rubricas_dict.values():

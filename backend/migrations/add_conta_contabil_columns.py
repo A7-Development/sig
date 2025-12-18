@@ -42,3 +42,5 @@ for coluna, tipo in colunas:
 conn.close()
 print("\nVerificacao concluida!")
 
+
+

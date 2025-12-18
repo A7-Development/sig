@@ -211,6 +211,100 @@ def buscar_cliente_nw_por_codigo(codigo: str) -> Optional[ClienteNW]:
     return cliente
 
 
+class FornecedorNW(BaseModel):
+    """Fornecedor do NW"""
+    codigo: str
+    razao_social: str
+    nome_fantasia: Optional[str] = None
+    cnpj: Optional[str] = None
+
+
+def listar_fornecedores_nw(
+    apenas_ativos: bool = True,
+    busca: Optional[str] = None
+) -> List[FornecedorNW]:
+    """
+    Lista fornecedores da tabela clifor no NW.
+    Filtra por fornec = 'S' e ativo = 'S'.
+    SOMENTE LEITURA.
+    """
+    conn = get_nw_connection()
+    cursor = conn.cursor()
+    
+    query = """
+        SELECT 
+            cod_clifor,
+            razao,
+            fantasia
+        FROM clifor
+        WHERE fornec = 'S'
+    """
+    params = []
+    
+    if apenas_ativos:
+        query += " AND ativo = 'S'"
+    
+    if busca:
+        query += " AND (razao ILIKE %s OR fantasia ILIKE %s OR cod_clifor ILIKE %s)"
+        busca_param = f"%{busca}%"
+        params.extend([busca_param, busca_param, busca_param])
+    
+    query += " ORDER BY razao"
+    
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    
+    fornecedores = []
+    for row in rows:
+        fornecedores.append(FornecedorNW(
+            codigo=row[0].strip() if row[0] else "",
+            razao_social=row[1].strip() if row[1] else "",
+            nome_fantasia=row[2].strip() if row[2] else None,
+            cnpj=None,  # Não disponível na tabela clifor
+        ))
+    
+    cursor.close()
+    conn.close()
+    
+    return fornecedores
+
+
+def buscar_fornecedor_nw_por_codigo(codigo: str) -> Optional[FornecedorNW]:
+    """
+    Busca um fornecedor específico pelo código no NW.
+    SOMENTE LEITURA.
+    """
+    conn = get_nw_connection()
+    cursor = conn.cursor()
+    
+    query = """
+        SELECT 
+            cod_clifor,
+            razao,
+            fantasia
+        FROM clifor
+        WHERE cod_clifor = %s
+        AND fornec = 'S'
+    """
+    
+    cursor.execute(query, [codigo])
+    row = cursor.fetchone()
+    
+    fornecedor = None
+    if row:
+        fornecedor = FornecedorNW(
+            codigo=row[0].strip() if row[0] else "",
+            razao_social=row[1].strip() if row[1] else "",
+            nome_fantasia=row[2].strip() if row[2] else None,
+            cnpj=None,  # Não disponível na tabela clifor
+        )
+    
+    cursor.close()
+    conn.close()
+    
+    return fornecedor
+
+
 class ContaContabilNW(BaseModel):
     """Conta contábil da view vw_conta_contabil_niveis do NW."""
     codigo: str

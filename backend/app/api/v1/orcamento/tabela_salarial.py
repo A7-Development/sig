@@ -10,14 +10,33 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
-from app.db.models.orcamento import TabelaSalarial, Funcao, FaixaSalarial, PoliticaBeneficio
+from app.db.models.orcamento import TabelaSalarial, Funcao, FaixaSalarial, PoliticaBeneficio, QuadroPessoal, CustoCalculado
 from app.schemas.orcamento import (
     TabelaSalarialCreate,
     TabelaSalarialUpdate,
     TabelaSalarialResponse,
 )
+from sqlalchemy import delete
 
 router = APIRouter(prefix="/tabela-salarial", tags=["Tabela Salarial"])
+
+
+async def invalidar_custos_tabela_salarial(db: AsyncSession, tabela_salarial_id: UUID):
+    """
+    Invalida custos de todos os cenários que usam esta tabela salarial.
+    """
+    # Buscar todos os cenários que têm posições usando esta tabela salarial
+    result = await db.execute(
+        select(QuadroPessoal.cenario_id)
+        .where(QuadroPessoal.tabela_salarial_id == tabela_salarial_id)
+        .distinct()
+    )
+    cenarios_ids = [row[0] for row in result.fetchall()]
+    
+    # Invalidar custos de cada cenário afetado
+    if cenarios_ids:
+        stmt = delete(CustoCalculado).where(CustoCalculado.cenario_id.in_(cenarios_ids))
+        await db.execute(stmt)
 
 
 @router.get("/", response_model=List[TabelaSalarialResponse])
@@ -178,6 +197,9 @@ async def update_tabela_salarial(
     for field, value in update_data.items():
         setattr(item, field, value)
     
+    # Invalidar custos de cenários que usam esta tabela salarial
+    await invalidar_custos_tabela_salarial(db, item_id)
+    
     await db.commit()
     
     # Recarregar com relacionamentos
@@ -209,6 +231,9 @@ async def delete_tabela_salarial(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Item da tabela salarial não encontrado"
         )
+    
+    # Invalidar custos de cenários que usam esta tabela salarial
+    await invalidar_custos_tabela_salarial(db, item_id)
     
     await db.delete(item)
     await db.commit()

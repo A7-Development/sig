@@ -38,15 +38,16 @@ import {
   Calendar,
   Loader2,
   FileX,
-  User
+  User,
+  Server
 } from "lucide-react";
 import { MasterDetailTree } from "@/components/orcamento/MasterDetailTree";
 import { CapacityPlanningPanel } from "@/components/orcamento/CapacityPlanningPanel";
 import { PremissasFuncaoMesGrid } from "@/components/orcamento/PremissasFuncaoMesGrid";
 import { PremissasTree, type SelectedNodePremissas } from "@/components/orcamento/PremissasTree";
 import { PremissasFuncaoGridPanel } from "@/components/orcamento/PremissasFuncaoGridPanel";
-import { CustosPanel } from "@/components/orcamento/CustosPanel";
 import { DREPanel } from "@/components/orcamento/DREPanel";
+import TecnologiaPanel from "@/components/orcamento/TecnologiaPanel";
 import type { CenarioEmpresa, CenarioCliente, CenarioSecao } from "@/lib/api/orcamento";
 import { useAuthStore } from "@/stores/auth-store";
 import { 
@@ -57,7 +58,6 @@ import {
   centrosCustoApi,
   tabelaSalarialApi,
   type Cenario,
-  type Premissa,
   type QuadroPessoal,
   type Empresa,
   type Funcao,
@@ -70,7 +70,6 @@ export default function CenariosPage() {
   const { accessToken: token } = useAuthStore();
   const [cenarios, setCenarios] = useState<Cenario[]>([]);
   const [cenarioSelecionado, setCenarioSelecionado] = useState<Cenario | null>(null);
-  const [premissas, setPremissas] = useState<Premissa[]>([]);
   const [quadro, setQuadro] = useState<QuadroPessoal[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingDetalhes, setLoadingDetalhes] = useState(false);
@@ -83,7 +82,7 @@ export default function CenariosPage() {
   const [tabelaSalarial, setTabelaSalarial] = useState<TabelaSalarial[]>([]);
   
   // Abas
-  const [abaAtiva, setAbaAtiva] = useState<'estrutura' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custos' | 'dre'>('estrutura');
+  const [abaAtiva, setAbaAtiva] = useState<'estrutura' | 'premissas-funcao' | 'premissas' | 'quadro' | 'tecnologia' | 'dre'>('estrutura');
   
   // Estado para seleção na árvore Master-Detail
   const [selectedNode, setSelectedNode] = useState<{
@@ -197,11 +196,7 @@ export default function CenariosPage() {
     if (!token) return;
     setLoadingDetalhes(true);
     try {
-      const [premissasData, quadroData] = await Promise.all([
-        cenariosApi.getPremissas(token, cenarioId),
-        cenariosApi.getQuadro(token, cenarioId),
-      ]);
-      setPremissas(premissasData);
+      const quadroData = await cenariosApi.getQuadro(token, cenarioId);
       setQuadro(quadroData);
     } catch (error) {
       console.error("Erro ao carregar detalhes:", error);
@@ -313,16 +308,6 @@ export default function CenariosPage() {
       carregarDetalhes(cenarioSelecionado.id);
     } catch (error) {
       console.error("Erro ao excluir:", error);
-    }
-  };
-
-  const handleUpdatePremissa = async (premissaId: string, campo: string, valor: number) => {
-    if (!token || !cenarioSelecionado) return;
-    try {
-      await cenariosApi.updatePremissa(token, cenarioSelecionado.id, premissaId, { [campo]: valor });
-      carregarDetalhes(cenarioSelecionado.id);
-    } catch (error) {
-      console.error("Erro ao atualizar premissa:", error);
     }
   };
 
@@ -443,15 +428,15 @@ export default function CenariosPage() {
               <Badge variant="secondary" className="text-[10px] ml-1">{quadro.length}</Badge>
             </button>
             <button
-              onClick={() => setAbaAtiva('custos')}
+              onClick={() => setAbaAtiva('tecnologia')}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                abaAtiva === 'custos'
+                abaAtiva === 'tecnologia'
                   ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              <DollarSign className="h-4 w-4" />
-              Custos
+              <Server className="h-4 w-4" />
+              Tecnologia
             </button>
             <button
               onClick={() => setAbaAtiva('dre')}
@@ -495,13 +480,6 @@ export default function CenariosPage() {
                       cliente={selectedNode.cliente!}
                       secao={selectedNode.secao}
                       todasSecoes={todasSecoescentario}
-                      premissas={premissas.length > 0 ? {
-                        absenteismo: premissas[0].absenteismo,
-                        abs_pct_justificado: premissas[0].abs_pct_justificado || 75,
-                        turnover: premissas[0].turnover,
-                        ferias_indice: premissas[0].ferias_indice,
-                        dias_treinamento: premissas[0].dias_treinamento,
-                      } : undefined}
                       anoInicio={cenarioSelecionado.ano_inicio}
                       mesInicio={cenarioSelecionado.mes_inicio}
                       anoFim={cenarioSelecionado.ano_fim}
@@ -550,7 +528,6 @@ export default function CenariosPage() {
                       secao={selectedNodePremissas.secao!}
                       funcao={selectedNodePremissas.funcao}
                       quadroItem={selectedNodePremissas.quadroItem}
-                      premissaGeral={premissas.length > 0 ? premissas[0] : undefined}
                       anoInicio={cenarioSelecionado.ano_inicio}
                       mesInicio={cenarioSelecionado.mes_inicio}
                       anoFim={cenarioSelecionado.ano_fim}
@@ -716,12 +693,22 @@ export default function CenariosPage() {
                   )}
                 </div>
               </div>
-            ) : abaAtiva === 'custos' ? (
+            ) : abaAtiva === 'tecnologia' ? (
               <div className="h-full overflow-auto">
-                <CustosPanel
-                  cenarioId={cenarioSelecionado.id}
-                  ano={cenarioSelecionado.ano_inicio}
-                />
+                {selectedTreeNode ? (
+                  <TecnologiaPanel
+                    cenarioId={cenarioSelecionado.id}
+                    secaoId={selectedTreeNode.id}
+                    secaoNome={selectedTreeNode.label}
+                  />
+                ) : (
+                  <div className="empty-state">
+                    <Server className="size-12 text-muted-foreground/50 mx-auto mb-4" />
+                    <p className="text-muted-foreground">
+                      Selecione uma seção na árvore para gerenciar alocações de tecnologia
+                    </p>
+                  </div>
+                )}
               </div>
             ) : abaAtiva === 'dre' ? (
               <div className="h-full overflow-auto">

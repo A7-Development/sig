@@ -66,3 +66,5 @@ END $$;
 -- Verificação final
 SELECT 'Migração concluída com sucesso!' as status;
 
+
+

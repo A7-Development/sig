@@ -93,3 +93,5 @@ CREATE INDEX IF NOT EXISTS idx_premissa_funcao_mes_periodo ON premissa_funcao_me
 
 
 
+
+

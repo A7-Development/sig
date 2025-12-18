@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -26,9 +26,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { FileSpreadsheet, Download, AlertCircle, RefreshCw, ChevronRight, ChevronDown } from "lucide-react";
+import { FileSpreadsheet, Download, AlertCircle, ChevronRight, ChevronDown, Calculator } from "lucide-react";
 import { api } from "@/lib/api/client";
 import { useAuthStore } from "@/stores/auth-store";
+import { toast } from "sonner";
 
 interface DRELinha {
   conta_contabil_codigo: string;
@@ -72,6 +73,7 @@ interface ContaContabilAgrupada {
 
 export function DREPanel({ cenarioId, cenarioSecaoId, anoInicio, anoFim }: DREPanelProps) {
   const { accessToken: token } = useAuthStore();
+  const queryClient = useQueryClient();
   const [anoSelecionado, setAnoSelecionado] = useState(anoInicio);
   const [expandedContas, setExpandedContas] = useState<Set<string>>(new Set());
 
@@ -97,6 +99,31 @@ export function DREPanel({ cenarioId, cenarioSecaoId, anoInicio, anoFim }: DREPa
       return api.get<DREResponse>(`/api/v1/orcamento/custos/cenarios/${cenarioId}/dre?${params}`);
     },
     enabled: !!cenarioId,
+  });
+
+  // Mutation para calcular custos (pessoal + tecnologia) e atualizar DRE automaticamente
+  const calcularMutation = useMutation({
+    mutationFn: async () => {
+      const params = new URLSearchParams();
+      if (cenarioSecaoId) params.append("cenario_secao_id", cenarioSecaoId);
+      
+      // Calcula custos de pessoal e tecnologia em paralelo
+      const [resultadoPessoal, resultadoTecnologia] = await Promise.all([
+        api.post(`/api/v1/orcamento/custos/cenarios/${cenarioId}/calcular?${params}`, {}),
+        api.post(`/api/v1/orcamento/custos/cenarios/${cenarioId}/calcular-tecnologia?${params}`, {})
+      ]);
+      
+      return { pessoal: resultadoPessoal, tecnologia: resultadoTecnologia };
+    },
+    onSuccess: async (data: any) => {
+      // Atualiza automaticamente a DRE após calcular os custos
+      await refetch();
+      const totalRegistros = (data.pessoal?.quantidade || 0) + (data.tecnologia?.custos_criados || 0);
+      toast.success(`Custos calculados e DRE atualizada: ${totalRegistros} registros processados (${data.pessoal?.quantidade || 0} pessoal + ${data.tecnologia?.custos_criados || 0} tecnologia)`);
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.detail || "Erro ao calcular custos");
+    },
   });
 
   // Formatar número com separador de milhar (ponto) - estilo brasileiro
@@ -228,9 +255,37 @@ export function DREPanel({ cenarioId, cenarioSecaoId, anoInicio, anoFim }: DREPa
     link.click();
   };
 
+  const temDados = dre && contasAgrupadas.length > 0;
+
   return (
     <TooltipProvider>
       <div className="p-6 space-y-4">
+        {/* Banner de alerta quando não há dados */}
+        {!isLoading && !temDados && (
+          <Card className="border-orange-200 bg-orange-50">
+            <CardContent className="p-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-orange-600 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <h3 className="font-semibold text-orange-900 mb-1">DRE não disponível</h3>
+                  <p className="text-sm text-orange-800 mb-3">
+                    Os custos precisam ser calculados primeiro para gerar a DRE. O processo calculará automaticamente os custos e atualizará a demonstração.
+                  </p>
+                  <Button 
+                    size="sm" 
+                    onClick={() => calcularMutation.mutate()} 
+                    disabled={calcularMutation.isPending}
+                    className="bg-orange-600 hover:bg-orange-700"
+                  >
+                    <Calculator className="h-4 w-4 mr-2" />
+                    {calcularMutation.isPending ? "Processando..." : "Calcular e Gerar DRE"}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -255,9 +310,14 @@ export function DREPanel({ cenarioId, cenarioSecaoId, anoInicio, anoFim }: DREPa
                 ))}
               </SelectContent>
             </Select>
-            <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-              Atualizar
+            <Button
+              size="sm"
+              onClick={() => calcularMutation.mutate()}
+              disabled={calcularMutation.isPending}
+              className="bg-orange-600 hover:bg-orange-700 text-white"
+            >
+              <Calculator className="h-4 w-4 mr-2" />
+              {calcularMutation.isPending ? "Processando..." : "Calcular e Atualizar"}
             </Button>
             <Button variant="outline" size="sm" onClick={exportToCSV} disabled={!dre || contasAgrupadas.length === 0}>
               <Download className="h-4 w-4 mr-2" />
@@ -287,9 +347,13 @@ export function DREPanel({ cenarioId, cenarioSecaoId, anoInicio, anoFim }: DREPa
             <CardContent className="flex flex-col items-center justify-center py-12">
               <FileSpreadsheet className="h-12 w-12 text-muted-foreground/50 mb-4" />
               <h3 className="text-lg font-medium mb-2">Nenhum dado para exibir</h3>
-              <p className="text-sm text-muted-foreground text-center max-w-md">
-                Primeiro calcule os custos na aba "Custos" para gerar o DRE
+              <p className="text-sm text-muted-foreground text-center max-w-md mb-6">
+                Processe os custos para gerar automaticamente a DRE com base no quadro de pessoal e premissas configuradas.
               </p>
+              <Button onClick={() => calcularMutation.mutate()} disabled={calcularMutation.isPending}>
+                <Calculator className="h-4 w-4 mr-2" />
+                {calcularMutation.isPending ? "Processando..." : "Calcular e Gerar DRE"}
+              </Button>
             </CardContent>
           </Card>
         ) : (

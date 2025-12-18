@@ -645,22 +645,6 @@ export interface Cenario {
   }[];
 }
 
-export interface Premissa {
-  id: string;
-  cenario_id: string;
-  absenteismo: number;
-  abs_pct_justificado: number;  // % do ABS que e justificado
-  turnover: number;
-  ferias_indice: number;
-  dias_treinamento: number;
-  reajuste_data: string | null;
-  reajuste_percentual: number;
-  dissidio_mes: number | null;
-  dissidio_percentual: number;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface QuadroPessoal {
   id: string;
   cenario_id: string;
@@ -831,13 +815,6 @@ export const cenariosApi = {
   
   duplicar: (token: string, id: string, novoCodigo: string, novoNome: string) =>
     api.post<Cenario>(`/api/v1/orcamento/cenarios/${id}/duplicar?novo_codigo=${encodeURIComponent(novoCodigo)}&novo_nome=${encodeURIComponent(novoNome)}`, {}, token),
-  
-  // Premissas
-  getPremissas: (token: string, cenarioId: string) =>
-    api.get<Premissa[]>(`/api/v1/orcamento/cenarios/${cenarioId}/premissas`, token),
-  
-  updatePremissa: (token: string, cenarioId: string, premissaId: string, data: Partial<Premissa>) =>
-    api.put<Premissa>(`/api/v1/orcamento/cenarios/${cenarioId}/premissas/${premissaId}`, data, token),
   
   // Quadro de Pessoal
   getQuadro: (token: string, cenarioId: string, params?: { funcao_id?: string; secao_id?: string; centro_custo_id?: string; regime?: string }) => {
@@ -1109,6 +1086,242 @@ export const custosApi = {
     return api.get<DREResponse>(
       `/api/v1/orcamento/custos/cenarios/${cenarioId}/dre?${params}`, token
     );
+  },
+  
+  // Calcular custos de tecnologia
+  calcularTecnologia: (token: string, cenarioId: string, cenarioSecaoId?: string, ano?: number) => {
+    const params = new URLSearchParams();
+    if (cenarioSecaoId) params.append('cenario_secao_id', cenarioSecaoId);
+    if (ano) params.append('ano', ano.toString());
+    return api.post<{
+      success: boolean;
+      message: string;
+      cenario_id: string;
+      ano: number;
+      alocacoes_processadas: number;
+      custos_criados: number;
+      valor_total: number;
+    }>(`/api/v1/orcamento/custos/cenarios/${cenarioId}/calcular-tecnologia?${params}`, {}, token);
+  },
+};
+
+
+// ============================================
+// Fornecedores
+// ============================================
+
+export interface Fornecedor {
+  id: string;
+  codigo: string;
+  codigo_nw?: string | null;
+  nome: string;
+  nome_fantasia?: string | null;
+  cnpj?: string | null;
+  contato_nome?: string | null;
+  contato_email?: string | null;
+  contato_telefone?: string | null;
+  observacao?: string | null;
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FornecedorCreate {
+  codigo: string;
+  codigo_nw?: string | null;
+  nome: string;
+  nome_fantasia?: string | null;
+  cnpj?: string | null;
+  contato_nome?: string | null;
+  contato_email?: string | null;
+  contato_telefone?: string | null;
+  observacao?: string | null;
+  ativo?: boolean;
+}
+
+export interface FornecedorUpdate extends Partial<FornecedorCreate> {}
+
+export const fornecedores = {
+  // Listar
+  listar: (token: string, filtros?: { apenas_ativos?: boolean; busca?: string }) => {
+    const params = new URLSearchParams();
+    if (filtros?.apenas_ativos !== undefined) params.append('apenas_ativos', filtros.apenas_ativos.toString());
+    if (filtros?.busca) params.append('busca', filtros.busca);
+    return api.get<Fornecedor[]>(`/api/v1/orcamento/fornecedores?${params}`, token);
+  },
+
+  // Obter
+  obter: (token: string, id: string) => {
+    return api.get<Fornecedor>(`/api/v1/orcamento/fornecedores/${id}`, token);
+  },
+
+  // Criar
+  criar: (token: string, data: FornecedorCreate) => {
+    return api.post<Fornecedor>('/api/v1/orcamento/fornecedores', data, token);
+  },
+
+  // Atualizar
+  atualizar: (token: string, id: string, data: FornecedorUpdate) => {
+    return api.put<Fornecedor>(`/api/v1/orcamento/fornecedores/${id}`, data, token);
+  },
+
+  // Excluir
+  excluir: (token: string, id: string, softDelete: boolean = true) => {
+    return api.delete<void>(`/api/v1/orcamento/fornecedores/${id}?soft_delete=${softDelete}`, token);
+  },
+
+  // Listar do NW
+  listarNW: (token: string, filtros?: { apenas_ativos?: boolean; busca?: string }) => {
+    const params = new URLSearchParams();
+    if (filtros?.apenas_ativos !== undefined) params.append('apenas_ativos', filtros.apenas_ativos.toString());
+    if (filtros?.busca) params.append('busca', filtros.busca);
+    return api.get<{ codigo: string; razao_social: string; nome_fantasia?: string; cnpj?: string }[]>(
+      `/api/v1/orcamento/nw/fornecedores?${params}`, token
+    );
+  },
+
+  // Importar do NW
+  importarNW: (token: string, codigos: string[]) => {
+    return api.post<{ importados: number; erros: number; detalhes: any[] }>(
+      '/api/v1/orcamento/nw/fornecedores/importar',
+      { codigos },
+      token
+    );
+  },
+};
+
+
+// ============================================
+// Produtos de Tecnologia
+// ============================================
+
+export interface ProdutoTecnologia {
+  id: string;
+  fornecedor_id: string;
+  codigo: string;
+  nome: string;
+  categoria: string;
+  valor_base?: number | null;
+  unidade_medida?: string | null;
+  conta_contabil_id?: string | null;
+  descricao?: string | null;
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+  fornecedor?: Fornecedor;
+}
+
+export interface ProdutoTecnologiaCreate {
+  fornecedor_id: string;
+  codigo?: string; // AUTO para gerar automaticamente
+  nome: string;
+  categoria: string;
+  valor_base?: number | null;
+  unidade_medida?: string | null;
+  conta_contabil_id?: string | null;
+  descricao?: string | null;
+  ativo?: boolean;
+}
+
+export interface ProdutoTecnologiaUpdate extends Partial<ProdutoTecnologiaCreate> {}
+
+export const produtosTecnologia = {
+  // Listar
+  listar: (token: string, filtros?: { fornecedor_id?: string; categoria?: string; apenas_ativos?: boolean; busca?: string }) => {
+    const params = new URLSearchParams();
+    if (filtros?.fornecedor_id) params.append('fornecedor_id', filtros.fornecedor_id);
+    if (filtros?.categoria) params.append('categoria', filtros.categoria);
+    if (filtros?.apenas_ativos !== undefined) params.append('apenas_ativos', filtros.apenas_ativos.toString());
+    if (filtros?.busca) params.append('busca', filtros.busca);
+    return api.get<ProdutoTecnologia[]>(`/api/v1/orcamento/produtos?${params}`, token);
+  },
+
+  // Obter
+  obter: (token: string, id: string) => {
+    return api.get<ProdutoTecnologia>(`/api/v1/orcamento/produtos/${id}`, token);
+  },
+
+  // Criar
+  criar: (token: string, data: ProdutoTecnologiaCreate) => {
+    return api.post<ProdutoTecnologia>('/api/v1/orcamento/produtos', data, token);
+  },
+
+  // Atualizar
+  atualizar: (token: string, id: string, data: ProdutoTecnologiaUpdate) => {
+    return api.put<ProdutoTecnologia>(`/api/v1/orcamento/produtos/${id}`, data, token);
+  },
+
+  // Excluir
+  excluir: (token: string, id: string, softDelete: boolean = true) => {
+    return api.delete<void>(`/api/v1/orcamento/produtos/${id}?soft_delete=${softDelete}`, token);
+  },
+};
+
+
+// ============================================
+// Alocações de Tecnologia
+// ============================================
+
+export interface AlocacaoTecnologia {
+  id: string;
+  cenario_id: string;
+  cenario_secao_id: string;
+  produto_id: string;
+  tipo_alocacao: 'FIXO' | 'FIXO_VARIAVEL' | 'VARIAVEL';
+  valor_fixo_mensal?: number | null;
+  tipo_variavel?: 'POR_PA' | 'POR_HC' | null;
+  valor_unitario_variavel?: number | null;
+  fator_multiplicador: number;
+  observacao?: string | null;
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+  produto?: ProdutoTecnologia;
+}
+
+export interface AlocacaoTecnologiaCreate {
+  cenario_id: string;
+  cenario_secao_id: string;
+  produto_id: string;
+  tipo_alocacao: 'FIXO' | 'FIXO_VARIAVEL' | 'VARIAVEL';
+  valor_fixo_mensal?: number | null;
+  tipo_variavel?: 'POR_PA' | 'POR_HC' | null;
+  valor_unitario_variavel?: number | null;
+  fator_multiplicador?: number;
+  observacao?: string | null;
+  ativo?: boolean;
+}
+
+export interface AlocacaoTecnologiaUpdate extends Partial<AlocacaoTecnologiaCreate> {}
+
+export const alocacoesTecnologia = {
+  // Listar
+  listar: (token: string, cenarioId: string, filtros?: { cenario_secao_id?: string; ativo?: boolean }) => {
+    const params = new URLSearchParams();
+    params.append('cenario_id', cenarioId);
+    if (filtros?.cenario_secao_id) params.append('cenario_secao_id', filtros.cenario_secao_id);
+    if (filtros?.ativo !== undefined) params.append('ativo', filtros.ativo.toString());
+    return api.get<AlocacaoTecnologia[]>(`/api/v1/orcamento/alocacoes?${params}`, token);
+  },
+
+  // Obter
+  obter: (token: string, id: string) => {
+    return api.get<AlocacaoTecnologia>(`/api/v1/orcamento/alocacoes/${id}`, token);
+  },
+
+  // Criar
+  criar: (token: string, data: AlocacaoTecnologiaCreate) => {
+    return api.post<AlocacaoTecnologia>('/api/v1/orcamento/alocacoes', data, token);
+  },
+
+  // Atualizar
+  atualizar: (token: string, id: string, data: AlocacaoTecnologiaUpdate) => {
+    return api.put<AlocacaoTecnologia>(`/api/v1/orcamento/alocacoes/${id}`, data, token);
+  },
+
+  // Excluir
+  excluir: (token: string, id: string, softDelete: boolean = true) => {
+    return api.delete<void>(`/api/v1/orcamento/alocacoes/${id}?soft_delete=${softDelete}`, token);
   },
 };
 

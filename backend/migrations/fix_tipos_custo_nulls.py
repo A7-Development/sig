@@ -63,3 +63,5 @@ print(f"  flags booleanos: {cur.rowcount} registros atualizados")
 conn.close()
 print("\nCorrecao concluida!")
 
+
+

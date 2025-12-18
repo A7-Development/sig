@@ -3,7 +3,8 @@ Schemas do mÃ³dulo de OrÃ§amento.
 """
 
 from datetime import datetime, date
-from typing import Optional, List
+from decimal import Decimal
+from typing import Optional, List, Dict, Any
 from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
 
@@ -189,6 +190,100 @@ class FuncaoResponse(FuncaoBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# Fornecedor
+# ============================================
+
+class FornecedorBase(BaseModel):
+    codigo: str = Field(..., min_length=1, max_length=50)
+    nome: str = Field(..., min_length=1, max_length=200)
+    codigo_nw: Optional[str] = Field(None, max_length=50)
+    nome_fantasia: Optional[str] = Field(None, max_length=200)
+    cnpj: Optional[str] = Field(None, max_length=20)
+    contato_nome: Optional[str] = Field(None, max_length=200)
+    contato_email: Optional[str] = Field(None, max_length=200)
+    contato_telefone: Optional[str] = Field(None, max_length=50)
+    observacao: Optional[str] = None
+    ativo: bool = True
+
+
+class FornecedorCreate(FornecedorBase):
+    pass
+
+
+class FornecedorUpdate(BaseModel):
+    codigo: Optional[str] = Field(None, min_length=1, max_length=50)
+    nome: Optional[str] = Field(None, min_length=1, max_length=200)
+    codigo_nw: Optional[str] = Field(None, max_length=50)
+    nome_fantasia: Optional[str] = Field(None, max_length=200)
+    cnpj: Optional[str] = Field(None, max_length=20)
+    contato_nome: Optional[str] = Field(None, max_length=200)
+    contato_email: Optional[str] = Field(None, max_length=200)
+    contato_telefone: Optional[str] = Field(None, max_length=50)
+    observacao: Optional[str] = None
+    ativo: Optional[bool] = None
+
+
+class FornecedorResponse(FornecedorBase):
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# Produto de Tecnologia
+# ============================================
+
+class ProdutoTecnologiaBase(BaseModel):
+    fornecedor_id: UUID
+    codigo: str = Field(..., min_length=1, max_length=50)
+    nome: str = Field(..., min_length=1, max_length=200)
+    categoria: str = Field(..., max_length=50, description="DISCADOR, URA, AGENTE_VIRTUAL, AUTOMACAO, QUALIDADE, etc")
+    valor_base: Optional[float] = Field(None, ge=0, description="Valor base/tabela do fornecedor (referência)")
+    unidade_medida: Optional[str] = Field(None, max_length=30)
+    conta_contabil_id: Optional[UUID] = None
+    descricao: Optional[str] = None
+    ativo: bool = True
+
+
+class ProdutoTecnologiaCreate(BaseModel):
+    fornecedor_id: UUID
+    codigo: Optional[str] = Field(None, max_length=50, description="Código do produto (deixe vazio para gerar automaticamente)")
+    nome: str = Field(..., min_length=1, max_length=200)
+    categoria: str = Field(..., max_length=50)
+    valor_base: Optional[float] = Field(None, ge=0)
+    unidade_medida: Optional[str] = Field(None, max_length=30)
+    conta_contabil_id: Optional[UUID] = None
+    descricao: Optional[str] = None
+    ativo: bool = True
+
+
+class ProdutoTecnologiaUpdate(BaseModel):
+    fornecedor_id: Optional[UUID] = None
+    codigo: Optional[str] = Field(None, min_length=1, max_length=50)
+    nome: Optional[str] = Field(None, min_length=1, max_length=200)
+    categoria: Optional[str] = Field(None, max_length=50)
+    tipo_precificacao: Optional[str] = Field(None, max_length=30)
+    valor_unitario: Optional[float] = Field(None, ge=0)
+    unidade_medida: Optional[str] = Field(None, max_length=30)
+    conta_contabil_id: Optional[UUID] = None
+    descricao: Optional[str] = None
+    ativo: Optional[bool] = None
+
+
+class ProdutoTecnologiaResponse(ProdutoTecnologiaBase):
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+    fornecedor: Optional["FornecedorResponse"] = None
 
     class Config:
         from_attributes = True
@@ -518,6 +613,17 @@ class ClienteNW(BaseModel):
         from_attributes = True
 
 
+class FornecedorNW(BaseModel):
+    """Fornecedor do banco NW (tabela clifor WHERE fornec = 'S')."""
+    codigo: str
+    razao_social: str
+    nome_fantasia: Optional[str] = None
+    cnpj: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 # ============================================
 # Cenário Empresa (Empresa do Cenário)
 # ============================================
@@ -706,48 +812,6 @@ class CenarioComRelacionamentos(CenarioResponse):
 
 
 # ============================================
-# Premissa
-# ============================================
-
-class PremissaBase(BaseModel):
-    cenario_id: UUID
-    absenteismo: float = Field(3.0, ge=0, le=100, description="% absenteismo total")
-    abs_pct_justificado: float = Field(75.0, ge=0, le=100, description="% do ABS que e justificado")
-    turnover: float = Field(5.0, ge=0, le=100)
-    ferias_indice: float = Field(8.33, ge=0, le=100)
-    dias_treinamento: int = Field(15, ge=0, le=180)
-    reajuste_data: Optional[date] = None
-    reajuste_percentual: float = Field(0, ge=0, le=100)
-    dissidio_mes: Optional[int] = Field(None, ge=1, le=12)
-    dissidio_percentual: float = Field(0, ge=0, le=100)
-
-
-class PremissaCreate(PremissaBase):
-    pass
-
-
-class PremissaUpdate(BaseModel):
-    absenteismo: Optional[float] = Field(None, ge=0, le=100)
-    abs_pct_justificado: Optional[float] = Field(None, ge=0, le=100)
-    turnover: Optional[float] = Field(None, ge=0, le=100)
-    ferias_indice: Optional[float] = Field(None, ge=0, le=100)
-    dias_treinamento: Optional[int] = Field(None, ge=0, le=180)
-    reajuste_data: Optional[date] = None
-    reajuste_percentual: Optional[float] = Field(None, ge=0, le=100)
-    dissidio_mes: Optional[int] = Field(None, ge=1, le=12)
-    dissidio_percentual: Optional[float] = Field(None, ge=0, le=100)
-
-
-class PremissaResponse(PremissaBase):
-    id: UUID
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-# ============================================
 # Quadro de Pessoal
 # ============================================
 
@@ -879,6 +943,99 @@ class QuadroPessoalComRelacionamentos(QuadroPessoalResponse):
     funcao: Optional[FuncaoSimples] = None
     secao: Optional[SecaoSimples] = None
     centro_custo: Optional[CentroCustoSimples] = None
+
+
+# ============================================
+# Alocação de Tecnologia
+# ============================================
+
+class AlocacaoTecnologiaBase(BaseModel):
+    cenario_id: UUID
+    cenario_secao_id: UUID
+    produto_id: UUID
+    tipo_alocacao: str = Field("FIXO", max_length=30, description="FIXO, FIXO_VARIAVEL, VARIAVEL")
+    
+    # Componente FIXO
+    valor_fixo_mensal: Optional[float] = Field(None, ge=0, description="Valor fixo mensal (para FIXO e FIXO_VARIAVEL)")
+    
+    # Componente VARIÁVEL
+    tipo_variavel: Optional[str] = Field(None, max_length=20, description="POR_PA ou POR_HC (para VARIAVEL e FIXO_VARIAVEL)")
+    valor_unitario_variavel: Optional[float] = Field(None, ge=0, description="Valor por unidade variável (PA ou HC)")
+    fator_multiplicador: float = Field(1.0, ge=0, description="Multiplicador para cálculo variável")
+    
+    observacao: Optional[str] = None
+    ativo: bool = True
+
+
+class AlocacaoTecnologiaCreate(AlocacaoTecnologiaBase):
+    pass
+
+
+class AlocacaoTecnologiaUpdate(BaseModel):
+    cenario_secao_id: Optional[UUID] = None
+    produto_id: Optional[UUID] = None
+    tipo_alocacao: Optional[str] = Field(None, max_length=30)
+    
+    valor_fixo_mensal: Optional[float] = Field(None, ge=0)
+    tipo_variavel: Optional[str] = Field(None, max_length=20)
+    valor_unitario_variavel: Optional[float] = Field(None, ge=0)
+    fator_multiplicador: Optional[float] = Field(None, ge=0)
+    observacao: Optional[str] = None
+    ativo: Optional[bool] = None
+
+
+class AlocacaoTecnologiaResponse(AlocacaoTecnologiaBase):
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+    produto: Optional["ProdutoTecnologiaResponse"] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# Custos Tecnologia (Calculados)
+# ============================================
+
+class CustoTecnologiaBase(BaseModel):
+    cenario_id: UUID
+    cenario_secao_id: UUID
+    alocacao_tecnologia_id: UUID
+    produto_id: UUID
+    conta_contabil_id: Optional[UUID] = None
+    mes: int = Field(..., ge=1, le=12)
+    ano: int
+    quantidade_base: Decimal
+    valor_unitario: Decimal
+    valor_calculado: Decimal
+    tipo_calculo: str
+    parametros_calculo: Optional[Dict[str, Any]] = None
+
+
+class CustoTecnologiaCreate(CustoTecnologiaBase):
+    pass
+
+
+class CustoTecnologiaUpdate(BaseModel):
+    quantidade_base: Optional[Decimal] = None
+    valor_unitario: Optional[Decimal] = None
+    valor_calculado: Optional[Decimal] = None
+    tipo_calculo: Optional[str] = None
+    parametros_calculo: Optional[Dict[str, Any]] = None
+
+
+class CustoTecnologiaResponse(CustoTecnologiaBase):
+    id: UUID
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CustoTecnologiaComRelacionamentos(CustoTecnologiaResponse):
+    produto: Optional["ProdutoTecnologiaResponse"] = None
+    alocacao: Optional["AlocacaoTecnologiaResponse"] = None
 
 
 # ============================================

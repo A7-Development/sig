@@ -10,7 +10,7 @@ import { Loader2, Save, Building2, Users, Briefcase, User, Copy } from "lucide-r
 import { toast } from "sonner";
 import { api } from "@/lib/api/client";
 import { useAuthStore } from "@/stores/auth-store";
-import type { CenarioEmpresa, CenarioCliente, CenarioSecao, QuadroPessoal, Funcao, PremissaFuncaoMes, Premissa } from "@/lib/api/orcamento";
+import type { CenarioEmpresa, CenarioCliente, CenarioSecao, QuadroPessoal, Funcao, PremissaFuncaoMes } from "@/lib/api/orcamento";
 
 // ============================================
 // Tipos
@@ -23,7 +23,6 @@ interface PremissasFuncaoGridPanelProps {
   secao: CenarioSecao;
   funcao: Funcao;
   quadroItem: QuadroPessoal;
-  premissaGeral?: Premissa;
   anoInicio: number;
   mesInicio: number;
   anoFim: number;
@@ -62,7 +61,6 @@ export function PremissasFuncaoGridPanel({
   secao,
   funcao,
   quadroItem,
-  premissaGeral,
   anoInicio,
   mesInicio,
   anoFim,
@@ -109,6 +107,20 @@ export function PremissasFuncaoGridPanel({
       );
       
       const premissasExistentes = res || [];
+      
+      // Debug: Verificar se as premissas pertencem ao cenário correto
+      if (premissasExistentes.length > 0) {
+        const premissaErrada = premissasExistentes.find(p => p.cenario_id !== cenarioId);
+        if (premissaErrada) {
+          console.error('⚠️ PREMISSA DE OUTRO CENÁRIO DETECTADA!', {
+            premissaCenarioId: premissaErrada.cenario_id,
+            cenarioAtual: cenarioId,
+            funcaoId: funcao.id,
+            secaoId: secao.id
+          });
+        }
+      }
+      
       const meses = mesesPeriodo();
       
       // Mapear premissas existentes ou criar com valores padrão
@@ -118,23 +130,23 @@ export function PremissasFuncaoGridPanel({
           return {
             mes: m.mes,
             ano: m.ano,
-            absenteismo: existente.absenteismo,
-            abs_pct_justificado: existente.abs_pct_justificado || 75,
-            turnover: existente.turnover,
-            ferias_indice: existente.ferias_indice,
-            dias_treinamento: existente.dias_treinamento,
+            absenteismo: existente.absenteismo ?? 0,
+            abs_pct_justificado: existente.abs_pct_justificado ?? 0,
+            turnover: existente.turnover ?? 0,
+            ferias_indice: existente.ferias_indice ?? 0,
+            dias_treinamento: existente.dias_treinamento ?? 0,
             id: existente.id,
           };
         }
-        // Valores padrão da premissa geral ou defaults
+        // Valores padrão zerados - usuário deve preencher
         return {
           mes: m.mes,
           ano: m.ano,
-          absenteismo: premissaGeral?.absenteismo || 3.0,
-          abs_pct_justificado: premissaGeral?.abs_pct_justificado || 75,
-          turnover: premissaGeral?.turnover || 5.0,
-          ferias_indice: premissaGeral?.ferias_indice || 8.33,
-          dias_treinamento: premissaGeral?.dias_treinamento || 15,
+          absenteismo: 0,
+          abs_pct_justificado: 0,
+          turnover: 0,
+          ferias_indice: 0,
+          dias_treinamento: 0,
         };
       });
       
@@ -146,7 +158,7 @@ export function PremissasFuncaoGridPanel({
     } finally {
       setLoading(false);
     }
-  }, [cenarioId, token, funcao.id, secao.id, mesesPeriodo, premissaGeral]);
+  }, [cenarioId, token, funcao.id, secao.id, mesesPeriodo]);
 
   useEffect(() => {
     carregarPremissas();

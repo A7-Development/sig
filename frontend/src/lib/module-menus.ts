@@ -34,6 +34,8 @@ import {
   CalendarDays,
   Receipt,
   BookOpen,
+  Truck,
+  Server,
   type LucideIcon,
 } from "lucide-react";
 
@@ -91,6 +93,8 @@ export const moduleMenus: ModuleMenus = {
             { name: "Feriados", href: "/controladoria/orcamento/cadastros/feriados", icon: CalendarDays },
             { name: "Rubricas de Custo", href: "/controladoria/orcamento/cadastros/rubricas", icon: Receipt },
             { name: "Contas Contábeis", href: "/controladoria/orcamento/cadastros/contas-contabeis", icon: BookOpen },
+            { name: "Fornecedores", href: "/controladoria/orcamento/cadastros/fornecedores", icon: Truck },
+            { name: "Produtos Tecnologia", href: "/controladoria/orcamento/cadastros/produtos-tecnologia", icon: Server },
           ],
         },
         { name: "Indicadores", href: "/controladoria/indicadores", icon: BarChart3 },

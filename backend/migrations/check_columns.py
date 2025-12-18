@@ -43,3 +43,5 @@ for row in cur.fetchall():
 conn.close()
 print("\nVerificacao concluida!")
 
+
+

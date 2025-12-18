@@ -59,21 +59,12 @@ import { v4 as uuidv4 } from "uuid";
 // Tipos
 // ============================================
 
-interface PremissaSimples {
-  absenteismo: number;
-  abs_pct_justificado: number;
-  turnover: number;
-  ferias_indice: number;
-  dias_treinamento: number;
-}
-
 interface CapacityPlanningPanelProps {
   cenarioId: string;
   empresa: CenarioEmpresa;
   cliente: CenarioCliente;
   secao: CenarioSecao;
   todasSecoes: CenarioSecao[];  // Para rateio entre seções
-  premissas?: PremissaSimples;  // Premissas do cenário para cálculo de HC na Folha
   anoInicio: number;
   mesInicio: number;
   anoFim: number;
@@ -93,7 +84,6 @@ export function CapacityPlanningPanel({
   cliente,
   secao,
   todasSecoes,
-  premissas,
   anoInicio,
   mesInicio,
   anoFim,
@@ -323,24 +313,6 @@ export function CapacityPlanningPanel({
     }, 0);
   };
 
-  // Calcular HC na Folha considerando premissas de ineficiência
-  // Fórmula: HC_Folha = HC_Operando / (1 - ABS%) / (1 - Férias%) / (1 - TO% × (dias_trein/30))
-  const calcularHCFolhaMes = (mesKey: string) => {
-    const hcOperando = calcularTotalMes(mesKey);
-    if (!premissas || hcOperando === 0) return hcOperando;
-    
-    const abs = (premissas.absenteismo || 0) / 100;
-    const ferias = (premissas.ferias_indice || 0) / 100;
-    const to = (premissas.turnover || 0) / 100;
-    const fatorTreinamento = (premissas.dias_treinamento || 15) / 30;
-    
-    // Evitar divisão por zero
-    const fatorAbs = Math.max(0.01, 1 - abs);
-    const fatorFerias = Math.max(0.01, 1 - ferias);
-    const fatorTO = Math.max(0.01, 1 - (to * fatorTreinamento));
-    
-    return hcOperando / fatorAbs / fatorFerias / fatorTO;
-  };
 
   // ============================================
   // Funções não utilizadas nesta seção
@@ -605,27 +577,6 @@ export function CapacityPlanningPanel({
                 </TableCell>
                 <TableCell></TableCell>
               </TableRow>
-              
-              {/* Linha de HC na Folha (calculado com premissas) */}
-              {premissas && (
-                <TableRow className="bg-blue-50">
-                  <TableCell className="sticky left-0 bg-blue-50 z-10">
-                    <span className="text-[10px] font-semibold text-blue-700">HC na Folha</span>
-                  </TableCell>
-                  <TableCell></TableCell>
-                  {meses.map(m => (
-                    <TableCell key={`folha-${m.key}`} className="text-center">
-                      <span className="text-[10px] font-mono text-blue-700">{calcularHCFolhaMes(m.key).toFixed(0)}</span>
-                    </TableCell>
-                  ))}
-                  <TableCell className="text-center bg-blue-100">
-                    <span className="text-[10px] font-semibold text-blue-700">
-                      {meses.reduce((sum, m) => sum + calcularHCFolhaMes(m.key), 0).toFixed(0)}
-                    </span>
-                  </TableCell>
-                  <TableCell></TableCell>
-                </TableRow>
-              )}
               
               {/* Linha de PAs */}
               <TableRow className="bg-orange-50">
