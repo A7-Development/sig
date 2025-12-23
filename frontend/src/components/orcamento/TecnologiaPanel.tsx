@@ -54,14 +54,9 @@ interface TecnologiaPanelProps {
 }
 
 const TIPOS_ALOCACAO = [
-  { value: "FIXO", label: "Fixo", description: "Somente valor fixo mensal" },
-  { value: "FIXO_VARIAVEL", label: "Fixo + Variável", description: "Valor fixo + variável (PA ou HC)" },
-  { value: "VARIAVEL", label: "Variável", description: "Somente variável (PA ou HC)" },
-];
-
-const TIPOS_VARIAVEL = [
-  { value: "POR_PA", label: "Por PA" },
-  { value: "POR_HC", label: "Por HC" },
+  { value: "FIXO", label: "Fixo", description: "Valor fixo mensal baseado no produto" },
+  { value: "VARIAVEL", label: "Variável", description: "Quantidade variável por mês" },
+  { value: "RATEIO", label: "Rateio", description: "Percentual de rateio sobre operação" },
 ];
 
 export default function TecnologiaPanel({
@@ -83,11 +78,10 @@ export default function TecnologiaPanel({
   
   const [formData, setFormData] = useState({
     produto_id: "",
-    tipo_alocacao: "FIXO" as "FIXO" | "FIXO_VARIAVEL" | "VARIAVEL",
-    valor_fixo_mensal: "",
-    tipo_variavel: "" as "POR_PA" | "POR_HC" | "",
-    valor_unitario_variavel: "",
+    tipo_alocacao: "FIXO" as "FIXO" | "VARIAVEL" | "RATEIO",
+    valor_override: "",
     fator_multiplicador: "1.0",
+    percentual_rateio: "",
     observacao: "",
   });
 
@@ -143,10 +137,9 @@ export default function TecnologiaPanel({
         cenario_secao_id: secaoId,
         produto_id: formData.produto_id,
         tipo_alocacao: formData.tipo_alocacao,
-        valor_fixo_mensal: formData.valor_fixo_mensal ? parseFloat(formData.valor_fixo_mensal) : null,
-        tipo_variavel: formData.tipo_variavel || null,
-        valor_unitario_variavel: formData.valor_unitario_variavel ? parseFloat(formData.valor_unitario_variavel) : null,
-        fator_multiplicador: parseFloat(formData.fator_multiplicador),
+        valor_override: formData.valor_override ? parseFloat(formData.valor_override) : null,
+        fator_multiplicador: formData.fator_multiplicador ? parseFloat(formData.fator_multiplicador) : 1.0,
+        percentual_rateio: formData.percentual_rateio ? parseFloat(formData.percentual_rateio) : null,
         observacao: formData.observacao || null,
       };
 
@@ -184,10 +177,9 @@ export default function TecnologiaPanel({
     setFormData({
       produto_id: "",
       tipo_alocacao: "FIXO",
-      valor_fixo_mensal: "",
-      tipo_variavel: "",
-      valor_unitario_variavel: "",
+      valor_override: "",
       fator_multiplicador: "1.0",
+      percentual_rateio: "",
       observacao: "",
     });
   };
@@ -196,11 +188,10 @@ export default function TecnologiaPanel({
     setEditando(alocacao);
     setFormData({
       produto_id: alocacao.produto_id,
-      tipo_alocacao: alocacao.tipo_alocacao,
-      valor_fixo_mensal: alocacao.valor_fixo_mensal?.toString() || "",
-      tipo_variavel: (alocacao.tipo_variavel as "POR_PA" | "POR_HC") || "",
-      valor_unitario_variavel: alocacao.valor_unitario_variavel?.toString() || "",
-      fator_multiplicador: alocacao.fator_multiplicador.toString(),
+      tipo_alocacao: alocacao.tipo_alocacao as "FIXO" | "VARIAVEL" | "RATEIO",
+      valor_override: alocacao.valor_override?.toString() || "",
+      fator_multiplicador: alocacao.fator_multiplicador?.toString() || "1.0",
+      percentual_rateio: alocacao.percentual_rateio?.toString() || "",
       observacao: alocacao.observacao || "",
     });
     setShowForm(true);
@@ -236,8 +227,7 @@ export default function TecnologiaPanel({
     }).format(valor);
   };
 
-  const mostrarCampoFixo = formData.tipo_alocacao === "FIXO" || formData.tipo_alocacao === "FIXO_VARIAVEL";
-  const mostrarCampoVariavel = formData.tipo_alocacao === "VARIAVEL" || formData.tipo_alocacao === "FIXO_VARIAVEL";
+  const mostrarCampoRateio = formData.tipo_alocacao === "RATEIO";
 
   return (
     <div className="space-y-6">
@@ -292,8 +282,8 @@ export default function TecnologiaPanel({
                   <TableHead>Produto</TableHead>
                   <TableHead>Fornecedor</TableHead>
                   <TableHead>Tipo</TableHead>
-                  <TableHead className="text-right">Fixo Mensal</TableHead>
-                  <TableHead>Variável</TableHead>
+                  <TableHead className="text-right">Valor Override</TableHead>
+                  <TableHead className="text-right">Fator</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
@@ -311,21 +301,17 @@ export default function TecnologiaPanel({
                         <Badge variant="outline">
                           {TIPOS_ALOCACAO.find(t => t.value === alocacao.tipo_alocacao)?.label || alocacao.tipo_alocacao}
                         </Badge>
+                        {alocacao.percentual_rateio && (
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            ({alocacao.percentual_rateio}%)
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm">
-                        {alocacao.valor_fixo_mensal ? formatarValor(alocacao.valor_fixo_mensal) : "-"}
+                        {alocacao.valor_override ? formatarValor(alocacao.valor_override) : "-"}
                       </TableCell>
-                      <TableCell className="text-sm">
-                        {alocacao.tipo_variavel ? (
-                          <div className="space-y-1">
-                            <div className="text-muted-foreground">
-                              {TIPOS_VARIAVEL.find(t => t.value === alocacao.tipo_variavel)?.label}
-                            </div>
-                            <div className="font-mono">
-                              {formatarValor(alocacao.valor_unitario_variavel)} × {alocacao.fator_multiplicador}
-                            </div>
-                          </div>
-                        ) : "-"}
+                      <TableCell className="text-right font-mono text-sm">
+                        {alocacao.fator_multiplicador ?? 1.0}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
@@ -413,76 +399,58 @@ export default function TecnologiaPanel({
               </div>
             </div>
 
-            {/* Componente FIXO */}
-            {mostrarCampoFixo && (
+            {/* Valor Override e Fator */}
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="valor_fixo_mensal">Valor Fixo Mensal * {formData.tipo_alocacao === "FIXO" && "(R$)"}</Label>
+                <Label htmlFor="valor_override">Valor Override (R$)</Label>
                 <Input
-                  id="valor_fixo_mensal"
+                  id="valor_override"
                   type="number"
                   step="0.01"
                   min="0"
-                  value={formData.valor_fixo_mensal}
-                  onChange={(e) => setFormData({ ...formData, valor_fixo_mensal: e.target.value })}
-                  placeholder="Valor fixo mensal"
-                  required={formData.tipo_alocacao === "FIXO"}
+                  value={formData.valor_override}
+                  onChange={(e) => setFormData({ ...formData, valor_override: e.target.value })}
+                  placeholder="Valor para sobrescrever cálculo automático"
                 />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Deixe em branco para usar o valor do produto
+                </p>
               </div>
-            )}
+              <div>
+                <Label htmlFor="fator_multiplicador">Fator Multiplicador</Label>
+                <Input
+                  id="fator_multiplicador"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.fator_multiplicador}
+                  onChange={(e) => setFormData({ ...formData, fator_multiplicador: e.target.value })}
+                  placeholder="1.0"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Multiplicador para cálculo (padrão: 1.0)
+                </p>
+              </div>
+            </div>
 
-            {/* Componente VARIÁVEL */}
-            {mostrarCampoVariavel && (
-              <div className="space-y-4 p-4 border rounded-lg bg-muted/10">
-                <Label className="text-base font-semibold">Componente Variável</Label>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="tipo_variavel">Tipo *</Label>
-                    <Select
-                      value={formData.tipo_variavel}
-                      onValueChange={(value: any) => setFormData({ ...formData, tipo_variavel: value })}
-                      required={formData.tipo_alocacao === "VARIAVEL"}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecione..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {TIPOS_VARIAVEL.map((tipo) => (
-                          <SelectItem key={tipo.value} value={tipo.value}>
-                            {tipo.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label htmlFor="valor_unitario_variavel">Valor Unitário *</Label>
-                    <Input
-                      id="valor_unitario_variavel"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.valor_unitario_variavel}
-                      onChange={(e) => setFormData({ ...formData, valor_unitario_variavel: e.target.value })}
-                      placeholder="R$ por PA/HC"
-                      required={formData.tipo_alocacao === "VARIAVEL"}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <Label htmlFor="fator_multiplicador">Fator Multiplicador</Label>
-                  <Input
-                    id="fator_multiplicador"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={formData.fator_multiplicador}
-                    onChange={(e) => setFormData({ ...formData, fator_multiplicador: e.target.value })}
-                    placeholder="1.0"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Multiplica a quantidade base (ex: 1.5 = 150% do PA/HC)
-                  </p>
-                </div>
+            {/* Percentual de Rateio */}
+            {mostrarCampoRateio && (
+              <div>
+                <Label htmlFor="percentual_rateio">Percentual de Rateio (%)</Label>
+                <Input
+                  id="percentual_rateio"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  value={formData.percentual_rateio}
+                  onChange={(e) => setFormData({ ...formData, percentual_rateio: e.target.value })}
+                  placeholder="0.00"
+                  required={formData.tipo_alocacao === "RATEIO"}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Percentual do custo a ser rateado para esta seção
+                </p>
               </div>
             )}
 
@@ -496,16 +464,6 @@ export default function TecnologiaPanel({
                 rows={2}
               />
             </div>
-
-            {/* Alertas */}
-            {mostrarCampoVariavel && (
-              <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <AlertCircle className="size-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                <div className="text-sm text-blue-800">
-                  <strong>Info:</strong> Os valores variáveis serão calculados automaticamente com base nos PAs/HCs do cenário.
-                </div>
-              </div>
-            )}
 
             <div className="flex justify-end gap-2 pt-4">
               <Button type="button" variant="outline" onClick={() => setShowForm(false)}>

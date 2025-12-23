@@ -165,9 +165,9 @@ export default function RubricasPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Rubricas de Custo</h1>
+          <h1 className="text-2xl font-bold">Eventos de Folha</h1>
           <p className="text-sm text-muted-foreground">
-            Configure as rubricas de custo e vincule às contas contábeis
+            Configure os eventos de folha e vincule às contas contábeis
           </p>
         </div>
       </div>

@@ -26,6 +26,13 @@ from app.services.calculo_custos_tecnologia import calcular_e_salvar_custos_tecn
 router = APIRouter(prefix="/custos", tags=["Custos"])
 
 
+# Endpoint de teste simples
+@router.get("/test")
+async def test_endpoint():
+    """Teste simples."""
+    return {"status": "ok", "message": "Endpoint de custos funcionando"}
+
+
 # ============================================
 # Tipos de Custo (Rubricas)
 # ============================================

@@ -247,6 +247,8 @@ class ProdutoTecnologiaBase(BaseModel):
     codigo: str = Field(..., min_length=1, max_length=50)
     nome: str = Field(..., min_length=1, max_length=200)
     categoria: str = Field(..., max_length=50, description="DISCADOR, URA, AGENTE_VIRTUAL, AUTOMACAO, QUALIDADE, etc")
+    tipo_precificacao: Optional[str] = Field(None, max_length=30, description="POR_PA, POR_LICENCA, FIXO, etc")
+    valor_unitario: Optional[float] = Field(None, ge=0, description="Valor unitário")
     valor_base: Optional[float] = Field(None, ge=0, description="Valor base/tabela do fornecedor (referência)")
     unidade_medida: Optional[str] = Field(None, max_length=30)
     conta_contabil_id: Optional[UUID] = None
@@ -259,6 +261,8 @@ class ProdutoTecnologiaCreate(BaseModel):
     codigo: Optional[str] = Field(None, max_length=50, description="Código do produto (deixe vazio para gerar automaticamente)")
     nome: str = Field(..., min_length=1, max_length=200)
     categoria: str = Field(..., max_length=50)
+    tipo_precificacao: Optional[str] = Field(None, max_length=30)
+    valor_unitario: Optional[float] = Field(None, ge=0)
     valor_base: Optional[float] = Field(None, ge=0)
     unidade_medida: Optional[str] = Field(None, max_length=30)
     conta_contabil_id: Optional[UUID] = None
@@ -953,15 +957,30 @@ class AlocacaoTecnologiaBase(BaseModel):
     cenario_id: UUID
     cenario_secao_id: UUID
     produto_id: UUID
-    tipo_alocacao: str = Field("FIXO", max_length=30, description="FIXO, FIXO_VARIAVEL, VARIAVEL")
+    tipo_alocacao: str = Field("FIXO", max_length=30, description="FIXO, VARIAVEL, RATEIO")
     
-    # Componente FIXO
-    valor_fixo_mensal: Optional[float] = Field(None, ge=0, description="Valor fixo mensal (para FIXO e FIXO_VARIAVEL)")
+    # Quantidades mensais
+    qtd_jan: Optional[float] = Field(None, ge=0)
+    qtd_fev: Optional[float] = Field(None, ge=0)
+    qtd_mar: Optional[float] = Field(None, ge=0)
+    qtd_abr: Optional[float] = Field(None, ge=0)
+    qtd_mai: Optional[float] = Field(None, ge=0)
+    qtd_jun: Optional[float] = Field(None, ge=0)
+    qtd_jul: Optional[float] = Field(None, ge=0)
+    qtd_ago: Optional[float] = Field(None, ge=0)
+    qtd_set: Optional[float] = Field(None, ge=0)
+    qtd_out: Optional[float] = Field(None, ge=0)
+    qtd_nov: Optional[float] = Field(None, ge=0)
+    qtd_dez: Optional[float] = Field(None, ge=0)
     
-    # Componente VARIÁVEL
-    tipo_variavel: Optional[str] = Field(None, max_length=20, description="POR_PA ou POR_HC (para VARIAVEL e FIXO_VARIAVEL)")
-    valor_unitario_variavel: Optional[float] = Field(None, ge=0, description="Valor por unidade variável (PA ou HC)")
-    fator_multiplicador: float = Field(1.0, ge=0, description="Multiplicador para cálculo variável")
+    # Valor override
+    valor_override: Optional[float] = Field(None, ge=0, description="Valor para sobrescrever cálculo automático")
+    
+    # Fator multiplicador
+    fator_multiplicador: Optional[float] = Field(1.0, ge=0, description="Multiplicador para cálculo")
+    
+    # Percentual de rateio
+    percentual_rateio: Optional[float] = Field(None, ge=0, le=100, description="Percentual de rateio (0-100)")
     
     observacao: Optional[str] = None
     ativo: bool = True
@@ -976,10 +995,22 @@ class AlocacaoTecnologiaUpdate(BaseModel):
     produto_id: Optional[UUID] = None
     tipo_alocacao: Optional[str] = Field(None, max_length=30)
     
-    valor_fixo_mensal: Optional[float] = Field(None, ge=0)
-    tipo_variavel: Optional[str] = Field(None, max_length=20)
-    valor_unitario_variavel: Optional[float] = Field(None, ge=0)
+    qtd_jan: Optional[float] = Field(None, ge=0)
+    qtd_fev: Optional[float] = Field(None, ge=0)
+    qtd_mar: Optional[float] = Field(None, ge=0)
+    qtd_abr: Optional[float] = Field(None, ge=0)
+    qtd_mai: Optional[float] = Field(None, ge=0)
+    qtd_jun: Optional[float] = Field(None, ge=0)
+    qtd_jul: Optional[float] = Field(None, ge=0)
+    qtd_ago: Optional[float] = Field(None, ge=0)
+    qtd_set: Optional[float] = Field(None, ge=0)
+    qtd_out: Optional[float] = Field(None, ge=0)
+    qtd_nov: Optional[float] = Field(None, ge=0)
+    qtd_dez: Optional[float] = Field(None, ge=0)
+    
+    valor_override: Optional[float] = Field(None, ge=0)
     fator_multiplicador: Optional[float] = Field(None, ge=0)
+    percentual_rateio: Optional[float] = Field(None, ge=0, le=100)
     observacao: Optional[str] = None
     ativo: Optional[bool] = None
 
@@ -1162,8 +1193,15 @@ class TipoCustoUpdate(BaseModel):
 
 class TipoCustoResponse(TipoCustoBase):
     id: UUID
-    created_at: datetime
-    updated_at: datetime
+    ativo: Optional[bool] = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    @field_validator('ativo', mode='before')
+    @classmethod
+    def ativo_default(cls, v):
+        """Converte None para True (padrão)."""
+        return v if v is not None else True
 
     class Config:
         from_attributes = True

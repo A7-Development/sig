@@ -158,8 +158,10 @@ class ProdutoTecnologia(Base):
     nome = Column(String(200), nullable=False)
     categoria = Column(String(50), nullable=False)  # DISCADOR, URA, AGENTE_VIRTUAL, AUTOMACAO, QUALIDADE, etc.
     
-    # Valor de referência/tabela (pode ser sobrescrito na alocação)
-    valor_base = Column(Numeric(12, 2), nullable=True)  # Valor base/tabela do fornecedor
+    # Precificação
+    tipo_precificacao = Column(String(30), nullable=True)  # POR_PA, POR_LICENCA, FIXO, etc.
+    valor_unitario = Column(Numeric(12, 2), nullable=True)  # Valor unitário
+    valor_base = Column(Numeric(12, 2), nullable=True)  # Valor base/tabela do fornecedor (referência)
     unidade_medida = Column(String(30), nullable=True)  # licença, PA, HC, etc.
     
     # Conta contábil padrão (comentado temporariamente até criar tabela contas_contabeis)
@@ -531,17 +533,31 @@ class AlocacaoTecnologia(Base):
     cenario_secao_id = Column(UUID(as_uuid=True), ForeignKey("cenario_secao.id", ondelete="CASCADE"), nullable=False)
     produto_id = Column(UUID(as_uuid=True), ForeignKey("produtos_tecnologia.id", ondelete="CASCADE"), nullable=False)
     
-    # Tipo de alocação
+    # Tipo de alocação: FIXO, VARIAVEL, RATEIO
     tipo_alocacao = Column(String(30), nullable=False, default="FIXO")
-    # FIXO (só valor fixo), FIXO_VARIAVEL (fixo + variável), VARIAVEL (só variável)
     
-    # Valores mensais FIXOS (para FIXO e FIXO_VARIAVEL)
-    valor_fixo_mensal = Column(Numeric(12, 2), nullable=True)  # Valor fixo mensal
+    # Quantidades mensais (para alocações variáveis por mês)
+    qtd_jan = Column(Numeric(10, 2), nullable=True)
+    qtd_fev = Column(Numeric(10, 2), nullable=True)
+    qtd_mar = Column(Numeric(10, 2), nullable=True)
+    qtd_abr = Column(Numeric(10, 2), nullable=True)
+    qtd_mai = Column(Numeric(10, 2), nullable=True)
+    qtd_jun = Column(Numeric(10, 2), nullable=True)
+    qtd_jul = Column(Numeric(10, 2), nullable=True)
+    qtd_ago = Column(Numeric(10, 2), nullable=True)
+    qtd_set = Column(Numeric(10, 2), nullable=True)
+    qtd_out = Column(Numeric(10, 2), nullable=True)
+    qtd_nov = Column(Numeric(10, 2), nullable=True)
+    qtd_dez = Column(Numeric(10, 2), nullable=True)
     
-    # Componente VARIÁVEL (para VARIAVEL e FIXO_VARIAVEL)
-    tipo_variavel = Column(String(20), nullable=True)  # POR_PA, POR_HC
-    valor_unitario_variavel = Column(Numeric(12, 2), nullable=True)  # Valor por unidade (PA ou HC)
-    fator_multiplicador = Column(Numeric(10, 4), default=1.0)  # Multiplicador para o cálculo
+    # Valor override (para sobrescrever cálculo automático)
+    valor_override = Column(Numeric(12, 2), nullable=True)
+    
+    # Fator multiplicador para cálculos
+    fator_multiplicador = Column(Numeric(10, 4), nullable=True, default=1.0)
+    
+    # Percentual de rateio (para tipo RATEIO)
+    percentual_rateio = Column(Numeric(5, 2), nullable=True)
     
     # Observações
     observacao = Column(Text, nullable=True)

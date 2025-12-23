@@ -694,21 +694,36 @@ export default function CenariosPage() {
                 </div>
               </div>
             ) : abaAtiva === 'tecnologia' ? (
-              <div className="h-full overflow-auto">
-                {selectedTreeNode ? (
-                  <TecnologiaPanel
+              /* Layout Master-Detail para Tecnologia: Árvore à esquerda, Painel à direita */
+              <div className="h-full flex">
+                {/* Painel Esquerdo: Árvore de Navegação */}
+                <div className="w-80 border-r bg-muted/10 flex-shrink-0">
+                  <MasterDetailTree
                     cenarioId={cenarioSelecionado.id}
-                    secaoId={selectedTreeNode.id}
-                    secaoNome={selectedTreeNode.label}
+                    onNodeSelect={setSelectedNode}
+                    onSecoesLoaded={setTodasSecoesCenario}
+                    selectedSecaoId={selectedNode?.secao?.id}
                   />
-                ) : (
-                  <div className="empty-state">
-                    <Server className="size-12 text-muted-foreground/50 mx-auto mb-4" />
-                    <p className="text-muted-foreground">
-                      Selecione uma seção na árvore para gerenciar alocações de tecnologia
-                    </p>
-                  </div>
-                )}
+                </div>
+                
+                {/* Painel Direito: Alocações de Tecnologia */}
+                <div className="flex-1 overflow-auto">
+                  {selectedNode?.type === 'secao' && selectedNode.secao ? (
+                    <TecnologiaPanel
+                      cenarioId={cenarioSelecionado.id}
+                      secaoId={selectedNode.secao.id}
+                      secaoNome={selectedNode.secao.secao?.nome || 'Seção'}
+                    />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
+                      <Server className="h-12 w-12 mb-4 opacity-30" />
+                      <h3 className="text-lg font-medium mb-2">Selecione uma seção</h3>
+                      <p className="text-sm max-w-md text-center">
+                        Navegue pela estrutura à esquerda e clique em uma seção para gerenciar alocações de tecnologia
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : abaAtiva === 'dre' ? (
               <div className="h-full overflow-auto">
