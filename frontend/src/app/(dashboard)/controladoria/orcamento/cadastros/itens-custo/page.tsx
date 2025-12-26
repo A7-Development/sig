@@ -42,18 +42,44 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth-store";
 import { produtosTecnologia, fornecedores, type ProdutoTecnologia, type Fornecedor } from "@/lib/api/orcamento";
+import { api } from "@/lib/api/client";
 import { useToast } from "@/hooks/use-toast";
+import { BookOpen, X } from "lucide-react";
 
 const CATEGORIAS = [
-  { value: "DISCADOR", label: "Discador" },
-  { value: "URA", label: "URA" },
-  { value: "AGENTE_VIRTUAL", label: "Agente Virtual" },
-  { value: "QUALIDADE", label: "Sistema de Qualidade" },
-  { value: "AUTOMACAO", label: "Automação" },
-  { value: "CRM", label: "CRM" },
-  { value: "ANALYTICS", label: "Analytics" },
-  { value: "OUTROS", label: "Outros" },
+  // Tecnologia
+  { value: "DISCADOR", label: "Discador", grupo: "Tecnologia" },
+  { value: "URA", label: "URA", grupo: "Tecnologia" },
+  { value: "AGENTE_VIRTUAL", label: "Agente Virtual", grupo: "Tecnologia" },
+  { value: "QUALIDADE", label: "Sistema de Qualidade", grupo: "Tecnologia" },
+  { value: "AUTOMACAO", label: "Automação", grupo: "Tecnologia" },
+  { value: "CRM", label: "CRM", grupo: "Tecnologia" },
+  { value: "ANALYTICS", label: "Analytics", grupo: "Tecnologia" },
+  // Infraestrutura
+  { value: "TELEFONIA", label: "Telefonia", grupo: "Infraestrutura" },
+  { value: "LINK_DADOS", label: "Link de Dados", grupo: "Infraestrutura" },
+  { value: "CLOUD", label: "Cloud/Hosting", grupo: "Infraestrutura" },
+  { value: "LICENCAS", label: "Licenças de Software", grupo: "Infraestrutura" },
+  // Facilities
+  { value: "ALUGUEL", label: "Aluguel", grupo: "Facilities" },
+  { value: "ENERGIA", label: "Energia Elétrica", grupo: "Facilities" },
+  { value: "AGUA", label: "Água", grupo: "Facilities" },
+  { value: "LIMPEZA", label: "Limpeza", grupo: "Facilities" },
+  { value: "SEGURANCA", label: "Segurança", grupo: "Facilities" },
+  { value: "MANUTENCAO", label: "Manutenção Predial", grupo: "Facilities" },
+  // Serviços
+  { value: "CONSULTORIA", label: "Consultoria", grupo: "Serviços" },
+  { value: "AUDITORIA", label: "Auditoria", grupo: "Serviços" },
+  { value: "JURIDICO", label: "Serviços Jurídicos", grupo: "Serviços" },
+  { value: "CONTABIL", label: "Serviços Contábeis", grupo: "Serviços" },
+  // Outros
+  { value: "OUTROS", label: "Outros", grupo: "Outros" },
 ];
+
+interface ContaContabil {
+  codigo: string;
+  descricao: string;
+}
 
 
 export default function ProdutosTecnologiaPage() {
@@ -78,9 +104,17 @@ export default function ProdutosTecnologiaPage() {
     categoria: "OUTROS",
     valor_base: "",
     unidade_medida: "",
+    conta_contabil_codigo: "",
+    conta_contabil_descricao: "",
     descricao: "",
     ativo: true,
   });
+  
+  // Estado para busca de conta contábil
+  const [buscaContaContabil, setBuscaContaContabil] = useState("");
+  const [contasContabeis, setContasContabeis] = useState<ContaContabil[]>([]);
+  const [loadingContas, setLoadingContas] = useState(false);
+  const [showContasList, setShowContasList] = useState(false);
 
   useEffect(() => {
     if (token) {
@@ -95,6 +129,54 @@ export default function ProdutosTecnologiaPage() {
     }, 500);
     return () => clearTimeout(timer);
   }, [busca]);
+
+  // Buscar contas contábeis quando digitar
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (buscaContaContabil.length >= 2 && token) {
+        buscarContasContabeis();
+      } else {
+        setContasContabeis([]);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [buscaContaContabil]);
+
+  const buscarContasContabeis = async () => {
+    if (!token) return;
+    setLoadingContas(true);
+    try {
+      const params = new URLSearchParams();
+      params.append("busca", buscaContaContabil);
+      params.append("limit", "20");
+      const data = await api.get<ContaContabil[]>(`/api/v1/orcamento/nw/contas-contabeis?${params}`, token);
+      setContasContabeis(data);
+      setShowContasList(true);
+    } catch (error) {
+      console.error("Erro ao buscar contas contábeis:", error);
+    } finally {
+      setLoadingContas(false);
+    }
+  };
+
+  const selecionarContaContabil = (conta: ContaContabil) => {
+    setFormData({
+      ...formData,
+      conta_contabil_codigo: conta.codigo,
+      conta_contabil_descricao: conta.descricao,
+    });
+    setBuscaContaContabil("");
+    setShowContasList(false);
+    setContasContabeis([]);
+  };
+
+  const limparContaContabil = () => {
+    setFormData({
+      ...formData,
+      conta_contabil_codigo: "",
+      conta_contabil_descricao: "",
+    });
+  };
 
   const carregarFornecedores = async () => {
     if (!token) return;
@@ -141,6 +223,8 @@ export default function ProdutosTecnologiaPage() {
         categoria: formData.categoria,
         valor_base: formData.valor_base ? parseFloat(formData.valor_base) : null,
         unidade_medida: formData.unidade_medida || null,
+        conta_contabil_codigo: formData.conta_contabil_codigo || null,
+        conta_contabil_descricao: formData.conta_contabil_descricao || null,
         descricao: formData.descricao || null,
         ativo: formData.ativo,
       };
@@ -204,9 +288,14 @@ export default function ProdutosTecnologiaPage() {
       categoria: "OUTROS",
       valor_base: "",
       unidade_medida: "",
+      conta_contabil_codigo: "",
+      conta_contabil_descricao: "",
       descricao: "",
       ativo: true,
     });
+    setBuscaContaContabil("");
+    setContasContabeis([]);
+    setShowContasList(false);
   };
 
   const handleEditar = (produto: ProdutoTecnologia) => {
@@ -218,6 +307,8 @@ export default function ProdutosTecnologiaPage() {
       categoria: produto.categoria,
       valor_base: produto.valor_base?.toString() || "",
       unidade_medida: produto.unidade_medida || "",
+      conta_contabil_codigo: produto.conta_contabil_codigo || "",
+      conta_contabil_descricao: produto.conta_contabil_descricao || "",
       descricao: produto.descricao || "",
       ativo: produto.ativo,
     });
@@ -349,6 +440,7 @@ export default function ProdutosTecnologiaPage() {
                   <TableHead>Nome</TableHead>
                   <TableHead>Fornecedor</TableHead>
                   <TableHead>Categoria</TableHead>
+                  <TableHead>Conta Contábil</TableHead>
                   <TableHead className="text-right">Valor Base</TableHead>
                   <TableHead className="text-center">Status</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
@@ -366,6 +458,18 @@ export default function ProdutosTecnologiaPage() {
                       <Badge variant="outline">
                         {CATEGORIAS.find(c => c.value === produto.categoria)?.label || produto.categoria}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {produto.conta_contabil_codigo ? (
+                        <div className="text-xs">
+                          <span className="font-mono text-muted-foreground">{produto.conta_contabil_codigo}</span>
+                          <p className="text-muted-foreground truncate max-w-[150px]" title={produto.conta_contabil_descricao || ""}>
+                            {produto.conta_contabil_descricao}
+                          </p>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">-</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right font-mono text-sm">
                       {formatarValor(produto.valor_base)}
@@ -512,6 +616,73 @@ export default function ProdutosTecnologiaPage() {
                   placeholder="Ex: licença, unidade, PA, HC"
                 />
               </div>
+            </div>
+
+            {/* Campo de Conta Contábil */}
+            <div>
+              <Label htmlFor="conta_contabil" className="flex items-center gap-2">
+                <BookOpen className="size-4" />
+                Conta Contábil (DRE)
+              </Label>
+              
+              {formData.conta_contabil_codigo ? (
+                <div className="flex items-center gap-2 mt-2 p-3 bg-muted/50 rounded-lg border">
+                  <div className="flex-1">
+                    <span className="font-mono text-sm font-semibold">{formData.conta_contabil_codigo}</span>
+                    <p className="text-sm text-muted-foreground">{formData.conta_contabil_descricao}</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={limparContaContabil}
+                    title="Remover conta contábil"
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="relative mt-2">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                  <Input
+                    id="conta_contabil"
+                    placeholder="Digite código ou descrição para buscar..."
+                    value={buscaContaContabil}
+                    onChange={(e) => setBuscaContaContabil(e.target.value)}
+                    onFocus={() => buscaContaContabil.length >= 2 && setShowContasList(true)}
+                    className="pl-9"
+                  />
+                  {loadingContas && (
+                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 size-4 animate-spin text-muted-foreground" />
+                  )}
+                  
+                  {/* Lista de contas contábeis */}
+                  {showContasList && contasContabeis.length > 0 && (
+                    <div className="absolute z-50 w-full mt-1 bg-background border rounded-lg shadow-lg max-h-60 overflow-auto">
+                      {contasContabeis.map((conta) => (
+                        <button
+                          key={conta.codigo}
+                          type="button"
+                          className="w-full px-3 py-2 text-left hover:bg-muted/50 border-b last:border-b-0 transition-colors"
+                          onClick={() => selecionarContaContabil(conta)}
+                        >
+                          <span className="font-mono text-xs text-muted-foreground">{conta.codigo}</span>
+                          <p className="text-sm">{conta.descricao}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {showContasList && buscaContaContabil.length >= 2 && contasContabeis.length === 0 && !loadingContas && (
+                    <div className="absolute z-50 w-full mt-1 bg-background border rounded-lg shadow-lg p-3 text-center text-sm text-muted-foreground">
+                      Nenhuma conta encontrada
+                    </div>
+                  )}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground mt-1">
+                Vincule a uma conta contábil do NW para classificação no DRE
+              </p>
             </div>
 
             <div>

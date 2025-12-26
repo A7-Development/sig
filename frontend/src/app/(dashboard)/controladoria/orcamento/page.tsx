@@ -4,13 +4,11 @@ import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
-  Wallet, 
   GitCompare, 
   Briefcase, 
   Building2, 
   CircleDollarSign,
   CalendarDays,
-  Calculator,
   ArrowRight,
   Plus,
   FileText
@@ -26,28 +24,12 @@ const acessosRapidos = [
     bgColor: "bg-blue-100",
   },
   {
-    title: "Cargos e Salários",
-    description: "Tabela salarial e benefícios",
-    icon: Briefcase,
-    href: "/controladoria/orcamento/cargos-salarios",
-    color: "text-purple-600",
-    bgColor: "bg-purple-100",
-  },
-  {
     title: "Cadastros",
-    description: "Departamentos, Seções, CCs, Feriados",
+    description: "Empresas, Departamentos, Cargos, Feriados",
     icon: Building2,
     href: "/controladoria/orcamento/cadastros",
     color: "text-emerald-600",
     bgColor: "bg-emerald-100",
-  },
-  {
-    title: "Encargos",
-    description: "Configuração de encargos e provisões",
-    icon: Calculator,
-    href: "/controladoria/orcamento/configuracoes/encargos",
-    color: "text-orange-600",
-    bgColor: "bg-orange-100",
   },
 ];
 
@@ -127,7 +109,7 @@ export default function OrcamentoPage() {
       {/* Acessos rápidos */}
       <div>
         <h2 className="text-lg font-semibold mb-4">Acessos Rápidos</h2>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2">
           {acessosRapidos.map((item) => (
             <Link key={item.href} href={item.href}>
               <Card className="hover:shadow-md transition-shadow cursor-pointer group h-full">

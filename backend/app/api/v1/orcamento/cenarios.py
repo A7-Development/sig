@@ -1837,3 +1837,107 @@ async def listar_centros_custo_para_secao(
         ]
     }
 
+
+# ============================================
+# CENTROS DE CUSTO DA SEÇÃO
+# ============================================
+
+from app.db.models.orcamento import CenarioSecaoCC
+from app.schemas.orcamento import CenarioSecaoCCCreate, CenarioSecaoCCResponse, CentroCustoSimples
+
+@router.get("/{cenario_id}/secoes/{cenario_secao_id}/centros-custo", response_model=List[CenarioSecaoCCResponse])
+async def listar_ccs_secao(
+    cenario_id: UUID,
+    cenario_secao_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """Lista todos os Centros de Custo associados a uma Seção do cenário."""
+    result = await db.execute(
+        select(CenarioSecaoCC)
+        .where(
+            CenarioSecaoCC.cenario_secao_id == cenario_secao_id,
+            CenarioSecaoCC.ativo == True
+        )
+        .options(selectinload(CenarioSecaoCC.centro_custo))
+        .order_by(CenarioSecaoCC.created_at)
+    )
+    return result.scalars().all()
+
+
+@router.post("/{cenario_id}/secoes/{cenario_secao_id}/centros-custo", response_model=CenarioSecaoCCResponse)
+async def adicionar_cc_secao(
+    cenario_id: UUID,
+    cenario_secao_id: UUID,
+    data: CenarioSecaoCCCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Adiciona um Centro de Custo a uma Seção do cenário."""
+    # Verificar se seção existe
+    secao_result = await db.execute(
+        select(CenarioSecao).where(CenarioSecao.id == cenario_secao_id)
+    )
+    cenario_secao = secao_result.scalar_one_or_none()
+    if not cenario_secao:
+        raise HTTPException(status_code=404, detail="Seção não encontrada no cenário")
+    
+    # Verificar se CC existe
+    cc_result = await db.execute(
+        select(CentroCusto).where(CentroCusto.id == data.centro_custo_id)
+    )
+    cc = cc_result.scalar_one_or_none()
+    if not cc:
+        raise HTTPException(status_code=404, detail="Centro de Custo não encontrado")
+    
+    # Verificar se já existe associação
+    existing = await db.execute(
+        select(CenarioSecaoCC).where(
+            CenarioSecaoCC.cenario_secao_id == cenario_secao_id,
+            CenarioSecaoCC.centro_custo_id == data.centro_custo_id
+        )
+    )
+    existing_record = existing.scalar_one_or_none()
+    if existing_record:
+        # Reativar se estava inativo
+        if not existing_record.ativo:
+            existing_record.ativo = True
+            await db.commit()
+            await db.refresh(existing_record, attribute_names=['centro_custo'])
+            return existing_record
+        raise HTTPException(status_code=400, detail="Centro de Custo já está associado a esta Seção")
+    
+    # Criar nova associação
+    associacao = CenarioSecaoCC(
+        cenario_secao_id=cenario_secao_id,
+        centro_custo_id=data.centro_custo_id
+    )
+    db.add(associacao)
+    await db.commit()
+    await db.refresh(associacao, attribute_names=['centro_custo'])
+    
+    return associacao
+
+
+@router.delete("/{cenario_id}/secoes/{cenario_secao_id}/centros-custo/{centro_custo_id}")
+async def remover_cc_secao(
+    cenario_id: UUID,
+    cenario_secao_id: UUID,
+    centro_custo_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """Remove um Centro de Custo de uma Seção do cenário."""
+    result = await db.execute(
+        select(CenarioSecaoCC).where(
+            CenarioSecaoCC.cenario_secao_id == cenario_secao_id,
+            CenarioSecaoCC.centro_custo_id == centro_custo_id
+        )
+    )
+    associacao = result.scalar_one_or_none()
+    if not associacao:
+        raise HTTPException(status_code=404, detail="Associação não encontrada")
+    
+    # Soft delete
+    associacao.ativo = False
+    await db.commit()
+    
+    return {"message": "Centro de Custo removido da Seção com sucesso"}
+

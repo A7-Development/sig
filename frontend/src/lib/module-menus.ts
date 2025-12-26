@@ -78,8 +78,6 @@ export const moduleMenus: ModuleMenus = {
           submenu: [
             { name: "Visão Geral", href: "/controladoria/orcamento", icon: Wallet },
             { name: "Cenários", href: "/controladoria/orcamento/cenarios", icon: GitCompare },
-            { name: "Empresas", href: "/controladoria/orcamento/empresas", icon: Building2 },
-            { name: "Cargos e Salários", href: "/controladoria/orcamento/cargos-salarios", icon: Briefcase },
           ],
         },
         { 
@@ -87,14 +85,17 @@ export const moduleMenus: ModuleMenus = {
           href: "/controladoria/cadastros", 
           icon: ClipboardList,
           submenu: [
-            { name: "Departamentos", href: "/controladoria/orcamento/cadastros/departamentos", icon: Building2 },
+            { name: "Empresas", href: "/controladoria/orcamento/cadastros/empresas", icon: Building2 },
+            { name: "Departamentos", href: "/controladoria/orcamento/cadastros/departamentos", icon: Layers },
             { name: "Seções", href: "/controladoria/orcamento/cadastros/secoes", icon: Layers },
             { name: "Centros de Custo", href: "/controladoria/orcamento/cadastros/centros-custo", icon: CircleDollarSign },
+            { name: "Cargos e Salários", href: "/controladoria/orcamento/cadastros/cargos-salarios", icon: Briefcase },
             { name: "Feriados", href: "/controladoria/orcamento/cadastros/feriados", icon: CalendarDays },
             { name: "Eventos de Folha", href: "/controladoria/orcamento/cadastros/rubricas", icon: Receipt },
             { name: "Contas Contábeis", href: "/controladoria/orcamento/cadastros/contas-contabeis", icon: BookOpen },
             { name: "Fornecedores", href: "/controladoria/orcamento/cadastros/fornecedores", icon: Truck },
             { name: "Itens de Custo", href: "/controladoria/orcamento/cadastros/itens-custo", icon: Server },
+            { name: "Tipos de Receita", href: "/controladoria/orcamento/cadastros/tipos-receita", icon: TrendingUp },
           ],
         },
         { name: "Indicadores", href: "/controladoria/indicadores", icon: BarChart3 },

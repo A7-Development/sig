@@ -358,6 +358,8 @@ async def gerar_dre_cenario(
         ProdutoTecnologia.codigo,
         ProdutoTecnologia.nome,
         ProdutoTecnologia.categoria,
+        ProdutoTecnologia.conta_contabil_codigo,
+        ProdutoTecnologia.conta_contabil_descricao,
         CustoTecnologia.mes,
         func.sum(CustoTecnologia.valor_calculado).label("valor")
     ).join(
@@ -369,6 +371,8 @@ async def gerar_dre_cenario(
         ProdutoTecnologia.codigo,
         ProdutoTecnologia.nome,
         ProdutoTecnologia.categoria,
+        ProdutoTecnologia.conta_contabil_codigo,
+        ProdutoTecnologia.conta_contabil_descricao,
         CustoTecnologia.mes
     ).order_by(ProdutoTecnologia.codigo, CustoTecnologia.mes)
     
@@ -382,13 +386,17 @@ async def gerar_dre_cenario(
     for row in rows_tec:
         codigo = f"TEC_{row.codigo}"  # Prefixo para diferenciar de custos de pessoal
         if codigo not in rubricas_dict:
+            conta_codigo = row.conta_contabil_codigo or ""
+            conta_desc = row.conta_contabil_descricao or ""
+            conta_completa = f"{conta_codigo} - {conta_desc}" if conta_codigo and conta_desc else conta_codigo or conta_desc or ""
+            
             rubricas_dict[codigo] = {
                 "tipo_custo_codigo": codigo,
                 "tipo_custo_nome": f"{row.nome} (Tecnologia)",
                 "categoria": f"TECNOLOGIA_{row.categoria}",
-                "conta_contabil_codigo": "",
-                "conta_contabil_descricao": "",
-                "conta_contabil_completa": "",
+                "conta_contabil_codigo": conta_codigo,
+                "conta_contabil_descricao": conta_desc,
+                "conta_contabil_completa": conta_completa,
                 "valores_mensais": [0.0] * 12,
                 "total": 0.0
             }
@@ -399,13 +407,225 @@ async def gerar_dre_cenario(
         rubricas_dict[codigo]["total"] += valor
     
     # ============================================
-    # 3. Converter para lista de DRELinha e calcular totais
+    # 3. Buscar CUSTOS DIRETOS agrupados por item de custo e mês
+    # ============================================
+    from app.db.models.orcamento import CustoDireto, CentroCusto, QuadroPessoal
+    
+    # Calcular custos diretos para cada mês do cenário
+    mes_inicio = cenario.mes_inicio
+    mes_fim = cenario.mes_fim
+    ano_inicio_cenario = cenario.ano_inicio
+    ano_fim_cenario = cenario.ano_fim
+    
+    # Buscar custos diretos ativos do cenário
+    query_diretos = select(CustoDireto).options(
+        selectinload(CustoDireto.item_custo),
+        selectinload(CustoDireto.centro_custo)
+    ).where(
+        CustoDireto.cenario_id == cenario_id,
+        CustoDireto.ativo == True
+    )
+    
+    if cenario_secao_id:
+        query_diretos = query_diretos.where(CustoDireto.cenario_secao_id == cenario_secao_id)
+    
+    result_diretos = await db.execute(query_diretos)
+    custos_diretos = result_diretos.scalars().all()
+    
+    # Pré-calcular HC/PA por mês para custos variáveis
+    # Buscar quadro de pessoal para calcular HC por mês
+    MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
+    
+    async def calcular_hc_mes(centro_custo_id, funcao_id, mes_idx, ano_calc):
+        """Calcula HC para um mês específico."""
+        query = select(QuadroPessoal).where(
+            QuadroPessoal.cenario_id == cenario_id,
+            QuadroPessoal.ativo == True
+        )
+        if centro_custo_id:
+            query = query.where(QuadroPessoal.centro_custo_id == centro_custo_id)
+        if funcao_id:
+            query = query.where(QuadroPessoal.funcao_id == funcao_id)
+        
+        result = await db.execute(query)
+        quadros = result.scalars().all()
+        
+        total_hc = 0.0
+        mes_key = f"qtd_{MESES[mes_idx]}"
+        for q in quadros:
+            # Verificar se o registro tem dados para este ano
+            if hasattr(q, mes_key):
+                valor = getattr(q, mes_key, 0) or 0
+                total_hc += float(valor)
+        
+        return total_hc
+    
+    # Para cada custo direto, calcular o valor por mês
+    for custo in custos_diretos:
+        if not custo.item_custo:
+            continue
+            
+        item = custo.item_custo
+        codigo = f"DIR_{item.codigo}"
+        
+        if codigo not in rubricas_dict:
+            conta_codigo = item.conta_contabil_codigo or ""
+            conta_desc = item.conta_contabil_descricao or ""
+            conta_completa = f"{conta_codigo} - {conta_desc}" if conta_codigo and conta_desc else conta_codigo or conta_desc or ""
+            
+            rubricas_dict[codigo] = {
+                "tipo_custo_codigo": codigo,
+                "tipo_custo_nome": f"{item.nome} (Custo Direto)",
+                "categoria": f"CUSTO_DIRETO_{item.categoria}",
+                "conta_contabil_codigo": conta_codigo,
+                "conta_contabil_descricao": conta_desc,
+                "conta_contabil_completa": conta_completa,
+                "valores_mensais": [0.0] * 12,
+                "total": 0.0
+            }
+        
+        # Distribuir valor nos meses do ano selecionado
+        for mes in range(1, 13):
+            # Verificar se o mês está dentro do período do cenário
+            if ano == ano_inicio_cenario and mes < mes_inicio:
+                continue
+            if ano == ano_fim_cenario and mes > mes_fim:
+                continue
+            if ano < ano_inicio_cenario or ano > ano_fim_cenario:
+                continue
+            
+            mes_idx = mes - 1
+            
+            # Calcular valor mensal baseado no tipo
+            valor_mensal = 0.0
+            if custo.tipo_valor == "FIXO":
+                valor_mensal = float(custo.valor_fixo or 0)
+            elif custo.tipo_valor == "VARIAVEL":
+                # Calcular baseado em HC/PA do quadro de pessoal
+                valor_unitario = float(custo.valor_unitario_variavel or 0)
+                
+                if custo.unidade_medida == "HC":
+                    # Buscar HC do centro de custo (ou função específica)
+                    hc = await calcular_hc_mes(
+                        custo.centro_custo_id if custo.tipo_medida in ["HC_TOTAL", None] else None,
+                        custo.funcao_base_id if custo.tipo_medida == "HC_FUNCAO" else None,
+                        mes_idx,
+                        ano
+                    )
+                    valor_mensal = valor_unitario * hc
+                elif custo.unidade_medida == "PA":
+                    # PA = Posição de Atendimento (usar mesmo cálculo de HC por simplicidade)
+                    pa = await calcular_hc_mes(
+                        custo.centro_custo_id,
+                        custo.funcao_base_id if custo.tipo_medida == "PA_FUNCAO" else None,
+                        mes_idx,
+                        ano
+                    )
+                    valor_mensal = valor_unitario * pa
+                else:
+                    # Unidade genérica, usar valor unitário direto
+                    valor_mensal = valor_unitario
+                    
+            elif custo.tipo_valor == "FIXO_VARIAVEL":
+                valor_fixo = float(custo.valor_fixo or 0)
+                valor_unitario = float(custo.valor_unitario_variavel or 0)
+                
+                # Calcular componente variável
+                hc = await calcular_hc_mes(
+                    custo.centro_custo_id,
+                    custo.funcao_base_id,
+                    mes_idx,
+                    ano
+                )
+                valor_mensal = valor_fixo + (valor_unitario * hc)
+            
+            # Aplicar rateio se existir
+            if custo.tipo_calculo == "rateio" and custo.rateio_percentual:
+                valor_mensal = valor_mensal * float(custo.rateio_percentual) / 100
+            
+            rubricas_dict[codigo]["valores_mensais"][mes_idx] += valor_mensal
+            rubricas_dict[codigo]["total"] += valor_mensal
+    
+    # ============================================
+    # 4. Buscar RECEITAS do cenário
+    # ============================================
+    from app.db.models.orcamento import ReceitaCenario, ReceitaPremissaMes, TipoReceita, Feriado
+    from app.api.v1.orcamento.receitas import _calcular_receita_mes
+    
+    # Buscar receitas ativas do cenário
+    query_receitas = select(ReceitaCenario).where(
+        ReceitaCenario.cenario_id == cenario_id,
+        ReceitaCenario.ativo == True
+    ).options(
+        selectinload(ReceitaCenario.tipo_receita),
+        selectinload(ReceitaCenario.centro_custo),
+        selectinload(ReceitaCenario.premissas)
+    )
+    
+    result_receitas = await db.execute(query_receitas)
+    receitas = result_receitas.scalars().all()
+    
+    # Calcular cada receita para cada mês do ano
+    for receita in receitas:
+        tipo_receita = receita.tipo_receita
+        if not tipo_receita:
+            continue
+        
+        codigo = f"REC_{tipo_receita.codigo}"
+        
+        # Inicializar entrada se não existir
+        if codigo not in rubricas_dict:
+            conta_codigo = tipo_receita.conta_contabil_codigo or ""
+            conta_desc = tipo_receita.conta_contabil_descricao or ""
+            conta_completa = f"{conta_codigo} - {conta_desc}" if conta_codigo and conta_desc else conta_codigo or conta_desc or ""
+            
+            rubricas_dict[codigo] = {
+                "tipo_custo_codigo": codigo,
+                "tipo_custo_nome": f"{tipo_receita.nome}",
+                "categoria": "RECEITA",
+                "conta_contabil_codigo": conta_codigo,
+                "conta_contabil_descricao": conta_desc,
+                "conta_contabil_completa": conta_completa,
+                "valores_mensais": [0.0] * 12,
+                "total": 0.0
+            }
+        
+        # Calcular receita para cada mês do ano solicitado
+        for mes in range(1, 13):
+            try:
+                resultado = await _calcular_receita_mes(receita, ano, mes, db)
+                valor = resultado.valor_calculado
+                
+                # Receitas são valores positivos (créditos)
+                # Invertemos o sinal para que apareçam como positivos no DRE
+                rubricas_dict[codigo]["valores_mensais"][mes - 1] += valor
+                rubricas_dict[codigo]["total"] += valor
+            except Exception as e:
+                # Se houver erro no cálculo, apenas ignora o mês
+                print(f"Erro ao calcular receita {receita.id} mês {mes}: {e}")
+                continue
+    
+    # ============================================
+    # 5. Converter para lista de DRELinha e calcular totais
     # ============================================
     linhas = []
     total_geral = 0
+    
+    # Separar receitas (valores positivos) e custos (valores negativos)
+    linhas_receita = []
+    linhas_custo = []
+    
     for dados in rubricas_dict.values():
-        linhas.append(DRELinha(**dados))
-        total_geral += dados["total"]
+        linha = DRELinha(**dados)
+        if dados["categoria"] == "RECEITA":
+            linhas_receita.append(linha)
+            total_geral += dados["total"]  # Receita positiva
+        else:
+            linhas_custo.append(linha)
+            total_geral -= dados["total"]  # Custo negativo (subtrai do resultado)
+    
+    # Ordenar: Receitas primeiro, depois custos
+    linhas = linhas_receita + linhas_custo
     
     return DREResponse(
         cenario_id=cenario_id,

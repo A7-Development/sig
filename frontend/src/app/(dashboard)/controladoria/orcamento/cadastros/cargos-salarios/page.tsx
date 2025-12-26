@@ -671,6 +671,9 @@ function TabelaSalarialTab() {
         ...formData,
         faixa_id: formData.faixa_id || null,
         politica_id: formData.politica_id || null,
+        override_vt_dia: null,
+        override_vr_dia: null,
+        override_plano_saude: null,
       };
       if (editando) {
         await tabelaSalarialApi.atualizar(token, editando.id, data);
@@ -1209,14 +1212,14 @@ function BeneficiosTab() {
                 <Label>Seguro Vida (R$/mês)</Label>
                 <Input type="number" step="0.01" value={formData.seguro_vida} onChange={(e) => setFormData({ ...formData, seguro_vida: parseFloat(e.target.value) || 0 })} />
               </div>
+              <div>
+                <Label>Auxílio Home Office (R$/mês)</Label>
+                <Input type="number" step="0.01" value={formData.aux_home_office} onChange={(e) => setFormData({ ...formData, aux_home_office: parseFloat(e.target.value) || 0 })} />
+              </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <Label>Dias Treinamento</Label>
-                <Input type="number" value={formData.dias_treinamento} onChange={(e) => setFormData({ ...formData, dias_treinamento: parseInt(e.target.value) || 0 })} />
-              </div>
-              <div className="flex items-center gap-2 pt-6">
+            <div className="flex items-center gap-6 pt-2">
+              <div className="flex items-center gap-2">
                 <Checkbox
                   id="vt_desconto"
                   checked={formData.vt_desconto_6pct}
@@ -1224,7 +1227,7 @@ function BeneficiosTab() {
                 />
                 <Label htmlFor="vt_desconto" className="cursor-pointer">Desconto 6% VT</Label>
               </div>
-              <div className="flex items-center gap-2 pt-6">
+              <div className="flex items-center gap-2">
                 <Checkbox
                   id="ativo_pol"
                   checked={formData.ativo}

@@ -39,7 +39,8 @@ import {
   Loader2,
   FileX,
   User,
-  Server
+  Server,
+  TrendingUp
 } from "lucide-react";
 import { MasterDetailTree } from "@/components/orcamento/MasterDetailTree";
 import { CapacityPlanningPanel } from "@/components/orcamento/CapacityPlanningPanel";
@@ -47,7 +48,8 @@ import { PremissasFuncaoMesGrid } from "@/components/orcamento/PremissasFuncaoMe
 import { PremissasTree, type SelectedNodePremissas } from "@/components/orcamento/PremissasTree";
 import { PremissasFuncaoGridPanel } from "@/components/orcamento/PremissasFuncaoGridPanel";
 import { DREPanel } from "@/components/orcamento/DREPanel";
-import TecnologiaPanel from "@/components/orcamento/TecnologiaPanel";
+import CustoDiretoPanel from "@/components/orcamento/CustoDiretoPanel";
+import { ReceitasPanel } from "@/components/orcamento/ReceitasPanel";
 import type { CenarioEmpresa, CenarioCliente, CenarioSecao } from "@/lib/api/orcamento";
 import { useAuthStore } from "@/stores/auth-store";
 import { 
@@ -82,7 +84,7 @@ export default function CenariosPage() {
   const [tabelaSalarial, setTabelaSalarial] = useState<TabelaSalarial[]>([]);
   
   // Abas
-  const [abaAtiva, setAbaAtiva] = useState<'estrutura' | 'premissas-funcao' | 'premissas' | 'quadro' | 'tecnologia' | 'dre'>('estrutura');
+  const [abaAtiva, setAbaAtiva] = useState<'estrutura' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custo-direto' | 'receitas' | 'dre'>('estrutura');
   
   // Estado para seleção na árvore Master-Detail
   const [selectedNode, setSelectedNode] = useState<{
@@ -433,15 +435,26 @@ export default function CenariosPage() {
               <Badge variant="secondary" className="text-[10px] ml-1">{quadro.length}</Badge>
             </button>
             <button
-              onClick={() => setAbaAtiva('tecnologia')}
+              onClick={() => setAbaAtiva('custo-direto')}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                abaAtiva === 'tecnologia'
+                abaAtiva === 'custo-direto'
                   ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              <Server className="h-4 w-4" />
-              Tecnologia
+              <DollarSign className="h-4 w-4" />
+              Custo Direto
+            </button>
+            <button
+              onClick={() => setAbaAtiva('receitas')}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                abaAtiva === 'receitas'
+                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <TrendingUp className="h-4 w-4" />
+              Receitas
             </button>
             <button
               onClick={() => setAbaAtiva('dre')}
@@ -699,8 +712,8 @@ export default function CenariosPage() {
                   )}
                 </div>
               </div>
-            ) : abaAtiva === 'tecnologia' ? (
-              /* Layout Master-Detail para Tecnologia: Árvore à esquerda, Painel à direita */
+            ) : abaAtiva === 'custo-direto' ? (
+              /* Layout Master-Detail para Custo Direto: Árvore à esquerda, Painel à direita */
               <div className="h-full flex">
                 {/* Painel Esquerdo: Árvore de Navegação */}
                 <div className="w-80 border-r bg-muted/10 flex-shrink-0">
@@ -709,27 +722,50 @@ export default function CenariosPage() {
                     onNodeSelect={setSelectedNode}
                     onSecoesLoaded={setTodasSecoesCenario}
                     selectedSecaoId={selectedNode?.secao?.id}
+                    selectedCCId={selectedNode?.centroCusto?.id}
                   />
                 </div>
                 
-                {/* Painel Direito: Alocações de Tecnologia */}
+                {/* Painel Direito: Custos Diretos */}
                 <div className="flex-1 overflow-auto">
-                  {selectedNode?.type === 'secao' && selectedNode.secao ? (
-                    <TecnologiaPanel
+                  {selectedNode?.type === 'centro_custo' && selectedNode.centroCusto && selectedNode.secao ? (
+                    <CustoDiretoPanel
                       cenarioId={cenarioSelecionado.id}
                       secaoId={selectedNode.secao.id}
                       secaoNome={selectedNode.secao.secao?.nome || 'Seção'}
+                      centroCustoId={selectedNode.centroCusto.id}
+                      centroCustoNome={selectedNode.centroCusto.nome}
+                      centrosCustoDisponiveis={centrosCusto.filter(cc => cc.ativo)}
+                    />
+                  ) : selectedNode?.type === 'secao' && selectedNode.secao ? (
+                    <CustoDiretoPanel
+                      cenarioId={cenarioSelecionado.id}
+                      secaoId={selectedNode.secao.id}
+                      secaoNome={selectedNode.secao.secao?.nome || 'Seção'}
+                      centrosCustoDisponiveis={centrosCusto.filter(cc => cc.ativo)}
                     />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
-                      <Server className="h-12 w-12 mb-4 opacity-30" />
-                      <h3 className="text-lg font-medium mb-2">Selecione uma seção</h3>
+                      <DollarSign className="h-12 w-12 mb-4 opacity-30" />
+                      <h3 className="text-lg font-medium mb-2">Selecione uma seção ou Centro de Custo</h3>
                       <p className="text-sm max-w-md text-center">
-                        Navegue pela estrutura à esquerda e clique em uma seção para gerenciar alocações de tecnologia
+                        Navegue pela estrutura à esquerda e clique em uma seção ou Centro de Custo para gerenciar custos diretos
                       </p>
                     </div>
                   )}
                 </div>
+              </div>
+            ) : abaAtiva === 'receitas' ? (
+              /* Painel de Receitas */
+              <div className="h-full overflow-auto p-4">
+                <ReceitasPanel
+                  cenarioId={cenarioSelecionado.id}
+                  centroCustoId={selectedNode?.centroCusto?.id}
+                  mesInicio={cenarioSelecionado.mes_inicio}
+                  anoInicio={cenarioSelecionado.ano_inicio}
+                  mesFim={cenarioSelecionado.mes_fim}
+                  anoFim={cenarioSelecionado.ano_fim}
+                />
               </div>
             ) : abaAtiva === 'dre' ? (
               <div className="h-full overflow-auto">
@@ -817,7 +853,6 @@ export default function CenariosPage() {
                 <TableHead className="w-32">Código</TableHead>
                 <TableHead className="w-40">Período</TableHead>
                 <TableHead>Descrição</TableHead>
-                <TableHead className="w-28">Cliente</TableHead>
                 <TableHead className="w-28">Status</TableHead>
                 <TableHead className="w-32 text-right">Ações</TableHead>
               </TableRow>
@@ -832,15 +867,6 @@ export default function CenariosPage() {
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {cenario.descricao || '—'}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {cenario.cliente_nw_codigo ? (
-                      <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">
-                        {cenario.cliente_nw_codigo}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
                   </TableCell>
                   <TableCell>
                     {getStatusBadge(cenario.status)}

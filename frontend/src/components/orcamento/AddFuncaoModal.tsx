@@ -387,7 +387,7 @@ export function AddFuncaoModal({
           {/* Centro de Custo */}
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Centro de Custo * {isCorporativo && <Badge variant="outline" className="ml-1 text-[8px] bg-purple-50 text-purple-700 border-purple-200">POOL</Badge>}
+              Centro de Custo *
             </Label>
             <Select value={centroCustoId} onValueChange={setCentroCustoId}>
               <SelectTrigger>
@@ -409,9 +409,7 @@ export function AddFuncaoModal({
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              {isCorporativo 
-                ? "Seção CORPORATIVO: apenas Centros de Custo tipo POOL são permitidos"
-                : "Selecione o projeto/contrato para esta função"}
+              Selecione o projeto/contrato para esta função
             </p>
             {combinacaoJaExiste && (
               <p className="text-xs text-amber-600 font-medium flex items-center gap-1">

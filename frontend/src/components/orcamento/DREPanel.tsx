@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -108,18 +108,31 @@ export function DREPanel({ cenarioId, cenarioSecaoId, anoInicio, anoFim }: DREPa
       if (cenarioSecaoId) params.append("cenario_secao_id", cenarioSecaoId);
       
       // Calcula custos de pessoal e tecnologia em paralelo
-      const [resultadoPessoal, resultadoTecnologia] = await Promise.all([
+      // Usa Promise.allSettled para não falhar se um dos endpoints falhar
+      const [resultadoPessoal, resultadoTecnologia] = await Promise.allSettled([
         api.post(`/api/v1/orcamento/custos/cenarios/${cenarioId}/calcular?${params}`, {}),
         api.post(`/api/v1/orcamento/custos/cenarios/${cenarioId}/calcular-tecnologia?${params}`, {})
       ]);
       
-      return { pessoal: resultadoPessoal, tecnologia: resultadoTecnologia };
+      return { 
+        pessoal: resultadoPessoal.status === 'fulfilled' ? resultadoPessoal.value : null,
+        tecnologia: resultadoTecnologia.status === 'fulfilled' ? resultadoTecnologia.value : null,
+        erros: [
+          resultadoPessoal.status === 'rejected' ? 'Erro ao calcular pessoal' : null,
+          resultadoTecnologia.status === 'rejected' ? 'Erro ao calcular tecnologia' : null
+        ].filter(Boolean)
+      };
     },
     onSuccess: async (data: any) => {
       // Atualiza automaticamente a DRE após calcular os custos
       await refetch();
       const totalRegistros = (data.pessoal?.quantidade || 0) + (data.tecnologia?.custos_criados || 0);
-      toast.success(`Custos calculados e DRE atualizada: ${totalRegistros} registros processados (${data.pessoal?.quantidade || 0} pessoal + ${data.tecnologia?.custos_criados || 0} tecnologia)`);
+      
+      if (data.erros?.length > 0) {
+        toast.warning(`DRE atualizada com avisos: ${data.erros.join(', ')}. ${totalRegistros} registros de pessoal processados.`);
+      } else {
+        toast.success(`Custos calculados e DRE atualizada: ${totalRegistros} registros processados (${data.pessoal?.quantidade || 0} pessoal + ${data.tecnologia?.custos_criados || 0} tecnologia)`);
+      }
     },
     onError: (error: any) => {
       toast.error(error?.response?.data?.detail || "Erro ao calcular custos");
@@ -400,10 +413,9 @@ export function DREPanel({ cenarioId, cenarioSecaoId, anoInicio, anoFim }: DREPa
                         const hasRubricas = conta.rubricas.length > 0;
 
                         return (
-                          <>
+                          <React.Fragment key={conta.codigo}>
                             {/* Linha da Conta Contábil */}
                             <TableRow
-                              key={conta.codigo}
                               className="hover:bg-muted/30 border-b cursor-pointer h-7"
                               onClick={() => hasRubricas && toggleConta(conta.codigo)}
                             >
@@ -473,7 +485,7 @@ export function DREPanel({ cenarioId, cenarioSecaoId, anoInicio, anoFim }: DREPa
                                   </TableCell>
                                 </TableRow>
                               ))}
-                          </>
+                          </React.Fragment>
                         );
                       })}
 

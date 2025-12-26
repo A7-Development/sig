@@ -39,8 +39,10 @@ import {
   secoesApi,
   secoesEmpresa,
   centrosCustoApi,
+  secaoCentrosCusto,
   type CenarioEmpresa,
   type CenarioSecao,
+  type CenarioSecaoCC,
   type Empresa,
   type Secao,
   type CentroCusto,
@@ -129,6 +131,7 @@ export function MasterDetailTree({
   // Modais
   const [showAddEmpresa, setShowAddEmpresa] = useState(false);
   const [showAddSecao, setShowAddSecao] = useState(false);
+  const [showAddCC, setShowAddCC] = useState(false);
   
   // Dados para modais
   const [empresasDisponiveis, setEmpresasDisponiveis] = useState<Empresa[]>([]);
@@ -136,8 +139,10 @@ export function MasterDetailTree({
   
   // Estado de seleção para modais
   const [empresaSelecionada, setEmpresaSelecionada] = useState<CenarioEmpresa | null>(null);
+  const [secaoSelecionadaParaCC, setSecaoSelecionadaParaCC] = useState<CenarioSecao | null>(null);
   const [selectedEmpresaId, setSelectedEmpresaId] = useState<string>("");
   const [selectedSecaoIdModal, setSelectedSecaoIdModal] = useState<string>("");
+  const [selectedCCIdModal, setSelectedCCIdModal] = useState<string>("");
   
   // Ações em andamento
   const [saving, setSaving] = useState(false);
@@ -236,42 +241,39 @@ export function MasterDetailTree({
   }, [token]);
 
   // ============================================
-  // Carregar CCs de uma seção (do QuadroPessoal)
+  // Carregar CCs de uma seção (associados via cenario_secao_cc)
   // ============================================
   
-  const carregarCCsSecao = useCallback(async (secaoId: string) => {
-    if (!token || loadingCCs.has(secaoId) || ccsPorSecao[secaoId]) return;
+  const carregarCCsSecao = useCallback(async (secaoId: string, forceReload = false) => {
+    if (!token || loadingCCs.has(secaoId)) return;
+    if (!forceReload && ccsPorSecao[secaoId]) return;
     
     setLoadingCCs(prev => new Set(prev).add(secaoId));
     try {
-      // Buscar quadro de pessoal da seção
+      // Buscar CCs associados a esta seção
+      const ccsAssociados = await secaoCentrosCusto.listar(token, cenarioId, secaoId);
+      
+      // Buscar quadro de pessoal para contar funções por CC
       const quadro = await cenariosApi.getQuadro(token, cenarioId, { cenario_secao_id: secaoId });
       
-      // Agrupar por centro_custo_id e contar funções
-      const ccMap = new Map<string, { cc: CentroCusto; count: number }>();
-      
+      // Contar funções por CC
+      const ccCount = new Map<string, number>();
       quadro.forEach((item: QuadroPessoal) => {
-        if (item.centro_custo_id && item.centro_custo && item.ativo) {
-          const existing = ccMap.get(item.centro_custo_id);
-          if (existing) {
-            existing.count++;
-          } else {
-            ccMap.set(item.centro_custo_id, { 
-              cc: item.centro_custo as CentroCusto, 
-              count: 1 
-            });
-          }
+        if (item.centro_custo_id && item.ativo) {
+          ccCount.set(item.centro_custo_id, (ccCount.get(item.centro_custo_id) || 0) + 1);
         }
       });
       
-      // Converter para array
-      const ccs: CCComContagem[] = Array.from(ccMap.values()).map(({ cc, count }) => ({
-        id: cc.id,
-        codigo: cc.codigo,
-        nome: cc.nome,
-        tipo: cc.tipo || 'OPERACIONAL',
-        qtdFuncoes: count,
-      }));
+      // Converter para formato CCComContagem
+      const ccs: CCComContagem[] = ccsAssociados
+        .filter(assoc => assoc.centro_custo)
+        .map(assoc => ({
+          id: assoc.centro_custo!.id,
+          codigo: assoc.centro_custo!.codigo,
+          nome: assoc.centro_custo!.nome,
+          tipo: assoc.centro_custo!.tipo || 'OPERACIONAL',
+          qtdFuncoes: ccCount.get(assoc.centro_custo!.id) || 0,
+        }));
       
       setCCsPorSecao(prev => ({ ...prev, [secaoId]: ccs }));
     } catch (err) {
@@ -383,6 +385,23 @@ export function MasterDetailTree({
       await carregarEstrutura();
     } catch (err: any) {
       alert(err.message || "Erro ao remover seção");
+    }
+  };
+
+  const handleAddCC = async () => {
+    if (!token || !secaoSelecionadaParaCC || !selectedCCIdModal) return;
+    
+    setSaving(true);
+    try {
+      await secaoCentrosCusto.adicionar(token, cenarioId, secaoSelecionadaParaCC.id, selectedCCIdModal);
+      // Recarregar CCs da seção
+      await carregarCCsSecao(secaoSelecionadaParaCC.id, true);
+      setShowAddCC(false);
+      setSelectedCCIdModal("");
+    } catch (err: any) {
+      alert(err.message || "Erro ao adicionar Centro de Custo");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -611,60 +630,74 @@ export function MasterDetailTree({
                                         <Loader2 className="h-3 w-3 animate-spin" />
                                         Carregando projetos...
                                       </div>
-                                    ) : ccsSecao.length === 0 ? (
-                                      <div 
-                                        className="py-2 px-3 text-xs text-muted-foreground italic cursor-pointer hover:text-blue-600 hover:bg-blue-50/50 rounded transition-colors"
-                                        onClick={() => onNodeSelect?.({
-                                          type: 'secao',
-                                          empresa,
-                                          secao
-                                        })}
-                                      >
-                                        + Clique para adicionar funções com Centro de Custo
-                                      </div>
                                     ) : (
-                                      ccsSecao.map(cc => (
+                                      <>
+                                        {ccsSecao.length === 0 ? (
+                                          <div className="py-1 px-3 text-xs text-muted-foreground italic">
+                                            Nenhum Centro de Custo adicionado
+                                          </div>
+                                        ) : (
+                                          ccsSecao.map(cc => (
+                                            <div 
+                                              key={cc.id}
+                                              className={cn(
+                                                "flex items-center gap-1 px-1.5 py-1 rounded-md cursor-pointer group",
+                                                "hover:bg-blue-50 hover:text-blue-700",
+                                                selectedCCId === cc.id && "bg-blue-100 text-blue-800",
+                                                "transition-colors"
+                                              )}
+                                              onClick={() => onNodeSelect?.({
+                                                type: 'centro_custo',
+                                                empresa,
+                                                secao,
+                                                centroCusto: {
+                                                  id: cc.id,
+                                                  codigo: cc.codigo,
+                                                  nome: cc.nome,
+                                                  tipo: cc.tipo as 'OPERACIONAL' | 'POOL' | 'ADMINISTRATIVO' | 'OVERHEAD',
+                                                  secao_id: null,
+                                                  codigo_totvs: null,
+                                                  cliente: null,
+                                                  contrato: null,
+                                                  uf: null,
+                                                  cidade: null,
+                                                  ativo: true,
+                                                  created_at: '',
+                                                  updated_at: ''
+                                                }
+                                              })}
+                                            >
+                                              <div className="w-3" />
+                                              <Briefcase className="h-3 w-3 text-blue-600" />
+                                              <span 
+                                                className="flex-1 text-xs"
+                                                title={cc.nome}
+                                              >
+                                                {truncateText(cc.nome, 16)}
+                                              </span>
+                                              <Badge variant="outline" className="text-[8px] h-3.5 px-1 bg-blue-50 text-blue-700 border-blue-200">
+                                                {cc.qtdFuncoes} {cc.qtdFuncoes === 1 ? 'função' : 'funções'}
+                                              </Badge>
+                                              <Badge variant="outline" className="text-[9px] h-4 px-1 font-mono">
+                                                {cc.codigo}
+                                              </Badge>
+                                            </div>
+                                          ))
+                                        )}
+                                        {/* Botão Adicionar Centro de Custo */}
                                         <div 
-                                          key={cc.id}
-                                          className={cn(
-                                            "flex items-center gap-1 px-1.5 py-1 rounded-md cursor-pointer group",
-                                            "hover:bg-blue-50 hover:text-blue-700",
-                                            selectedCCId === cc.id && "bg-blue-100 text-blue-800",
-                                            "transition-colors"
-                                          )}
-                                          onClick={() => onNodeSelect?.({
-                                            type: 'centro_custo',
-                                            empresa,
-                                            secao,
-                                            centroCusto: {
-                                              id: cc.id,
-                                              codigo: cc.codigo,
-                                              nome: cc.nome,
-                                              tipo: cc.tipo as 'OPERACIONAL' | 'POOL' | 'ADMINISTRATIVO' | 'OVERHEAD',
-                                              secao_id: null,
-                                              codigo_totvs: null,
-                                              ativo: true,
-                                              created_at: '',
-                                              updated_at: ''
-                                            }
-                                          })}
+                                          className="flex items-center gap-1 px-1.5 py-1 rounded-md cursor-pointer text-muted-foreground hover:text-orange-600 hover:bg-orange-50 transition-colors"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setSecaoSelecionadaParaCC(secao);
+                                            setShowAddCC(true);
+                                          }}
                                         >
                                           <div className="w-3" />
-                                          <Briefcase className="h-3 w-3 text-blue-600" />
-                                          <span 
-                                            className="flex-1 text-xs"
-                                            title={cc.nome}
-                                          >
-                                            {truncateText(cc.nome, 16)}
-                                          </span>
-                                          <Badge variant="outline" className="text-[8px] h-3.5 px-1 bg-blue-50 text-blue-700 border-blue-200">
-                                            {cc.qtdFuncoes} {cc.qtdFuncoes === 1 ? 'função' : 'funções'}
-                                          </Badge>
-                                          <Badge variant="outline" className="text-[9px] h-4 px-1 font-mono">
-                                            {cc.codigo}
-                                          </Badge>
+                                          <Plus className="h-3 w-3" />
+                                          <span className="text-xs">Adicionar Centro de Custo</span>
                                         </div>
-                                      ))
+                                      </>
                                     )}
                                   </div>
                                 )}
@@ -754,11 +787,6 @@ export function MasterDetailTree({
               </SelectContent>
             </Select>
             
-            {selectedSecaoIdModal && isCorporativo(secoesDisponiveis.find(s => s.id === selectedSecaoIdModal)) && (
-              <div className="mt-3 p-2 bg-purple-50 border border-purple-200 rounded text-xs text-purple-700">
-                <strong>Seção CORPORATIVO:</strong> Apenas Centros de Custo tipo POOL serão permitidos no Quadro de Pessoal.
-              </div>
-            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddSecao(false)}>
@@ -767,6 +795,51 @@ export function MasterDetailTree({
             <Button 
               onClick={handleAddSecao} 
               disabled={!selectedSecaoIdModal || saving}
+            >
+              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Adicionar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Adicionar Centro de Custo */}
+      <Dialog open={showAddCC} onOpenChange={setShowAddCC}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Adicionar Centro de Custo</DialogTitle>
+            <DialogDescription>
+              Selecione um Centro de Custo para adicionar à seção {secaoSelecionadaParaCC?.secao?.nome}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Select value={selectedCCIdModal} onValueChange={setSelectedCCIdModal}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione um Centro de Custo..." />
+              </SelectTrigger>
+              <SelectContent className="max-h-60">
+                {todosCCs
+                  .filter(cc => {
+                    // Filtrar CCs já associados a esta seção
+                    const ccsAssociados = secaoSelecionadaParaCC ? ccsPorSecao[secaoSelecionadaParaCC.id] || [] : [];
+                    return !ccsAssociados.some(assoc => assoc.id === cc.id);
+                  })
+                  .map(cc => (
+                    <SelectItem key={cc.id} value={cc.id}>
+                      {cc.codigo} - {cc.nome}
+                    </SelectItem>
+                  ))
+                }
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddCC(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleAddCC} 
+              disabled={!selectedCCIdModal || saving}
             >
               {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Adicionar

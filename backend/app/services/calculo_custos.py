@@ -430,64 +430,74 @@ class CalculoCustosService:
         # ============================================
         
         elif codigo == COD_FGTS:
-            # FGTS 8%
+            # FGTS - alíquota do cadastro (padrão 8%)
             base = self._calcular_base_encargo("incide_fgts")
-            return base * 0.08
+            aliquota = self._get_aliquota(tipo, 8.0)
+            return base * aliquota
         
         elif codigo == COD_INSS_EMP:
-            # INSS Empresa 20%
+            # INSS Empresa - alíquota do cadastro (padrão 20%)
             base = self._calcular_base_encargo("incide_inss")
-            return base * 0.20
+            aliquota = self._get_aliquota(tipo, 20.0)
+            return base * aliquota
         
         elif codigo == COD_INSS_TERC:
-            # INSS Terceiros 5.8%
+            # INSS Terceiros - alíquota do cadastro (padrão 5.8%)
             base = self._calcular_base_encargo("incide_inss")
-            return base * 0.058
+            aliquota = self._get_aliquota(tipo, 5.8)
+            return base * aliquota
         
         elif codigo == COD_SAT_RAT:
-            # SAT/RAT 3%
+            # SAT/RAT - alíquota do cadastro (padrão 3%)
             base = self._calcular_base_encargo("incide_inss")
-            return base * 0.03
+            aliquota = self._get_aliquota(tipo, 3.0)
+            return base * aliquota
         
         # ============================================
         # PROVISÕES
         # ============================================
         
         elif codigo == COD_PROV_FERIAS:
-            # Provisão Férias: 11.11% (1/12 + 1/3)
+            # Provisão Férias - alíquota do cadastro (padrão 11.11% = 1/12 + 1/3)
             base = self._calcular_base_reflexo("reflexo_ferias")
-            return base * 0.1111
+            aliquota = self._get_aliquota(tipo, 11.11)
+            return base * aliquota
         
         elif codigo == COD_FGTS_FERIAS:
-            # FGTS sobre Férias
+            # FGTS sobre Férias - alíquota do cadastro (padrão 8%)
             prov_ferias = self._custos_calculados.get(COD_PROV_FERIAS, Decimal(0))
-            return float(prov_ferias) * 0.08
+            aliquota = self._get_aliquota(tipo, 8.0)
+            return float(prov_ferias) * aliquota
         
         elif codigo == COD_INSS_FERIAS:
-            # INSS sobre Férias (28.8%)
+            # INSS sobre Férias - alíquota do cadastro (padrão 28.8%)
             prov_ferias = self._custos_calculados.get(COD_PROV_FERIAS, Decimal(0))
-            return float(prov_ferias) * 0.288
+            aliquota = self._get_aliquota(tipo, 28.8)
+            return float(prov_ferias) * aliquota
         
         elif codigo == COD_PROV_13:
-            # Provisão 13º: 8.33%
+            # Provisão 13º - alíquota do cadastro (padrão 8.33%)
             base = self._calcular_base_reflexo("reflexo_13")
-            return base * 0.0833
+            aliquota = self._get_aliquota(tipo, 8.33)
+            return base * aliquota
         
         elif codigo == COD_FGTS_13:
-            # FGTS sobre 13º
+            # FGTS sobre 13º - alíquota do cadastro (padrão 8%)
             prov_13 = self._custos_calculados.get(COD_PROV_13, Decimal(0))
-            return float(prov_13) * 0.08
+            aliquota = self._get_aliquota(tipo, 8.0)
+            return float(prov_13) * aliquota
         
         elif codigo == COD_INSS_13:
-            # INSS sobre 13º (28.8%)
+            # INSS sobre 13º - alíquota do cadastro (padrão 28.8%)
             prov_13 = self._custos_calculados.get(COD_PROV_13, Decimal(0))
-            return float(prov_13) * 0.288
+            aliquota = self._get_aliquota(tipo, 28.8)
+            return float(prov_13) * aliquota
         
         elif codigo == COD_INDENIZ:
-            # Indenizações Trabalhistas
-            pct = self.get_parametro("pct_indenizacoes", tipo.id, 0)
+            # Indenizações Trabalhistas - alíquota do cadastro sobre o Salário (0001)
             salario_total = self._custos_calculados.get(COD_SALARIO, Decimal(0))
-            return float(salario_total) * (pct / 100)
+            aliquota = self._get_aliquota(tipo, 0)  # Padrão 0 se não cadastrado
+            return float(salario_total) * aliquota
         
         elif codigo == COD_AVISO_IND:
             # Aviso Prévio Indenizado
@@ -569,6 +579,22 @@ class CalculoCustosService:
             return -(float(vr_valor) * pct_desconto)
         
         return 0
+    
+    def _get_aliquota(self, tipo: TipoCusto, padrao: float) -> float:
+        """
+        Obtém a alíquota do cadastro do evento (tipos_custo.aliquota_padrao).
+        Se não houver alíquota cadastrada, usa o valor padrão.
+        
+        Args:
+            tipo: Objeto TipoCusto
+            padrao: Valor padrão caso não haja alíquota cadastrada
+        
+        Returns:
+            Alíquota em decimal (ex: 8.33% retorna 0.0833)
+        """
+        if tipo and tipo.aliquota_padrao is not None:
+            return float(tipo.aliquota_padrao) / 100
+        return padrao / 100
     
     def _calcular_base_encargo(self, flag: str) -> float:
         """Calcula a base para encargos (soma das rubricas com flag True)."""

@@ -31,13 +31,13 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
       <Card className="w-full max-w-md">
-        <CardHeader className="text-center space-y-4">
+        <CardHeader className="text-center space-y-4 pt-8">
           <div className="mx-auto">
             <Image
               src="/logo.png"
               alt="Alert Brasil Contact Center"
-              width={240}
-              height={80}
+              width={160}
+              height={54}
               className="object-contain"
               priority
             />

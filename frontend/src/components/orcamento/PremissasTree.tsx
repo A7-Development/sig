@@ -131,7 +131,7 @@ export function PremissasTree({
       );
       
       setEmpresas(empresasComSecoes);
-      setTodasFuncoes(funcoesRes?.items || funcoesRes || []);
+      setTodasFuncoes(funcoesRes?.items || []);
       
       // Expandir a primeira empresa automaticamente
       if (empresasComSecoes.length > 0) {
@@ -204,14 +204,31 @@ export function PremissasTree({
         if (!funcao) return;
         
         if (!ccMap.has(ccId)) {
+          const defaultCC: CentroCusto = { 
+            id: 'sem-cc', 
+            codigo: 'N/A', 
+            codigo_totvs: null,
+            nome: 'Sem Centro de Custo',
+            tipo: 'OPERACIONAL',
+            secao_id: null,
+            cliente: null,
+            contrato: null,
+            uf: null,
+            cidade: null,
+            ativo: true,
+            created_at: '',
+            updated_at: ''
+          };
+          
+          const cc = q.centro_custo ? {
+            ...defaultCC,
+            id: q.centro_custo.id,
+            codigo: q.centro_custo.codigo,
+            nome: q.centro_custo.nome
+          } : defaultCC;
+          
           ccMap.set(ccId, {
-            centroCusto: q.centro_custo || { 
-              id: 'sem-cc', 
-              codigo: 'N/A', 
-              nome: 'Sem Centro de Custo',
-              tipo: 'OPERACIONAL',
-              ativo: true
-            } as CentroCusto,
+            centroCusto: cc,
             funcoes: []
           });
         }

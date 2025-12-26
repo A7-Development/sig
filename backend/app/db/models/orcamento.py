@@ -6,7 +6,7 @@ Todos os dados sÃ£o armazenados no PostgreSQL SIG.
 import uuid
 import json
 from datetime import datetime, date
-from sqlalchemy import Column, String, Boolean, DateTime, Date, Integer, ForeignKey, Numeric, Text, UniqueConstraint
+from sqlalchemy import Column, String, Boolean, DateTime, Date, Integer, ForeignKey, Numeric, Text, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import relationship
 from app.db.session import Base
@@ -164,9 +164,9 @@ class ProdutoTecnologia(Base):
     valor_base = Column(Numeric(12, 2), nullable=True)  # Valor base/tabela do fornecedor (referência)
     unidade_medida = Column(String(30), nullable=True)  # licença, PA, HC, etc.
     
-    # Conta contábil padrão (comentado temporariamente até criar tabela contas_contabeis)
-    # conta_contabil_id = Column(UUID(as_uuid=True), ForeignKey("contas_contabeis.id", ondelete="SET NULL"), nullable=True)
-    conta_contabil_id = Column(UUID(as_uuid=True), nullable=True)  # Sem FK por enquanto
+    # Vínculo com conta contábil (código e descrição da view NW)
+    conta_contabil_codigo = Column(String(50), nullable=True, index=True)
+    conta_contabil_descricao = Column(String(255), nullable=True)  # Cache da descrição
     
     # Observações
     descricao = Column(Text, nullable=True)
@@ -177,7 +177,6 @@ class ProdutoTecnologia(Base):
     
     # Relationships
     fornecedor = relationship("Fornecedor", back_populates="produtos", lazy="selectin")
-    # conta_contabil = relationship("ContaContabil", lazy="selectin")  # Comentado até criar tabela
     
     def __repr__(self):
         return f"<ProdutoTecnologia {self.codigo}: {self.nome}>"
@@ -579,6 +578,67 @@ class AlocacaoTecnologia(Base):
         return f"<AlocacaoTecnologia {self.produto.nome if self.produto else 'N/A'} - Cenário {self.cenario_id}>"
 
 
+class CustoDireto(Base):
+    """
+    Custo Direto alocado em Centro de Custo.
+    Suporta valores Fixo, Variável ou Fixo+Variável.
+    Pode ser rateado entre múltiplos CCs.
+    """
+    __tablename__ = "custos_diretos"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    cenario_secao_id = Column(UUID(as_uuid=True), ForeignKey("cenario_secao.id", ondelete="CASCADE"), nullable=False, index=True)
+    centro_custo_id = Column(UUID(as_uuid=True), ForeignKey("centros_custo.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # Item de custo (referência ao produto de tecnologia que representa o item)
+    item_custo_id = Column(UUID(as_uuid=True), ForeignKey("produtos_tecnologia.id", ondelete="CASCADE"), nullable=False)
+    
+    # Tipo de valor: FIXO, VARIAVEL, FIXO_VARIAVEL
+    tipo_valor = Column(String(20), nullable=False, default="FIXO")
+    
+    # === Componente FIXO ===
+    valor_fixo = Column(Numeric(14, 2), nullable=True)  # Valor fixo mensal (igual para todo o período)
+    
+    # === Componente VARIÁVEL ===
+    valor_unitario_variavel = Column(Numeric(14, 4), nullable=True)  # Valor por unidade
+    unidade_medida = Column(String(20), nullable=True)  # HC, PA, UNIDADE
+    
+    # Qual função usar como base para o cálculo variável
+    # Se null, considera o total do CC; se preenchido, considera apenas essa função
+    funcao_base_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="SET NULL"), nullable=True)
+    
+    # Tipo de medida: HC_TOTAL, HC_FUNCAO, PA_TOTAL, PA_FUNCAO, QUANTIDADE_FIXA
+    tipo_medida = Column(String(30), nullable=True)
+    
+    # === Rateio ===
+    # Suporte a rateio entre múltiplos CCs (mesma lógica do QuadroPessoal)
+    tipo_calculo = Column(String(20), nullable=False, default="manual")  # manual, rateio
+    rateio_grupo_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    rateio_percentual = Column(Numeric(5, 2), nullable=True)
+    
+    # Descrição/Observação
+    descricao = Column(Text, nullable=True)
+    
+    ativo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    cenario = relationship("Cenario", lazy="selectin")
+    cenario_secao = relationship("CenarioSecao", lazy="selectin")
+    centro_custo = relationship("CentroCusto", lazy="selectin")
+    item_custo = relationship("ProdutoTecnologia", lazy="selectin")
+    funcao_base = relationship("Funcao", lazy="selectin")
+    
+    __table_args__ = (
+        Index('ix_custos_diretos_cenario_cc', 'cenario_id', 'centro_custo_id'),
+    )
+    
+    def __repr__(self):
+        return f"<CustoDireto {self.item_custo.nome if self.item_custo else 'N/A'} CC={self.centro_custo_id}>"
+
+
 class FuncaoSpan(Base):
     """ConfiguraÃ§Ã£o de span (ratio) para cÃ¡lculo automÃ¡tico de quantidades de funÃ§Ãµes."""
     __tablename__ = "funcao_span"
@@ -668,6 +728,7 @@ class CenarioSecao(Base):
     spans = relationship("FuncaoSpan", back_populates="cenario_secao", lazy="selectin", cascade="all, delete-orphan")
     premissas_funcao_mes = relationship("PremissaFuncaoMes", back_populates="cenario_secao", lazy="selectin", cascade="all, delete-orphan")
     alocacoes_tecnologia = relationship("AlocacaoTecnologia", back_populates="cenario_secao", lazy="selectin", cascade="all, delete-orphan")
+    centros_custo_associados = relationship("CenarioSecaoCC", back_populates="cenario_secao", lazy="selectin", cascade="all, delete-orphan")
     
     __table_args__ = (
         UniqueConstraint('cenario_cliente_id', 'secao_id', name='uq_cenario_secao'),
@@ -965,4 +1026,142 @@ class RateioDestino(Base):
     
     def __repr__(self):
         return f"<RateioDestino cc={self.cc_destino_id} {self.percentual}%>"
+
+
+class CenarioSecaoCC(Base):
+    """
+    Associação entre uma Seção do cenário e um Centro de Custo.
+    Permite ao usuário adicionar CCs específicos a cada seção.
+    """
+    __tablename__ = "cenario_secao_cc"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    cenario_secao_id = Column(UUID(as_uuid=True), ForeignKey("cenario_secao.id", ondelete="CASCADE"), nullable=False, index=True)
+    centro_custo_id = Column(UUID(as_uuid=True), ForeignKey("centros_custo.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    ativo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    cenario_secao = relationship("CenarioSecao", back_populates="centros_custo_associados", lazy="selectin")
+    centro_custo = relationship("CentroCusto", lazy="selectin")
+    
+    __table_args__ = (
+        UniqueConstraint('cenario_secao_id', 'centro_custo_id', name='uq_cenario_secao_cc'),
+    )
+    
+    def __repr__(self):
+        return f"<CenarioSecaoCC secao={self.cenario_secao_id} cc={self.centro_custo_id}>"
+
+
+# ============================================
+# MÓDULO DE RECEITAS
+# ============================================
+
+class TipoReceita(Base):
+    """Tipo de Receita (categoria pré-definida com conta contábil)."""
+    __tablename__ = "tipos_receita"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    codigo = Column(String(50), unique=True, nullable=False, index=True)
+    nome = Column(String(200), nullable=False)
+    descricao = Column(Text, nullable=True)
+    categoria = Column(String(50), nullable=False, default="OPERACIONAL")  # OPERACIONAL, FINANCEIRA, OUTRAS
+    
+    # Conta Contábil para DRE
+    conta_contabil_codigo = Column(String(50), nullable=True, index=True)
+    conta_contabil_descricao = Column(String(255), nullable=True)
+    
+    # Controle
+    ordem = Column(Integer, default=0)
+    ativo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<TipoReceita {self.codigo}: {self.nome}>"
+
+
+class ReceitaCenario(Base):
+    """
+    Receita configurada em um cenário, alocada em Centro de Custo.
+    Suporta receitas fixas (CC, HC, PA) e variáveis (com indicadores de vendas).
+    """
+    __tablename__ = "receitas_cenario"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    centro_custo_id = Column(UUID(as_uuid=True), ForeignKey("centros_custo.id", ondelete="CASCADE"), nullable=False, index=True)
+    tipo_receita_id = Column(UUID(as_uuid=True), ForeignKey("tipos_receita.id", ondelete="RESTRICT"), nullable=False, index=True)
+    
+    # Tipo de cálculo: FIXA_CC, FIXA_HC, FIXA_PA, VARIAVEL
+    tipo_calculo = Column(String(20), nullable=False, default="FIXA_CC")
+    
+    # Função que representa o PA (obrigatório para FIXA_PA e VARIAVEL)
+    funcao_pa_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="SET NULL"), nullable=True)
+    
+    # Valores para receitas fixas
+    valor_fixo = Column(Numeric(15, 2), nullable=True)  # Valor fixo (por CC, HC ou PA conforme tipo_calculo)
+    
+    # Limites para receita variável (por PA)
+    valor_minimo_pa = Column(Numeric(15, 2), nullable=True)  # Mínimo por PA
+    valor_maximo_pa = Column(Numeric(15, 2), nullable=True)  # Máximo por PA
+    
+    # Descrição adicional
+    descricao = Column(Text, nullable=True)
+    
+    # Controle
+    ativo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    cenario = relationship("Cenario", lazy="selectin")
+    centro_custo = relationship("CentroCusto", lazy="selectin")
+    tipo_receita = relationship("TipoReceita", lazy="selectin")
+    funcao_pa = relationship("Funcao", lazy="selectin")
+    premissas = relationship("ReceitaPremissaMes", back_populates="receita_cenario", lazy="selectin", cascade="all, delete-orphan")
+    
+    __table_args__ = (
+        Index('ix_receitas_cenario_tipo', 'tipo_receita_id'),
+    )
+    
+    def __repr__(self):
+        return f"<ReceitaCenario tipo={self.tipo_calculo} CC={self.centro_custo_id}>"
+
+
+class ReceitaPremissaMes(Base):
+    """
+    Premissas mensais para cálculo de receita variável.
+    Define VOPDU, índice de conversão, ticket médio, fator e estorno por mês.
+    """
+    __tablename__ = "receita_premissa_mes"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    receita_cenario_id = Column(UUID(as_uuid=True), ForeignKey("receitas_cenario.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # Período
+    mes = Column(Integer, nullable=False)  # 1-12
+    ano = Column(Integer, nullable=False)
+    
+    # Indicadores de vendas
+    vopdu = Column(Numeric(10, 4), nullable=True, default=0)  # Venda Operador Dia Útil
+    indice_conversao = Column(Numeric(5, 4), nullable=True, default=0)  # Índice de instalação/ativação (0-1)
+    ticket_medio = Column(Numeric(15, 2), nullable=True, default=0)  # Ticket médio em R$
+    fator = Column(Numeric(10, 4), nullable=True, default=1)  # Fator multiplicador
+    indice_estorno = Column(Numeric(5, 4), nullable=True, default=0)  # Índice de estorno (0-1)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    receita_cenario = relationship("ReceitaCenario", back_populates="premissas", lazy="selectin")
+    
+    __table_args__ = (
+        UniqueConstraint('receita_cenario_id', 'mes', 'ano', name='uq_receita_premissa_mes'),
+        Index('ix_receita_premissa_mes_periodo', 'ano', 'mes'),
+    )
+    
+    def __repr__(self):
+        return f"<ReceitaPremissaMes {self.mes:02d}/{self.ano} VOPDU={self.vopdu}>"
 

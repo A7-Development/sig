@@ -70,6 +70,7 @@ export default function CentrosCustoPage() {
     nome: "",
     codigo_totvs: "",
     tipo: "OPERACIONAL" as "OPERACIONAL" | "ADMINISTRATIVO" | "OVERHEAD" | "POOL",
+    secao_id: null as string | null,
     cliente: "",
     contrato: "",
     uf: "",
@@ -153,7 +154,7 @@ export default function CentrosCustoPage() {
     setEditando(null);
     setFormData({
       codigo: "", nome: "", codigo_totvs: "", tipo: "OPERACIONAL",
-      cliente: "", contrato: "", uf: "", cidade: "", ativo: true,
+      secao_id: null, cliente: "", contrato: "", uf: "", cidade: "", ativo: true,
     });
   };
 
@@ -164,6 +165,7 @@ export default function CentrosCustoPage() {
       nome: cc.nome,
       codigo_totvs: cc.codigo_totvs || "",
       tipo: cc.tipo,
+      secao_id: cc.secao_id || null,
       cliente: cc.cliente || "",
       contrato: cc.contrato || "",
       uf: cc.uf || "",

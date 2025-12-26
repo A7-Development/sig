@@ -161,28 +161,21 @@ export function CapacityPlanningPanel({
       const funcoesData = await funcoesApi.listar(token, { ativo: true });
       setFuncoes(funcoesData);
       
-      // Carregar centros de custo disponíveis para esta seção
-      try {
-        const ccsData = await validacaoCenario.listarCCsDisponiveis(token, cenarioId, secao.id);
-        setCentrosCustoDisponiveis(ccsData.centros_custo);
-        setIsCorporativo(ccsData.is_corporativo);
-      } catch (err) {
-        // Se a API falhar (ex: seção sem empresa), usar lista vazia
-        console.warn("Não foi possível carregar CCs:", err);
-        setCentrosCustoDisponiveis([]);
-      }
-      
-      // Carregar TODOS os centros de custo (para rateio entre CCs)
+      // Carregar TODOS os centros de custo (sem validação de tipo)
       try {
         const todosCCsData = await centrosCustoApi.listar(token, { ativo: true });
-        setTodosCentrosCusto(todosCCsData.map(cc => ({
+        const ccsFormatados = todosCCsData.map(cc => ({
           id: cc.id,
           codigo: cc.codigo,
           nome: cc.nome,
           tipo: cc.tipo || 'OPERACIONAL',
-        })));
+        }));
+        setCentrosCustoDisponiveis(ccsFormatados);
+        setTodosCentrosCusto(ccsFormatados);
+        setIsCorporativo(false); // Não usar mais essa validação
       } catch (err) {
-        console.warn("Não foi possível carregar todos os CCs:", err);
+        console.warn("Não foi possível carregar CCs:", err);
+        setCentrosCustoDisponiveis([]);
         setTodosCentrosCusto([]);
       }
     } catch (err: any) {
@@ -246,12 +239,20 @@ export function CapacityPlanningPanel({
             funcao_id: data.funcao_id,
             cenario_secao_id: secao.id,  // Mantém a seção atual
             centro_custo_id: rateioCC.ccId,  // Varia por CC
+            secao_id: null,
+            tabela_salarial_id: null,
             fator_pa: data.fator_pa,
             regime: "CLT",
             tipo_calculo: "rateio",
             rateio_grupo_id: grupoId,
             rateio_percentual: rateioCC.percentual,
             rateio_qtd_total: qtdTotal,
+            span: null,
+            span_ratio: null,
+            span_funcoes_base_ids: null,
+            salario_override: null,
+            observacao: null,
+            ativo: true,
             // Aplicar quantidade rateada em todos os meses
             qtd_jan: qtdRateada, qtd_fev: qtdRateada, qtd_mar: qtdRateada, qtd_abr: qtdRateada,
             qtd_mai: qtdRateada, qtd_jun: qtdRateada, qtd_jul: qtdRateada, qtd_ago: qtdRateada,
@@ -265,11 +266,20 @@ export function CapacityPlanningPanel({
           funcao_id: data.funcao_id,
           cenario_secao_id: secao.id,
           centro_custo_id: data.centro_custo_id,
+          secao_id: null,
+          tabela_salarial_id: null,
           fator_pa: data.fator_pa,
           regime: "CLT",
           tipo_calculo: data.tipo_calculo,
+          span: null,
           span_ratio: data.span_ratio || null,
           span_funcoes_base_ids: data.span_funcoes_base_ids || null,
+          rateio_grupo_id: null,
+          rateio_percentual: null,
+          rateio_qtd_total: null,
+          salario_override: null,
+          observacao: null,
+          ativo: true,
           qtd_jan: 0, qtd_fev: 0, qtd_mar: 0, qtd_abr: 0,
           qtd_mai: 0, qtd_jun: 0, qtd_jul: 0, qtd_ago: 0,
           qtd_set: 0, qtd_out: 0, qtd_nov: 0, qtd_dez: 0,
