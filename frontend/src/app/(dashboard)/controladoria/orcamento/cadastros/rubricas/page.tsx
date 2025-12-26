@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -31,9 +32,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
-import { Receipt, Search, Edit, BookOpen, Check, X, RefreshCw } from "lucide-react";
-import { toast } from "sonner";
+import { Receipt, Search, Edit2, BookOpen, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 interface TipoCusto {
   id: string;
@@ -63,19 +63,20 @@ interface ContaContabil {
   nivel5: string | null;
 }
 
-const CATEGORIAS: Record<string, { label: string; color: string }> = {
-  PROVENTO: { label: "Provento", color: "bg-blue-100 text-blue-700" },
-  REMUNERACAO: { label: "Remuneração", color: "bg-blue-100 text-blue-700" },
-  BENEFICIO: { label: "Benefício", color: "bg-green-100 text-green-700" },
-  ENCARGO: { label: "Encargo", color: "bg-purple-100 text-purple-700" },
-  PROVISAO: { label: "Provisão", color: "bg-orange-100 text-orange-700" },
-  PREMIO: { label: "Prêmio", color: "bg-yellow-100 text-yellow-700" },
-  DESCONTO: { label: "Desconto", color: "bg-red-100 text-red-700" },
+const CATEGORIAS: Record<string, { label: string }> = {
+  PROVENTO: { label: "Provento" },
+  REMUNERACAO: { label: "Remuneração" },
+  BENEFICIO: { label: "Benefício" },
+  ENCARGO: { label: "Encargo" },
+  PROVISAO: { label: "Provisão" },
+  PREMIO: { label: "Prêmio" },
+  DESCONTO: { label: "Desconto" },
 };
 
 export default function RubricasPage() {
   const queryClient = useQueryClient();
-  const [filtroCategoria, setFiltroCategoria] = useState<string>("");
+  const { toast } = useToast();
+  const [filtroCategoria, setFiltroCategoria] = useState<string>("ALL");
   const [busca, setBusca] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [rubricaSelecionada, setRubricaSelecionada] = useState<TipoCusto | null>(null);
@@ -87,7 +88,7 @@ export default function RubricasPage() {
     queryKey: ["tipos-custo", filtroCategoria],
     queryFn: async () => {
       const params = new URLSearchParams();
-      if (filtroCategoria) params.append("categoria", filtroCategoria);
+      if (filtroCategoria && filtroCategoria !== "ALL") params.append("categoria", filtroCategoria);
       const url = `/api/v1/orcamento/custos/tipos${params.toString() ? `?${params}` : ""}`;
       return api.get<TipoCusto[]>(url);
     },
@@ -112,11 +113,18 @@ export default function RubricasPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tipos-custo"] });
-      toast.success("Rubrica atualizada com sucesso");
+      toast({
+        title: "Rubrica atualizada",
+        description: "Rubrica atualizada com sucesso.",
+      });
       setDialogOpen(false);
     },
     onError: () => {
-      toast.error("Erro ao atualizar rubrica");
+      toast({
+        title: "Erro ao atualizar",
+        description: "Não foi possível atualizar a rubrica.",
+        variant: "destructive",
+      });
     },
   });
 
@@ -161,166 +169,155 @@ export default function RubricasPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="page-container">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold">Eventos de Folha</h1>
+          <h1 className="page-title">Eventos de Folha</h1>
           <p className="text-sm text-muted-foreground">
             Configure os eventos de folha e vincule às contas contábeis
           </p>
         </div>
       </div>
 
-      {/* Filtros */}
       <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center gap-4">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por código ou nome..."
-                value={busca}
-                onChange={(e) => setBusca(e.target.value)}
-                className="pl-9"
-              />
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <CardTitle className="section-title flex items-center gap-2">
+                <Receipt className="size-4" />
+                Rubricas ({rubricasFiltradas.length})
+              </CardTitle>
+              <CardDescription>
+                Lista de eventos de folha cadastrados
+              </CardDescription>
             </div>
-            <Select 
-              value={filtroCategoria || "__all__"} 
-              onValueChange={(val) => setFiltroCategoria(val === "__all__" ? "" : val)}
-            >
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="Todas as categorias" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">Todas as categorias</SelectItem>
-                {Object.entries(CATEGORIAS).map(([key, cat]) => (
-                  <SelectItem key={key} value={key}>
-                    {cat.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-4">
+              <Select 
+                value={filtroCategoria} 
+                onValueChange={setFiltroCategoria}
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Categoria" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Todas as categorias</SelectItem>
+                  {Object.entries(CATEGORIAS).map(([key, cat]) => (
+                    <SelectItem key={key} value={key}>
+                      {cat.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="relative w-[300px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por código ou nome..."
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+            </div>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Tabela de Rubricas */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Receipt className="h-4 w-4" />
-            Rubricas ({rubricasFiltradas.length})
-          </CardTitle>
         </CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/50">
-                <TableHead className="w-20 text-xs">Código</TableHead>
-                <TableHead className="text-xs">Nome</TableHead>
-                <TableHead className="w-28 text-xs">Categoria</TableHead>
-                <TableHead className="w-32 text-xs text-center">Conta Contábil</TableHead>
-                <TableHead className="w-16 text-xs text-center">FGTS</TableHead>
-                <TableHead className="w-16 text-xs text-center">INSS</TableHead>
-                <TableHead className="w-16 text-xs text-center">Férias</TableHead>
-                <TableHead className="w-16 text-xs text-center">13º</TableHead>
-                <TableHead className="w-20 text-xs text-center">Alíquota</TableHead>
-                <TableHead className="w-16 text-xs text-center">Ativo</TableHead>
-                <TableHead className="w-16 text-xs"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
+        <CardContent>
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="size-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : rubricasFiltradas.length === 0 ? (
+            <div className="empty-state">
+              <Receipt className="size-12 text-muted-foreground/50 mx-auto mb-4" />
+              <p className="text-muted-foreground">Nenhuma rubrica encontrada</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={11} className="text-center py-8">
-                    <RefreshCw className="h-5 w-5 animate-spin mx-auto mb-2 text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">Carregando...</span>
-                  </TableCell>
+                  <TableHead>Código</TableHead>
+                  <TableHead>Nome</TableHead>
+                  <TableHead>Categoria</TableHead>
+                  <TableHead>Conta Contábil</TableHead>
+                  <TableHead className="text-center">FGTS</TableHead>
+                  <TableHead className="text-center">INSS</TableHead>
+                  <TableHead className="text-center">Férias</TableHead>
+                  <TableHead className="text-center">13º</TableHead>
+                  <TableHead className="text-right">Alíquota</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
-              ) : rubricasFiltradas.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
-                    Nenhuma rubrica encontrada
-                  </TableCell>
-                </TableRow>
-              ) : (
-                rubricasFiltradas.map((rubrica) => (
-                  <TableRow key={rubrica.id} className="hover:bg-muted/30">
+              </TableHeader>
+              <TableBody>
+                {rubricasFiltradas.map((rubrica) => (
+                  <TableRow key={rubrica.id}>
                     <TableCell className="font-mono text-xs">{rubrica.codigo}</TableCell>
-                    <TableCell className="text-xs">{rubrica.nome}</TableCell>
+                    <TableCell className="font-semibold text-sm">{rubrica.nome}</TableCell>
                     <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={`text-[10px] ${CATEGORIAS[rubrica.categoria]?.color || ""}`}
-                      >
+                      <Badge variant="outline">
                         {CATEGORIAS[rubrica.categoria]?.label || rubrica.categoria}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-center">
-                      {rubrica.conta_contabil_codigo ? (
-                        <span className="text-xs font-mono">{rubrica.conta_contabil_codigo}</span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">-</span>
-                      )}
+                    <TableCell className="font-mono text-xs">
+                      {rubrica.conta_contabil_codigo || "-"}
                     </TableCell>
                     <TableCell className="text-center">
                       {rubrica.incide_fgts ? (
-                        <Check className="h-4 w-4 mx-auto text-green-600" />
+                        <CheckCircle2 className="size-4 mx-auto text-green-600" />
                       ) : (
-                        <X className="h-4 w-4 mx-auto text-muted-foreground/30" />
+                        <XCircle className="size-4 mx-auto text-muted-foreground/30" />
                       )}
                     </TableCell>
                     <TableCell className="text-center">
                       {rubrica.incide_inss ? (
-                        <Check className="h-4 w-4 mx-auto text-green-600" />
+                        <CheckCircle2 className="size-4 mx-auto text-green-600" />
                       ) : (
-                        <X className="h-4 w-4 mx-auto text-muted-foreground/30" />
+                        <XCircle className="size-4 mx-auto text-muted-foreground/30" />
                       )}
                     </TableCell>
                     <TableCell className="text-center">
                       {rubrica.reflexo_ferias ? (
-                        <Check className="h-4 w-4 mx-auto text-green-600" />
+                        <CheckCircle2 className="size-4 mx-auto text-green-600" />
                       ) : (
-                        <X className="h-4 w-4 mx-auto text-muted-foreground/30" />
+                        <XCircle className="size-4 mx-auto text-muted-foreground/30" />
                       )}
                     </TableCell>
                     <TableCell className="text-center">
                       {rubrica.reflexo_13 ? (
-                        <Check className="h-4 w-4 mx-auto text-green-600" />
+                        <CheckCircle2 className="size-4 mx-auto text-green-600" />
                       ) : (
-                        <X className="h-4 w-4 mx-auto text-muted-foreground/30" />
+                        <XCircle className="size-4 mx-auto text-muted-foreground/30" />
                       )}
                     </TableCell>
-                    <TableCell className="text-center font-mono text-xs">
+                    <TableCell className="text-right font-mono text-sm">
                       {rubrica.aliquota_padrao ? `${rubrica.aliquota_padrao}%` : "-"}
                     </TableCell>
                     <TableCell className="text-center">
                       {rubrica.ativo ? (
-                        <Badge variant="outline" className="bg-green-50 text-green-700 text-[10px]">
-                          Sim
+                        <Badge variant="success" className="gap-1">
+                          <CheckCircle2 className="size-3" />
+                          Ativo
                         </Badge>
                       ) : (
-                        <Badge variant="outline" className="bg-red-50 text-red-700 text-[10px]">
-                          Não
+                        <Badge variant="secondary" className="gap-1">
+                          <XCircle className="size-3" />
+                          Inativo
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="text-right">
                       <Button
                         variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
+                        size="icon-xs"
                         onClick={() => handleEditar(rubrica)}
                       >
-                        <Edit className="h-3.5 w-3.5" />
+                        <Edit2 className="size-4" />
                       </Button>
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
@@ -351,7 +348,7 @@ export default function RubricasPage() {
                     size="icon"
                     onClick={() => setDialogContasOpen(true)}
                   >
-                    <BookOpen className="h-4 w-4" />
+                    <BookOpen className="size-4" />
                   </Button>
                 </div>
                 {rubricaSelecionada.conta_contabil_descricao && (
@@ -382,8 +379,9 @@ export default function RubricasPage() {
               <div className="space-y-3">
                 <Label>Incidências</Label>
                 <div className="grid grid-cols-2 gap-3">
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <div className="flex items-center gap-2">
                     <Checkbox
+                      id="incide_fgts"
                       checked={rubricaSelecionada.incide_fgts}
                       onCheckedChange={(checked) =>
                         setRubricaSelecionada({
@@ -392,10 +390,11 @@ export default function RubricasPage() {
                         })
                       }
                     />
-                    <span className="text-sm">Incide FGTS</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Label htmlFor="incide_fgts" className="text-sm cursor-pointer">Incide FGTS</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
                     <Checkbox
+                      id="incide_inss"
                       checked={rubricaSelecionada.incide_inss}
                       onCheckedChange={(checked) =>
                         setRubricaSelecionada({
@@ -404,10 +403,11 @@ export default function RubricasPage() {
                         })
                       }
                     />
-                    <span className="text-sm">Incide INSS</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Label htmlFor="incide_inss" className="text-sm cursor-pointer">Incide INSS</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
                     <Checkbox
+                      id="reflexo_ferias"
                       checked={rubricaSelecionada.reflexo_ferias}
                       onCheckedChange={(checked) =>
                         setRubricaSelecionada({
@@ -416,10 +416,11 @@ export default function RubricasPage() {
                         })
                       }
                     />
-                    <span className="text-sm">Reflexo Férias</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Label htmlFor="reflexo_ferias" className="text-sm cursor-pointer">Reflexo Férias</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
                     <Checkbox
+                      id="reflexo_13"
                       checked={rubricaSelecionada.reflexo_13}
                       onCheckedChange={(checked) =>
                         setRubricaSelecionada({
@@ -428,14 +429,15 @@ export default function RubricasPage() {
                         })
                       }
                     />
-                    <span className="text-sm">Reflexo 13º</span>
-                  </label>
+                    <Label htmlFor="reflexo_13" className="text-sm cursor-pointer">Reflexo 13º</Label>
+                  </div>
                 </div>
               </div>
 
               {/* Status */}
               <div className="flex items-center gap-2">
                 <Checkbox
+                  id="ativo"
                   checked={rubricaSelecionada.ativo}
                   onCheckedChange={(checked) =>
                     setRubricaSelecionada({
@@ -444,7 +446,7 @@ export default function RubricasPage() {
                     })
                   }
                 />
-                <Label>Rubrica ativa</Label>
+                <Label htmlFor="ativo" className="cursor-pointer">Rubrica ativa</Label>
               </div>
             </div>
           )}
@@ -454,7 +456,8 @@ export default function RubricasPage() {
               Cancelar
             </Button>
             <Button onClick={handleSalvar} disabled={updateMutation.isPending}>
-              {updateMutation.isPending ? "Salvando..." : "Salvar"}
+              {updateMutation.isPending && <Loader2 className="size-4 mr-2 animate-spin" />}
+              Salvar
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -469,7 +472,7 @@ export default function RubricasPage() {
           </DialogHeader>
 
           <div className="relative py-2">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
             <Input
               placeholder="Buscar por código ou descrição..."
               value={buscaConta}
@@ -481,16 +484,16 @@ export default function RubricasPage() {
           <div className="flex-1 overflow-auto border rounded-md">
             <Table>
               <TableHeader>
-                <TableRow className="bg-muted/50">
-                  <TableHead className="text-xs w-32">Código</TableHead>
-                  <TableHead className="text-xs">Descrição</TableHead>
+                <TableRow>
+                  <TableHead>Código</TableHead>
+                  <TableHead>Descrição</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoadingContas ? (
                   <TableRow>
                     <TableCell colSpan={2} className="text-center py-8">
-                      <RefreshCw className="h-5 w-5 animate-spin mx-auto mb-2 text-muted-foreground" />
+                      <Loader2 className="size-5 animate-spin mx-auto mb-2 text-muted-foreground" />
                       <span className="text-sm text-muted-foreground">Carregando...</span>
                     </TableCell>
                   </TableRow>
@@ -508,7 +511,7 @@ export default function RubricasPage() {
                       onClick={() => handleSelecionarConta(conta)}
                     >
                       <TableCell className="font-mono text-xs">{conta.codigo}</TableCell>
-                      <TableCell className="text-xs">{conta.descricao}</TableCell>
+                      <TableCell className="text-sm">{conta.descricao}</TableCell>
                     </TableRow>
                   ))
                 )}
@@ -526,4 +529,3 @@ export default function RubricasPage() {
     </div>
   );
 }
-

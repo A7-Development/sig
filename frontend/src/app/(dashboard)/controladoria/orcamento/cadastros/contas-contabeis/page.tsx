@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { BookOpen, Search, RefreshCw, Info } from "lucide-react";
+import { BookOpen, Search, Loader2, Info } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -52,12 +52,21 @@ export default function ContasContabeisPage() {
     return niveis.filter((n): n is string => n !== null && n !== "");
   };
 
+  const getNivelBadgeColor = (idx: number) => {
+    switch (idx) {
+      case 0: return "bg-blue-50 text-blue-700 border-blue-200";
+      case 1: return "bg-green-50 text-green-700 border-green-200";
+      case 2: return "bg-purple-50 text-purple-700 border-purple-200";
+      case 3: return "bg-orange-50 text-orange-700 border-orange-200";
+      default: return "bg-gray-50 text-gray-700 border-gray-200";
+    }
+  };
+
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="page-container">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold">Contas Contábeis</h1>
+          <h1 className="page-title">Contas Contábeis</h1>
           <p className="text-sm text-muted-foreground">
             Consulta de contas contábeis do sistema NW (somente leitura)
           </p>
@@ -66,7 +75,7 @@ export default function ContasContabeisPage() {
           <Tooltip>
             <TooltipTrigger asChild>
               <Badge variant="outline" className="bg-blue-50 text-blue-700 gap-1">
-                <Info className="h-3 w-3" />
+                <Info className="size-3" />
                 View NW
               </Badge>
             </TooltipTrigger>
@@ -77,90 +86,74 @@ export default function ContasContabeisPage() {
         </TooltipProvider>
       </div>
 
-      {/* Filtros */}
       <Card>
-        <CardContent className="p-4">
-          <div className="relative max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Buscar por código ou descrição (mín. 2 caracteres)..."
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-              className="pl-9"
-            />
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <CardTitle className="section-title flex items-center gap-2">
+                <BookOpen className="size-4" />
+                Plano de Contas ({contas.length} contas)
+              </CardTitle>
+              <CardDescription>
+                As contas são obtidas diretamente do NW e não podem ser editadas aqui
+              </CardDescription>
+            </div>
+            <div className="relative w-[350px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por código ou descrição (mín. 2 caracteres)..."
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                className="pl-9"
+              />
+            </div>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Tabela de Contas */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <BookOpen className="h-4 w-4" />
-            Plano de Contas ({contas.length} contas)
-          </CardTitle>
-          <CardDescription className="text-xs">
-            As contas são obtidas diretamente do NW e não podem ser editadas aqui
-          </CardDescription>
         </CardHeader>
-        <CardContent className="p-0">
-          <div className="max-h-[600px] overflow-auto">
-            <Table>
-              <TableHeader className="sticky top-0 bg-background z-10">
-                <TableRow className="bg-muted/50">
-                  <TableHead className="w-32 text-xs">Código</TableHead>
-                  <TableHead className="text-xs">Descrição</TableHead>
-                  <TableHead className="text-xs">Hierarquia</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
+        <CardContent>
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="size-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : error ? (
+            <div className="empty-state">
+              <BookOpen className="size-12 text-red-500/50 mx-auto mb-4" />
+              <p className="text-red-500">
+                Erro ao carregar contas. Verifique a conexão com o NW.
+              </p>
+            </div>
+          ) : contas.length === 0 ? (
+            <div className="empty-state">
+              <BookOpen className="size-12 text-muted-foreground/50 mx-auto mb-4" />
+              <p className="text-muted-foreground">
+                {busca.length < 2
+                  ? "Digite ao menos 2 caracteres para pesquisar"
+                  : "Nenhuma conta encontrada"}
+              </p>
+            </div>
+          ) : (
+            <div className="max-h-[600px] overflow-auto">
+              <Table>
+                <TableHeader className="sticky top-0 bg-background z-10">
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center py-8">
-                      <RefreshCw className="h-5 w-5 animate-spin mx-auto mb-2 text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">Carregando contas do NW...</span>
-                    </TableCell>
+                    <TableHead>Código</TableHead>
+                    <TableHead>Descrição</TableHead>
+                    <TableHead>Hierarquia</TableHead>
                   </TableRow>
-                ) : error ? (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-center py-8">
-                      <div className="text-red-500 text-sm">
-                        Erro ao carregar contas. Verifique a conexão com o NW.
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ) : contas.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">
-                      {busca.length < 2
-                        ? "Digite ao menos 2 caracteres para pesquisar"
-                        : "Nenhuma conta encontrada"}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  contas.map((conta) => {
+                </TableHeader>
+                <TableBody>
+                  {contas.map((conta) => {
                     const niveis = getNiveis(conta);
                     return (
-                      <TableRow key={conta.codigo} className="hover:bg-muted/30">
+                      <TableRow key={conta.codigo}>
                         <TableCell className="font-mono text-xs">{conta.codigo}</TableCell>
-                        <TableCell className="text-xs">{conta.descricao}</TableCell>
+                        <TableCell className="font-semibold text-sm">{conta.descricao}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1 flex-wrap">
                             {niveis.map((nivel, idx) => (
                               <Badge
                                 key={idx}
                                 variant="outline"
-                                className={`text-[9px] h-5 ${
-                                  idx === 0
-                                    ? "bg-blue-50 text-blue-700 border-blue-200"
-                                    : idx === 1
-                                    ? "bg-green-50 text-green-700 border-green-200"
-                                    : idx === 2
-                                    ? "bg-purple-50 text-purple-700 border-purple-200"
-                                    : idx === 3
-                                    ? "bg-orange-50 text-orange-700 border-orange-200"
-                                    : "bg-gray-50 text-gray-700 border-gray-200"
-                                }`}
+                                className={`text-[9px] h-5 ${getNivelBadgeColor(idx)}`}
                               >
                                 N{idx + 1}: {nivel}
                               </Badge>
@@ -169,16 +162,16 @@ export default function ContasContabeisPage() {
                         </TableCell>
                       </TableRow>
                     );
-                  })
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
 
       {/* Legenda */}
-      <Card className="bg-muted/20">
+      <Card className="bg-muted/20 mt-4">
         <CardContent className="p-4">
           <div className="flex items-center gap-6 text-xs text-muted-foreground">
             <span className="font-medium">Níveis hierárquicos:</span>
@@ -218,4 +211,3 @@ export default function ContasContabeisPage() {
     </div>
   );
 }
-

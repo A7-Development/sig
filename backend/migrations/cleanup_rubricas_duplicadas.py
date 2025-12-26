@@ -150,3 +150,4 @@ if __name__ == "__main__":
         cleanup_duplicatas()
         show_current_state()
 
+
