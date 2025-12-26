@@ -7,7 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api/client";
 import { useAuthStore } from "@/stores/auth-store";
-import { secoesEmpresa } from "@/lib/api/orcamento";
+import { secoesEmpresa, secaoCentrosCusto, cenariosApi } from "@/lib/api/orcamento";
 import type { CenarioEmpresa, CenarioSecao, QuadroPessoal, Funcao, Secao, CentroCusto } from "@/lib/api/orcamento";
 
 // ============================================
@@ -149,7 +149,7 @@ export function PremissasTree({
   }, [carregarEstrutura]);
 
   // ============================================
-  // Carregar funções de uma seção (agrupadas por CC)
+  // Carregar CCs e funções de uma seção
   // ============================================
 
   const carregarDadosSecao = useCallback(async (secaoId: string) => {
@@ -157,59 +157,84 @@ export function PremissasTree({
     
     setLoadingSecoes(prev => new Set(prev).add(secaoId));
     try {
-      // Carregar quadro de pessoal da seção
-      const quadroRes = await api.get<QuadroPessoal[]>(
-        `/api/v1/orcamento/cenarios/${cenarioId}/quadro?cenario_secao_id=${secaoId}`,
-        token
-      );
+      // 1. Buscar CCs cadastrados na estrutura (cenario_secao_cc)
+      const ccsAssociados = await secaoCentrosCusto.listar(token, cenarioId, secaoId);
       
-      let quadro = (quadroRes || []).filter(q => q.ativo !== false);
+      // 2. Buscar quadro de pessoal da seção
+      const quadro = await cenariosApi.getQuadro(token, cenarioId, { cenario_secao_id: secaoId });
+      const quadroAtivo = (quadro || []).filter(q => q.ativo !== false);
       
       // ========================================
       // FILTRAR FUNÇÕES RATEADAS: manter apenas a alocação primária
-      // Para premissas, devemos considerar apenas UMA entrada por grupo de rateio
-      // (a pessoa física é uma só, independente de como o custo é dividido)
       // ========================================
       const rateioGruposProcessados = new Set<string>();
       const quadroFiltrado: QuadroPessoal[] = [];
       
-      // Primeiro, ordenar para que o maior percentual venha primeiro
-      quadro.sort((a, b) => (b.rateio_percentual || 0) - (a.rateio_percentual || 0));
+      // Ordenar para que o maior percentual venha primeiro
+      quadroAtivo.sort((a, b) => (b.rateio_percentual || 0) - (a.rateio_percentual || 0));
       
-      quadro.forEach(q => {
-        // Se não é rateio, incluir normalmente
+      quadroAtivo.forEach(q => {
         if (q.tipo_calculo !== 'rateio' || !q.rateio_grupo_id) {
           quadroFiltrado.push(q);
           return;
         }
         
-        // Se é rateio, verificar se já processamos este grupo
         if (rateioGruposProcessados.has(q.rateio_grupo_id)) {
-          // Já incluímos a alocação primária deste grupo, pular
           return;
         }
         
-        // Esta é a alocação primária (maior percentual) do grupo
         rateioGruposProcessados.add(q.rateio_grupo_id);
         quadroFiltrado.push(q);
       });
       
-      // Agrupar por Centro de Custo
+      // 3. Criar mapa de CCs a partir da estrutura cadastrada
       const ccMap = new Map<string, CCAgrupado>();
       
-      quadroFiltrado.forEach(q => {
-        const ccId = q.centro_custo_id || 'sem-cc';
-        const funcao = todasFuncoes.find(f => f.id === q.funcao_id);
+      // Primeiro, adicionar todos os CCs da estrutura (mesmo sem funções)
+      ccsAssociados.forEach(assoc => {
+        if (!assoc.centro_custo) return;
         
+        const cc: CentroCusto = {
+          id: assoc.centro_custo.id,
+          codigo: assoc.centro_custo.codigo,
+          codigo_totvs: null,
+          nome: assoc.centro_custo.nome,
+          tipo: 'OPERACIONAL',
+          secao_id: null,
+          cliente: null,
+          contrato: null,
+          uf: null,
+          cidade: null,
+          ativo: true,
+          created_at: '',
+          updated_at: ''
+        };
+        
+        ccMap.set(cc.id, {
+          centroCusto: cc,
+          funcoes: []
+        });
+      });
+      
+      // 4. Associar funções aos CCs
+      quadroFiltrado.forEach(q => {
+        const ccId = q.centro_custo_id;
+        if (!ccId) return;
+        
+        const funcao = todasFuncoes.find(f => f.id === q.funcao_id);
         if (!funcao) return;
         
-        if (!ccMap.has(ccId)) {
-          const defaultCC: CentroCusto = { 
-            id: 'sem-cc', 
-            codigo: 'N/A', 
+        // Se o CC já existe no mapa (da estrutura)
+        if (ccMap.has(ccId)) {
+          ccMap.get(ccId)!.funcoes.push({ funcao, quadroItem: q });
+        } else {
+          // CC não está na estrutura mas tem função no quadro (caso legado)
+          const cc = q.centro_custo ? {
+            id: q.centro_custo.id,
+            codigo: q.centro_custo.codigo,
             codigo_totvs: null,
-            nome: 'Sem Centro de Custo',
-            tipo: 'OPERACIONAL',
+            nome: q.centro_custo.nome,
+            tipo: 'OPERACIONAL' as const,
             secao_id: null,
             cliente: null,
             contrato: null,
@@ -218,22 +243,15 @@ export function PremissasTree({
             ativo: true,
             created_at: '',
             updated_at: ''
-          };
+          } : null;
           
-          const cc = q.centro_custo ? {
-            ...defaultCC,
-            id: q.centro_custo.id,
-            codigo: q.centro_custo.codigo,
-            nome: q.centro_custo.nome
-          } : defaultCC;
-          
-          ccMap.set(ccId, {
-            centroCusto: cc,
-            funcoes: []
-          });
+          if (cc) {
+            ccMap.set(ccId, {
+              centroCusto: cc,
+              funcoes: [{ funcao, quadroItem: q }]
+            });
+          }
         }
-        
-        ccMap.get(ccId)!.funcoes.push({ funcao, quadroItem: q });
       });
       
       // Ordenar CCs por nome

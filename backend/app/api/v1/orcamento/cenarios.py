@@ -666,6 +666,7 @@ async def list_quadro_pessoal(
     cenario_id: UUID,
     funcao_id: Optional[UUID] = None,
     secao_id: Optional[UUID] = None,
+    cenario_secao_id: Optional[UUID] = None,
     centro_custo_id: Optional[UUID] = None,
     regime: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
@@ -681,6 +682,8 @@ async def list_quadro_pessoal(
     
     if funcao_id:
         query = query.where(QuadroPessoal.funcao_id == funcao_id)
+    if cenario_secao_id:
+        query = query.where(QuadroPessoal.cenario_secao_id == cenario_secao_id)
     if secao_id:
         query = query.where(QuadroPessoal.secao_id == secao_id)
     if centro_custo_id:
