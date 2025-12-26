@@ -100,7 +100,7 @@ export function PremissasTree({
       // Carregar empresas do cenário e todas as funções
       const [empresasRes, funcoesRes] = await Promise.all([
         api.get<CenarioEmpresa[]>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas`, token),
-        api.get<{ items?: Funcao[] }>(`/api/v1/orcamento/funcoes?limit=1000`, token),
+        api.get<Funcao[]>(`/api/v1/orcamento/funcoes?limit=1000`, token),
       ]);
       
       // Para cada empresa, carregar seções da nova hierarquia
@@ -131,7 +131,7 @@ export function PremissasTree({
       );
       
       setEmpresas(empresasComSecoes);
-      setTodasFuncoes(funcoesRes?.items || []);
+      setTodasFuncoes(funcoesRes || []);
       
       // Expandir a primeira empresa automaticamente
       if (empresasComSecoes.length > 0) {
