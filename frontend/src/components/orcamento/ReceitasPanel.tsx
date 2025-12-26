@@ -33,9 +33,10 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 import { 
   Plus, Pencil, Trash2, DollarSign, TrendingUp, 
-  Briefcase, Loader2, Save, X
+  Briefcase, Loader2, Save, X, ChevronRight, ChevronDown, User
 } from 'lucide-react';
 import { 
   ReceitaCenario, ReceitaCenarioCreate, ReceitaPremissaMes, 
@@ -80,13 +81,16 @@ export function ReceitasPanel({
   const { accessToken: token } = useAuthStore();
   const queryClient = useQueryClient();
   
-  // Estado do formulário
+  // Estado do painel
   const [showForm, setShowForm] = useState(false);
   const [editingReceita, setEditingReceita] = useState<ReceitaCenario | null>(null);
+  const [selectedReceita, setSelectedReceita] = useState<ReceitaCenario | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [selectedForDelete, setSelectedForDelete] = useState<ReceitaCenario | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savingPremissas, setSavingPremissas] = useState(false);
   
+  // Formulário de cadastro
   const [formData, setFormData] = useState({
     tipo_receita_id: '',
     tipo_calculo: 'FIXA_CC',
@@ -97,8 +101,8 @@ export function ReceitasPanel({
     descricao: '',
   });
   
-  // Estado para premissas variáveis (grid mensal)
-  const [premissasVariavel, setPremissasVariavel] = useState<Record<string, {
+  // Estado para premissas variáveis (grid mensal) - separado do formulário
+  const [premissasEdicao, setPremissasEdicao] = useState<Record<string, {
     vopdu: string;
     indice_conversao: string;
     ticket_medio: string;
@@ -147,9 +151,7 @@ export function ReceitasPanel({
     queryKey: ['funcoes-cc', cenarioId, centroCustoId],
     queryFn: async () => {
       if (!centroCustoId || !token) return [];
-      // Buscar funções do quadro de pessoal do CC
       const quadro = await cenariosApi.getQuadro(token, cenarioId, { centro_custo_id: centroCustoId });
-      // Extrair funções únicas
       const funcoesMap = new Map<string, any>();
       quadro.forEach(q => {
         if (q.funcao && !funcoesMap.has(q.funcao.id)) {
@@ -160,6 +162,40 @@ export function ReceitasPanel({
     },
     enabled: !!centroCustoId && !!token,
   });
+
+  // Carregar premissas quando selecionar uma receita variável
+  useEffect(() => {
+    if (selectedReceita?.tipo_calculo === 'VARIAVEL' && selectedReceita.premissas) {
+      const premissasMap: typeof premissasEdicao = {};
+      
+      // Inicializar todos os meses com valores padrão
+      mesesPeriodo.forEach(({ key }) => {
+        premissasMap[key] = {
+          vopdu: '0',
+          indice_conversao: '0',
+          ticket_medio: '0',
+          fator: '1',
+          indice_estorno: '0',
+        };
+      });
+      
+      // Preencher com valores existentes
+      selectedReceita.premissas.forEach(p => {
+        const key = `${p.ano}-${p.mes}`;
+        if (premissasMap[key]) {
+          premissasMap[key] = {
+            vopdu: String(p.vopdu || 0),
+            indice_conversao: String(p.indice_conversao || 0),
+            ticket_medio: String(p.ticket_medio || 0),
+            fator: String(p.fator || 1),
+            indice_estorno: String(p.indice_estorno || 0),
+          };
+        }
+      });
+      
+      setPremissasEdicao(premissasMap);
+    }
+  }, [selectedReceita, mesesPeriodo]);
 
   // Reset form
   const resetForm = () => {
@@ -172,7 +208,6 @@ export function ReceitasPanel({
       valor_maximo_pa: '',
       descricao: '',
     });
-    setPremissasVariavel({});
     setEditingReceita(null);
     setShowForm(false);
   };
@@ -188,24 +223,19 @@ export function ReceitasPanel({
       valor_maximo_pa: receita.valor_maximo_pa?.toString() || '',
       descricao: receita.descricao || '',
     });
-    
-    // Carregar premissas variáveis
-    if (receita.premissas) {
-      const premissasMap: typeof premissasVariavel = {};
-      receita.premissas.forEach(p => {
-        premissasMap[`${p.ano}-${p.mes}`] = {
-          vopdu: String(p.vopdu || 0),
-          indice_conversao: String(p.indice_conversao || 0),
-          ticket_medio: String(p.ticket_medio || 0),
-          fator: String(p.fator || 1),
-          indice_estorno: String(p.indice_estorno || 0),
-        };
-      });
-      setPremissasVariavel(premissasMap);
-    }
-    
     setEditingReceita(receita);
+    setSelectedReceita(null);
     setShowForm(true);
+  };
+
+  // Selecionar receita para editar premissas
+  const handleSelectReceita = (receita: ReceitaCenario) => {
+    if (selectedReceita?.id === receita.id) {
+      setSelectedReceita(null);
+    } else {
+      setSelectedReceita(receita);
+      setShowForm(false);
+    }
   };
 
   // Verificar se precisa de função (HC, PA ou Variável)
@@ -215,7 +245,6 @@ export function ReceitasPanel({
 
   // Salvar receita
   const handleSave = async () => {
-    // Validações
     if (!formData.tipo_receita_id) {
       toast.error('Selecione um tipo de receita');
       return;
@@ -244,36 +273,16 @@ export function ReceitasPanel({
         descricao: formData.descricao || undefined,
       };
       
-      let receitaId: string;
-      
       if (editingReceita) {
         await api.put(`/api/v1/orcamento/receitas/${editingReceita.id}`, payload, token || undefined);
-        receitaId = editingReceita.id;
         toast.success('Receita atualizada!');
       } else {
         const novaReceita = await api.post<ReceitaCenario>(`/api/v1/orcamento/receitas/cenarios/${cenarioId}`, payload, token || undefined);
-        receitaId = novaReceita.id;
         toast.success('Receita criada!');
-      }
-      
-      // Salvar premissas variáveis se aplicável
-      if (formData.tipo_calculo === 'VARIAVEL') {
-        const premissasData = Object.entries(premissasVariavel).map(([key, values]) => {
-          const [ano, mes] = key.split('-').map(Number);
-          return {
-            receita_cenario_id: receitaId,
-            mes,
-            ano,
-            vopdu: parseFloat(values.vopdu) || 0,
-            indice_conversao: parseFloat(values.indice_conversao) || 0,
-            ticket_medio: parseFloat(values.ticket_medio) || 0,
-            fator: parseFloat(values.fator) || 1,
-            indice_estorno: parseFloat(values.indice_estorno) || 0,
-          };
-        });
         
-        if (premissasData.length > 0) {
-          await api.post(`/api/v1/orcamento/receitas/${receitaId}/premissas/bulk`, premissasData, token || undefined);
+        // Se for variável, selecionar para editar premissas
+        if (formData.tipo_calculo === 'VARIAVEL') {
+          setSelectedReceita(novaReceita);
         }
       }
       
@@ -283,6 +292,36 @@ export function ReceitasPanel({
       toast.error(error.message || 'Erro ao salvar receita');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Salvar premissas da receita variável
+  const handleSavePremissas = async () => {
+    if (!selectedReceita) return;
+    
+    setSavingPremissas(true);
+    try {
+      const premissasData = Object.entries(premissasEdicao).map(([key, values]) => {
+        const [ano, mes] = key.split('-').map(Number);
+        return {
+          receita_cenario_id: selectedReceita.id,
+          mes,
+          ano,
+          vopdu: parseFloat(values.vopdu) || 0,
+          indice_conversao: parseFloat(values.indice_conversao) || 0,
+          ticket_medio: parseFloat(values.ticket_medio) || 0,
+          fator: parseFloat(values.fator) || 1,
+          indice_estorno: parseFloat(values.indice_estorno) || 0,
+        };
+      });
+      
+      await api.post(`/api/v1/orcamento/receitas/${selectedReceita.id}/premissas/bulk`, premissasData, token || undefined);
+      toast.success('Premissas salvas!');
+      await refetchReceitas();
+    } catch (error: any) {
+      toast.error(error.message || 'Erro ao salvar premissas');
+    } finally {
+      setSavingPremissas(false);
     }
   };
 
@@ -296,14 +335,17 @@ export function ReceitasPanel({
       await refetchReceitas();
       setDeleteConfirmOpen(false);
       setSelectedForDelete(null);
+      if (selectedReceita?.id === selectedForDelete.id) {
+        setSelectedReceita(null);
+      }
     } catch (error: any) {
       toast.error(error.message || 'Erro ao excluir receita');
     }
   };
 
   // Atualizar premissa individual
-  const handlePremissaChange = (key: string, field: keyof typeof premissasVariavel[string], value: string) => {
-    setPremissasVariavel(prev => ({
+  const handlePremissaChange = (key: string, field: keyof typeof premissasEdicao[string], value: string) => {
+    setPremissasEdicao(prev => ({
       ...prev,
       [key]: {
         ...prev[key] || { vopdu: '0', indice_conversao: '0', ticket_medio: '0', fator: '1', indice_estorno: '0' },
@@ -312,130 +354,258 @@ export function ReceitasPanel({
     }));
   };
 
-  // Renderizar grid de premissas variáveis
-  const renderPremissasGrid = () => (
-    <div className="border rounded-lg overflow-hidden">
-      <Table>
-        <TableHeader>
-          <TableRow className="bg-muted/30">
-            <TableHead className="w-[100px] sticky left-0 bg-muted/30">Mês/Ano</TableHead>
-            <TableHead className="text-center min-w-[80px]">VOPDU</TableHead>
-            <TableHead className="text-center min-w-[80px]">Índice Conv.</TableHead>
-            <TableHead className="text-center min-w-[100px]">Ticket Médio</TableHead>
-            <TableHead className="text-center min-w-[80px]">Fator</TableHead>
-            <TableHead className="text-center min-w-[80px]">% Estorno</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {mesesPeriodo.map(({ ano, mes, key }) => {
-            const valores = premissasVariavel[key] || {
-              vopdu: '0', indice_conversao: '0', ticket_medio: '0', fator: '1', indice_estorno: '0'
-            };
-            
-            return (
-              <TableRow key={key}>
-                <TableCell className="font-medium sticky left-0 bg-background">
-                  {MESES_NOMES[mes - 1]}/{ano}
-                </TableCell>
-                <TableCell className="p-1">
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={valores.vopdu}
-                    onChange={(e) => handlePremissaChange(key, 'vopdu', e.target.value)}
-                    className="h-7 text-xs text-center"
-                    placeholder="0"
-                  />
-                </TableCell>
-                <TableCell className="p-1">
-                  <Input
-                    type="number"
-                    step="0.0001"
-                    value={valores.indice_conversao}
-                    onChange={(e) => handlePremissaChange(key, 'indice_conversao', e.target.value)}
-                    className="h-7 text-xs text-center"
-                    placeholder="0"
-                  />
-                </TableCell>
-                <TableCell className="p-1">
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={valores.ticket_medio}
-                    onChange={(e) => handlePremissaChange(key, 'ticket_medio', e.target.value)}
-                    className="h-7 text-xs text-center"
-                    placeholder="0"
-                  />
-                </TableCell>
-                <TableCell className="p-1">
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={valores.fator}
-                    onChange={(e) => handlePremissaChange(key, 'fator', e.target.value)}
-                    className="h-7 text-xs text-center"
-                    placeholder="1"
-                  />
-                </TableCell>
-                <TableCell className="p-1">
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="100"
-                    value={valores.indice_estorno}
-                    onChange={(e) => handlePremissaChange(key, 'indice_estorno', e.target.value)}
-                    className="h-7 text-xs text-center"
-                    placeholder="0"
-                  />
-                </TableCell>
+  // Renderizar grid de premissas variáveis (igual às premissas de pessoal)
+  const renderPremissasGrid = () => {
+    if (!selectedReceita || selectedReceita.tipo_calculo !== 'VARIAVEL') {
+      return null;
+    }
+
+    return (
+      <div className="p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold flex items-center gap-2">
+              <TrendingUp className="size-4 text-green-600" />
+              Premissas de Receita Variável
+            </h3>
+            <p className="text-xs text-muted-foreground mt-1">
+              {selectedReceita.tipo_receita?.nome} • Função: {selectedReceita.funcao_pa?.nome || '-'}
+            </p>
+          </div>
+          <Button onClick={handleSavePremissas} disabled={savingPremissas} size="sm">
+            {savingPremissas ? (
+              <Loader2 className="size-4 mr-2 animate-spin" />
+            ) : (
+              <Save className="size-4 mr-2" />
+            )}
+            Salvar Premissas
+          </Button>
+        </div>
+
+        <div className="border rounded-lg overflow-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/50">
+                <TableHead className="w-[100px] sticky left-0 bg-muted/50 font-semibold">Mês/Ano</TableHead>
+                <TableHead className="text-center min-w-[100px]">
+                  <div className="text-xs">
+                    <div className="font-semibold">VOPDU</div>
+                    <div className="text-muted-foreground font-normal">Venda/Operador/Dia</div>
+                  </div>
+                </TableHead>
+                <TableHead className="text-center min-w-[100px]">
+                  <div className="text-xs">
+                    <div className="font-semibold">Índice Conv.</div>
+                    <div className="text-muted-foreground font-normal">% Conversão</div>
+                  </div>
+                </TableHead>
+                <TableHead className="text-center min-w-[120px]">
+                  <div className="text-xs">
+                    <div className="font-semibold">Ticket Médio</div>
+                    <div className="text-muted-foreground font-normal">R$ por venda</div>
+                  </div>
+                </TableHead>
+                <TableHead className="text-center min-w-[100px]">
+                  <div className="text-xs">
+                    <div className="font-semibold">Fator</div>
+                    <div className="text-muted-foreground font-normal">Multiplicador</div>
+                  </div>
+                </TableHead>
+                <TableHead className="text-center min-w-[100px]">
+                  <div className="text-xs">
+                    <div className="font-semibold">% Estorno</div>
+                    <div className="text-muted-foreground font-normal">Cancelamentos</div>
+                  </div>
+                </TableHead>
               </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </div>
-  );
+            </TableHeader>
+            <TableBody>
+              {mesesPeriodo.map(({ ano, mes, key }) => {
+                const valores = premissasEdicao[key] || {
+                  vopdu: '0', indice_conversao: '0', ticket_medio: '0', fator: '1', indice_estorno: '0'
+                };
+                
+                return (
+                  <TableRow key={key} className="hover:bg-muted/30">
+                    <TableCell className="font-medium sticky left-0 bg-background border-r">
+                      <span className="text-sm">{MESES_NOMES[mes - 1]}/{ano}</span>
+                    </TableCell>
+                    <TableCell className="p-1">
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={valores.vopdu}
+                        onChange={(e) => handlePremissaChange(key, 'vopdu', e.target.value)}
+                        className="h-8 text-center"
+                        placeholder="0"
+                      />
+                    </TableCell>
+                    <TableCell className="p-1">
+                      <Input
+                        type="number"
+                        step="0.0001"
+                        value={valores.indice_conversao}
+                        onChange={(e) => handlePremissaChange(key, 'indice_conversao', e.target.value)}
+                        className="h-8 text-center"
+                        placeholder="0"
+                      />
+                    </TableCell>
+                    <TableCell className="p-1">
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={valores.ticket_medio}
+                        onChange={(e) => handlePremissaChange(key, 'ticket_medio', e.target.value)}
+                        className="h-8 text-center"
+                        placeholder="0"
+                      />
+                    </TableCell>
+                    <TableCell className="p-1">
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={valores.fator}
+                        onChange={(e) => handlePremissaChange(key, 'fator', e.target.value)}
+                        className="h-8 text-center"
+                        placeholder="1"
+                      />
+                    </TableCell>
+                    <TableCell className="p-1">
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="100"
+                        value={valores.indice_estorno}
+                        onChange={(e) => handlePremissaChange(key, 'indice_estorno', e.target.value)}
+                        className="h-8 text-center"
+                        placeholder="0"
+                      />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+
+        {/* Info sobre o cálculo */}
+        <div className="bg-muted/30 rounded-lg p-3 text-xs text-muted-foreground">
+          <strong>Fórmula:</strong> PA × VOPDU × Índice Conversão × Ticket Médio × Fator × Dias Úteis × (1 - % Estorno)
+          <br />
+          <strong>Limites:</strong> Mínimo {formatCurrency(selectedReceita.valor_minimo_pa || 0)} / Máximo {formatCurrency(selectedReceita.valor_maximo_pa || 0)} por PA
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <div className="p-4 space-y-4">
-      {/* Header do CC selecionado */}
-      <div className="flex items-center justify-between border-b pb-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <Briefcase className="size-5 text-blue-600" />
-            <h2 className="text-lg font-semibold">{centroCustoNome}</h2>
-            <Badge variant="outline" className="text-xs">RECEITAS</Badge>
+    <div className="h-full flex">
+      {/* Painel Esquerdo: Lista de Receitas */}
+      <div className="w-72 border-r bg-muted/5 flex flex-col">
+        <div className="p-3 border-b bg-muted/10 flex items-center justify-between">
+          <div>
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Receitas</h3>
+            <p className="text-[10px] text-muted-foreground">{centroCustoNome}</p>
           </div>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Seção: {secaoNome}
-          </p>
+          <Button size="sm" variant="outline" onClick={() => { resetForm(); setSelectedReceita(null); setShowForm(true); }}>
+            <Plus className="size-3 mr-1" />
+            Nova
+          </Button>
         </div>
-        <Button onClick={() => { resetForm(); setShowForm(true); }}>
-          <Plus className="size-4 mr-2" />
-          Nova Receita
-        </Button>
+        
+        <ScrollArea className="flex-1">
+          <div className="p-2 space-y-1">
+            {loadingReceitas ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="size-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : receitas.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground text-xs">
+                <TrendingUp className="size-6 mx-auto mb-2 opacity-30" />
+                <p>Nenhuma receita</p>
+              </div>
+            ) : (
+              receitas.map(receita => {
+                const isSelected = selectedReceita?.id === receita.id;
+                const isVariavel = receita.tipo_calculo === 'VARIAVEL';
+                
+                return (
+                  <div
+                    key={receita.id}
+                    className={cn(
+                      "flex items-center gap-2 p-2 rounded-md cursor-pointer group",
+                      isSelected
+                        ? "bg-green-100 text-green-800"
+                        : "hover:bg-muted/50"
+                    )}
+                    onClick={() => handleSelectReceita(receita)}
+                  >
+                    <DollarSign className={cn("size-4 shrink-0", isSelected ? "text-green-600" : "text-green-500")} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium truncate">
+                        {receita.tipo_receita?.nome || 'Receita'}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {TIPOS_CALCULO.find(t => t.value === receita.tipo_calculo)?.label}
+                        {receita.funcao_pa && ` • ${receita.funcao_pa.nome}`}
+                      </p>
+                    </div>
+                    {isVariavel && (
+                      <Badge variant="outline" className="text-[9px] h-4 px-1 bg-purple-50 text-purple-700 border-purple-200">
+                        VAR
+                      </Badge>
+                    )}
+                    <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-6"
+                        onClick={(e) => { e.stopPropagation(); handleEdit(receita); }}
+                      >
+                        <Pencil className="size-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-6 text-destructive"
+                        onClick={(e) => { e.stopPropagation(); setSelectedForDelete(receita); setDeleteConfirmOpen(true); }}
+                      >
+                        <Trash2 className="size-3" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </ScrollArea>
       </div>
 
-      {/* Formulário de cadastro/edição */}
-      {showForm && (
-        <Card className="border-primary/20">
-          <CardHeader className="py-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <TrendingUp className="size-4 text-green-600" />
-              {editingReceita ? 'Editar Receita' : 'Nova Receita'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      {/* Painel Direito: Formulário ou Grid de Premissas */}
+      <div className="flex-1 overflow-auto">
+        {showForm ? (
+          /* Formulário de cadastro/edição */
+          <div className="p-4 space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="font-semibold flex items-center gap-2">
+                <TrendingUp className="size-4 text-green-600" />
+                {editingReceita ? 'Editar Receita' : 'Nova Receita'}
+              </h3>
+              <Button variant="ghost" size="sm" onClick={resetForm}>
+                <X className="size-4" />
+              </Button>
+            </div>
+
             {/* Tipo de Receita e Tipo de Cálculo */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label className="text-xs">Tipo de Receita *</Label>
+                <Label>Tipo de Receita *</Label>
                 <Select
                   value={formData.tipo_receita_id}
                   onValueChange={(v) => setFormData(prev => ({ ...prev, tipo_receita_id: v }))}
                 >
-                  <SelectTrigger className="h-9">
+                  <SelectTrigger>
                     <SelectValue placeholder="Selecione..." />
                   </SelectTrigger>
                   <SelectContent>
@@ -449,12 +619,12 @@ export function ReceitasPanel({
               </div>
               
               <div>
-                <Label className="text-xs">Tipo de Cálculo *</Label>
+                <Label>Tipo de Cálculo *</Label>
                 <Select
                   value={formData.tipo_calculo}
                   onValueChange={(v) => setFormData(prev => ({ ...prev, tipo_calculo: v, funcao_pa_id: '' }))}
                 >
-                  <SelectTrigger className="h-9">
+                  <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -471,12 +641,12 @@ export function ReceitasPanel({
               </div>
             </div>
 
-            {/* Função de referência (obrigatório para HC/PA/Variável) */}
+            {/* Função de referência */}
             {precisaFuncao && (
               <div>
-                <Label className="text-xs">
+                <Label>
                   Função de Referência * 
-                  <span className="text-muted-foreground ml-1">
+                  <span className="text-muted-foreground ml-1 font-normal">
                     (para calcular {formData.tipo_calculo === 'FIXA_HC' ? 'HC' : formData.tipo_calculo === 'FIXA_PA' ? 'PA' : 'produtividade'})
                   </span>
                 </Label>
@@ -484,7 +654,7 @@ export function ReceitasPanel({
                   value={formData.funcao_pa_id}
                   onValueChange={(v) => setFormData(prev => ({ ...prev, funcao_pa_id: v }))}
                 >
-                  <SelectTrigger className="h-9">
+                  <SelectTrigger>
                     <SelectValue placeholder="Selecione a função..." />
                   </SelectTrigger>
                   <SelectContent>
@@ -507,7 +677,7 @@ export function ReceitasPanel({
             {/* Valores */}
             {formData.tipo_calculo !== 'VARIAVEL' && (
               <div>
-                <Label className="text-xs">
+                <Label>
                   Valor {formData.tipo_calculo === 'FIXA_CC' ? 'Mensal Fixo' : 'por Unidade'} *
                 </Label>
                 <Input
@@ -516,7 +686,6 @@ export function ReceitasPanel({
                   value={formData.valor_fixo}
                   onChange={(e) => setFormData(prev => ({ ...prev, valor_fixo: e.target.value }))}
                   placeholder="0.00"
-                  className="h-9"
                 />
               </div>
             )}
@@ -525,156 +694,131 @@ export function ReceitasPanel({
             {formData.tipo_calculo === 'VARIAVEL' && (
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label className="text-xs">Valor Mínimo por PA</Label>
+                  <Label>Valor Mínimo por PA</Label>
                   <Input
                     type="number"
                     step="0.01"
                     value={formData.valor_minimo_pa}
                     onChange={(e) => setFormData(prev => ({ ...prev, valor_minimo_pa: e.target.value }))}
                     placeholder="0.00"
-                    className="h-9"
                   />
                 </div>
                 <div>
-                  <Label className="text-xs">Valor Máximo por PA</Label>
+                  <Label>Valor Máximo por PA</Label>
                   <Input
                     type="number"
                     step="0.01"
                     value={formData.valor_maximo_pa}
                     onChange={(e) => setFormData(prev => ({ ...prev, valor_maximo_pa: e.target.value }))}
                     placeholder="0.00"
-                    className="h-9"
                   />
                 </div>
               </div>
             )}
 
-            {/* Grid de Premissas Variáveis */}
-            {formData.tipo_calculo === 'VARIAVEL' && (
-              <div>
-                <Label className="text-xs mb-2 block">
-                  Premissas Mensais de Receita Variável
-                </Label>
-                <ScrollArea className="h-[200px]">
-                  {renderPremissasGrid()}
-                </ScrollArea>
-              </div>
-            )}
-
             {/* Descrição */}
             <div>
-              <Label className="text-xs">Descrição</Label>
+              <Label>Descrição</Label>
               <Input
                 value={formData.descricao}
                 onChange={(e) => setFormData(prev => ({ ...prev, descricao: e.target.value }))}
                 placeholder="Descrição opcional..."
-                className="h-9"
               />
             </div>
 
+            {/* Info para variável */}
+            {formData.tipo_calculo === 'VARIAVEL' && (
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-xs text-purple-800">
+                <strong>Receita Variável:</strong> Após salvar, clique na receita à esquerda para preencher as premissas mensais (VOPDU, Índice, Ticket, etc.)
+              </div>
+            )}
+
             {/* Ações */}
-            <div className="flex justify-end gap-2 pt-2 border-t">
-              <Button variant="outline" size="sm" onClick={resetForm} disabled={saving}>
-                <X className="size-3 mr-1" />
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <Button variant="outline" onClick={resetForm} disabled={saving}>
                 Cancelar
               </Button>
-              <Button size="sm" onClick={handleSave} disabled={saving}>
+              <Button onClick={handleSave} disabled={saving}>
                 {saving ? (
-                  <Loader2 className="size-3 mr-1 animate-spin" />
+                  <Loader2 className="size-4 mr-2 animate-spin" />
                 ) : (
-                  <Save className="size-3 mr-1" />
+                  <Save className="size-4 mr-2" />
                 )}
                 Salvar
               </Button>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        ) : selectedReceita ? (
+          /* Grid de Premissas ou Detalhes */
+          selectedReceita.tipo_calculo === 'VARIAVEL' ? (
+            renderPremissasGrid()
+          ) : (
+            /* Detalhes de receita fixa */
+            <div className="p-4 space-y-4">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div>
+                  <h3 className="font-semibold flex items-center gap-2">
+                    <DollarSign className="size-4 text-green-600" />
+                    {selectedReceita.tipo_receita?.nome || 'Receita'}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    {TIPOS_CALCULO.find(t => t.value === selectedReceita.tipo_calculo)?.label}
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => handleEdit(selectedReceita)}>
+                  <Pencil className="size-4 mr-2" />
+                  Editar
+                </Button>
+              </div>
 
-      {/* Lista de receitas cadastradas */}
-      <div>
-        <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
-          <DollarSign className="size-4 text-green-600" />
-          Receitas Cadastradas
-          <Badge variant="secondary" className="text-xs">{receitas.length}</Badge>
-        </h4>
-        
-        {loadingReceitas ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="size-5 animate-spin" />
-          </div>
-        ) : receitas.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground text-sm border rounded-lg bg-muted/10">
-            <TrendingUp className="size-8 mx-auto mb-2 opacity-30" />
-            <p>Nenhuma receita cadastrada</p>
-            <p className="text-xs mt-1">Clique em "Nova Receita" para começar</p>
-          </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Card>
+                  <CardHeader className="py-3">
+                    <CardTitle className="text-sm">Valor</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-2xl font-bold text-green-600">
+                      {formatCurrency(selectedReceita.valor_fixo || 0)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedReceita.tipo_calculo === 'FIXA_CC' ? 'por mês' : 
+                       selectedReceita.tipo_calculo === 'FIXA_HC' ? 'por HC/mês' : 'por PA/mês'}
+                    </p>
+                  </CardContent>
+                </Card>
+
+                {selectedReceita.funcao_pa && (
+                  <Card>
+                    <CardHeader className="py-3">
+                      <CardTitle className="text-sm">Função de Referência</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="font-medium">{selectedReceita.funcao_pa.nome}</p>
+                      <p className="text-xs text-muted-foreground font-mono">
+                        {selectedReceita.funcao_pa.codigo}
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+
+              {selectedReceita.descricao && (
+                <div className="bg-muted/30 rounded-lg p-3">
+                  <p className="text-sm">{selectedReceita.descricao}</p>
+                </div>
+              )}
+            </div>
+          )
         ) : (
-          <div className="border rounded-lg overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/30">
-                  <TableHead>Tipo de Receita</TableHead>
-                  <TableHead>Cálculo</TableHead>
-                  <TableHead>Função</TableHead>
-                  <TableHead className="text-right">Valor</TableHead>
-                  <TableHead className="text-center w-[100px]">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {receitas.map(receita => (
-                  <TableRow key={receita.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <DollarSign className="size-4 text-green-600" />
-                        <span className="font-medium">{receita.tipo_receita?.nome || '-'}</span>
-                      </div>
-                      {receita.descricao && (
-                        <p className="text-xs text-muted-foreground mt-0.5">{receita.descricao}</p>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        {TIPOS_CALCULO.find(t => t.value === receita.tipo_calculo)?.label}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {receita.funcao_pa ? (
-                        <span className="text-sm">{receita.funcao_pa.nome}</span>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {receita.valor_fixo ? formatCurrency(receita.valor_fixo) : '-'}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7"
-                          onClick={() => handleEdit(receita)}
-                        >
-                          <Pencil className="size-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7 text-destructive hover:text-destructive"
-                          onClick={() => {
-                            setSelectedForDelete(receita);
-                            setDeleteConfirmOpen(true);
-                          }}
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+          /* Estado inicial - nada selecionado */
+          <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
+            <TrendingUp className="size-12 mb-4 opacity-30" />
+            <h3 className="text-lg font-medium mb-2">Selecione uma Receita</h3>
+            <p className="text-sm max-w-md text-center">
+              Clique em uma receita à esquerda para ver os detalhes ou preencher as premissas mensais.
+              <br />
+              <span className="text-xs">Para receitas <strong>variáveis</strong>, você poderá preencher VOPDU, Índice, Ticket, etc. mês a mês.</span>
+            </p>
           </div>
         )}
       </div>
