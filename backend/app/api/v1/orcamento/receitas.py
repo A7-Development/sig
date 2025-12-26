@@ -217,6 +217,7 @@ async def listar_premissas_receita(
 
 
 @router.put("/{receita_id}/premissas", response_model=List[ReceitaPremissaMesResponse])
+@router.post("/{receita_id}/premissas/bulk", response_model=List[ReceitaPremissaMesResponse])
 async def atualizar_premissas_bulk(
     receita_id: UUID,
     data: ReceitaPremissasBulkUpdate,

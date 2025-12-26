@@ -344,7 +344,6 @@ export function ReceitasPanel({
     setSavingPremissas(true);
     try {
       const premissasData = premissas.map(p => ({
-        receita_cenario_id: selectedReceita.id,
         mes: p.mes,
         ano: p.ano,
         vopdu: p.vopdu,
@@ -354,7 +353,8 @@ export function ReceitasPanel({
         indice_estorno: p.indice_estorno,
       }));
       
-      await api.post(`/api/v1/orcamento/receitas/${selectedReceita.id}/premissas/bulk`, premissasData, token || undefined);
+      // PUT com objeto { premissas: [...] }
+      await api.put(`/api/v1/orcamento/receitas/${selectedReceita.id}/premissas`, { premissas: premissasData }, token || undefined);
       toast.success('Premissas salvas!');
       setHasChanges(false);
       await refetchReceitas();
@@ -604,17 +604,46 @@ export function ReceitasPanel({
                                         onChange={(e) => handleUpdateValue(idx, indicador.key, parseFloat(e.target.value) || 0)}
                                         onBlur={() => setEditingCell(null)}
                                         onKeyDown={(e) => {
-                                          if (e.key === 'Enter' || e.key === 'Tab') {
+                                          if (e.key === 'Enter') {
                                             e.preventDefault();
-                                            if (e.key === 'Tab') {
+                                            setEditingCell(null);
+                                          }
+                                          if (e.key === 'Tab') {
+                                            e.preventDefault();
+                                            if (e.shiftKey) {
+                                              // Shift+Tab: voltar para célula anterior
+                                              const prevIdx = idx - 1;
+                                              if (prevIdx >= 0) {
+                                                setEditingCell({ indicador: indicador.key, mesIndex: prevIdx });
+                                              } else {
+                                                // Ir para última célula da linha anterior
+                                                const indicadorIdx = INDICADORES_RECEITA.findIndex(i => i.key === indicador.key);
+                                                if (indicadorIdx > 0) {
+                                                  setEditingCell({ 
+                                                    indicador: INDICADORES_RECEITA[indicadorIdx - 1].key, 
+                                                    mesIndex: premissas.length - 1 
+                                                  });
+                                                } else {
+                                                  setEditingCell(null);
+                                                }
+                                              }
+                                            } else {
+                                              // Tab: avançar para próxima célula
                                               const nextIdx = idx + 1;
                                               if (nextIdx < premissas.length) {
                                                 setEditingCell({ indicador: indicador.key, mesIndex: nextIdx });
                                               } else {
-                                                setEditingCell(null);
+                                                // Ir para primeira célula da próxima linha
+                                                const indicadorIdx = INDICADORES_RECEITA.findIndex(i => i.key === indicador.key);
+                                                if (indicadorIdx < INDICADORES_RECEITA.length - 1) {
+                                                  setEditingCell({ 
+                                                    indicador: INDICADORES_RECEITA[indicadorIdx + 1].key, 
+                                                    mesIndex: 0 
+                                                  });
+                                                } else {
+                                                  setEditingCell(null);
+                                                }
                                               }
-                                            } else {
-                                              setEditingCell(null);
                                             }
                                           }
                                           if (e.key === 'Escape') {
