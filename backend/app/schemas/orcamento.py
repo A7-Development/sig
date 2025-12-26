@@ -686,36 +686,46 @@ class CenarioClienteResponse(CenarioClienteBase):
 
 
 # ============================================
-# CenÃ¡rio SeÃ§Ã£o (SeÃ§Ã£o do Cliente no CenÃ¡rio)
+# Cenário Seção (Seção do Cenário - Nova Hierarquia)
 # ============================================
+# NOVA HIERARQUIA: Cenário -> Empresa -> Seção (representa Cliente)
+# A Seção agora representa o "Cliente" (ex: CLARO, VIVO, CORPORATIVO)
 
 class CenarioSecaoBase(BaseModel):
-    cenario_cliente_id: UUID
+    cenario_cliente_id: Optional[UUID] = None  # Mantido para compatibilidade
+    cenario_empresa_id: Optional[UUID] = None  # Nova FK direta para empresa
     secao_id: UUID
     # Nota: fator_pa foi movido para QuadroPessoal (por função)
     ativo: bool = True
 
 
 class CenarioSecaoCreate(BaseModel):
+    """Schema para criar seção diretamente na empresa (nova hierarquia)."""
     secao_id: UUID
+    cenario_empresa_id: Optional[UUID] = None  # Preenchido automaticamente pela API
 
 
 class CenarioSecaoUpdate(BaseModel):
     ativo: Optional[bool] = None
 
 
-class CenarioSecaoResponse(CenarioSecaoBase):
+class CenarioSecaoResponse(BaseModel):
     id: UUID
+    cenario_cliente_id: Optional[UUID] = None
+    cenario_empresa_id: Optional[UUID] = None
+    secao_id: UUID
+    ativo: bool
     created_at: datetime
     updated_at: datetime
     secao: Optional["SecaoSimples"] = None
+    is_corporativo: bool = False  # Propriedade calculada
 
     class Config:
         from_attributes = True
 
 
 class CenarioClienteComSecoes(CenarioClienteResponse):
-    """Cliente do cenÃ¡rio com suas seÃ§Ãµes."""
+    """Cliente do cenário com suas seções (hierarquia antiga)."""
     secoes: List[CenarioSecaoResponse] = []
 
 
@@ -823,7 +833,7 @@ class QuadroPessoalBase(BaseModel):
     cenario_id: UUID
     funcao_id: UUID
     secao_id: Optional[UUID] = None
-    centro_custo_id: Optional[UUID] = None
+    centro_custo_id: UUID = Field(..., description="Centro de Custo é obrigatório (projeto/pool)")
     tabela_salarial_id: Optional[UUID] = None
     cenario_secao_id: Optional[UUID] = None  # Referência para CenarioSecao (estrutura hierárquica)
     regime: str = Field("CLT", pattern="^(CLT|PJ)$")
@@ -1326,9 +1336,85 @@ class DREResponse(BaseModel):
     total_geral: float
 
 
+# ============================================
+# Rateio de Custos (POOL -> OPERACIONAL)
+# ============================================
+
+class RateioDestinoBase(BaseModel):
+    """Destino de um rateio com percentual."""
+    cc_destino_id: UUID
+    percentual: float = Field(..., ge=0, le=100, description="Percentual do rateio (0-100)")
+
+
+class RateioDestinoCreate(RateioDestinoBase):
+    pass
+
+
+class RateioDestinoResponse(RateioDestinoBase):
+    id: UUID
+    rateio_grupo_id: UUID
+    created_at: datetime
+    cc_destino: Optional["CentroCustoSimples"] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RateioGrupoBase(BaseModel):
+    """Grupo de rateio para distribuir custos de CC POOL para CCs OPERACIONAIS."""
+    cc_origem_pool_id: UUID
+    nome: str = Field(..., min_length=1, max_length=200)
+    descricao: Optional[str] = None
+    ativo: bool = True
+
+
+class RateioGrupoCreate(RateioGrupoBase):
+    """Schema para criar grupo de rateio."""
+    destinos: List[RateioDestinoCreate] = Field(default_factory=list, description="Destinos do rateio com percentuais")
+
+
+class RateioGrupoUpdate(BaseModel):
+    """Schema para atualizar grupo de rateio."""
+    nome: Optional[str] = Field(None, min_length=1, max_length=200)
+    descricao: Optional[str] = None
+    ativo: Optional[bool] = None
+
+
+class RateioGrupoResponse(RateioGrupoBase):
+    id: UUID
+    cenario_id: UUID
+    created_at: datetime
+    updated_at: datetime
+    cc_origem: Optional["CentroCustoSimples"] = None
+    destinos: List[RateioDestinoResponse] = []
+    percentual_total: float = 0  # Soma dos percentuais dos destinos
+
+    class Config:
+        from_attributes = True
+
+
+class RateioGrupoComValidacao(RateioGrupoResponse):
+    """Grupo de rateio com informação de validação."""
+    is_valido: bool = False  # True se percentual_total == 100
+    mensagem_validacao: Optional[str] = None
+
+
+# ============================================
+# CenarioEmpresa com Seções (Nova Hierarquia)
+# ============================================
+
+class CenarioEmpresaComSecoes(CenarioEmpresaResponse):
+    """Empresa do cenário com seções diretamente ligadas (nova hierarquia)."""
+    secoes_diretas: List[CenarioSecaoResponse] = []
+    empresa: Optional["EmpresaResponse"] = None
+
+
 # Atualizar forward references
 DepartamentoComSecoes.model_rebuild()
 CenarioSecaoResponse.model_rebuild()
 CenarioClienteComSecoes.model_rebuild()
 CenarioEmpresaComClientes.model_rebuild()
+RateioDestinoResponse.model_rebuild()
+RateioGrupoResponse.model_rebuild()
+CenarioEmpresaComSecoes.model_rebuild()
 

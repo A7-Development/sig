@@ -35,7 +35,7 @@ export interface CentroCusto {
   codigo: string;
   codigo_totvs: string | null;
   nome: string;
-  tipo: 'OPERACIONAL' | 'ADMINISTRATIVO' | 'OVERHEAD';
+  tipo: 'OPERACIONAL' | 'ADMINISTRATIVO' | 'OVERHEAD' | 'POOL';
   cliente: string | null;
   contrato: string | null;
   uf: string | null;
@@ -709,13 +709,15 @@ export interface FuncaoSpan {
 
 export interface CenarioSecao {
   id: string;
-  cenario_cliente_id: string;
+  cenario_cliente_id: string | null;  // FK antiga (hierarquia cliente)
+  cenario_empresa_id: string | null;  // FK nova (hierarquia simplificada)
   secao_id: string;
   // Nota: fator_pa foi movido para QuadroPessoal
   ativo: boolean;
   created_at: string;
   updated_at: string;
   secao?: Secao;
+  is_corporativo?: boolean;  // Indica se a seção é CORPORATIVO
 }
 
 export interface CenarioCliente {
@@ -735,7 +737,8 @@ export interface CenarioEmpresa {
   empresa_id: string;
   created_at: string;
   empresa?: Empresa;
-  clientes?: CenarioCliente[];
+  clientes?: CenarioCliente[];  // Hierarquia antiga
+  secoes_diretas?: CenarioSecao[];  // Nova hierarquia: Empresa -> Seção
 }
 
 export interface CenarioEmpresaCreate {
@@ -1332,6 +1335,189 @@ export const alocacoesTecnologia = {
   // Excluir
   excluir: (token: string, id: string, softDelete: boolean = true) => {
     return api.delete<void>(`/api/v1/orcamento/alocacoes/${id}?soft_delete=${softDelete}`, token);
+  },
+};
+
+// ============================================
+// Rateio de Custos (POOL -> OPERACIONAL)
+// ============================================
+
+export interface RateioDestino {
+  id: string;
+  rateio_grupo_id: string;
+  cc_destino_id: string;
+  percentual: number;
+  created_at: string;
+  cc_destino?: CentroCusto;
+}
+
+export interface RateioDestinoCreate {
+  cc_destino_id: string;
+  percentual: number;
+}
+
+export interface RateioGrupo {
+  id: string;
+  cenario_id: string;
+  cc_origem_pool_id: string;
+  nome: string;
+  descricao: string | null;
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+  cc_origem?: CentroCusto;
+  destinos: RateioDestino[];
+  percentual_total: number;
+}
+
+export interface RateioGrupoComValidacao extends RateioGrupo {
+  is_valido: boolean;
+  mensagem_validacao: string | null;
+}
+
+export interface RateioGrupoCreate {
+  cc_origem_pool_id: string;
+  nome: string;
+  descricao?: string | null;
+  ativo?: boolean;
+  destinos?: RateioDestinoCreate[];
+}
+
+export interface RateioGrupoUpdate {
+  nome?: string;
+  descricao?: string | null;
+  ativo?: boolean;
+}
+
+export const rateios = {
+  // Listar grupos de rateio de um cenário
+  listar: (token: string, cenarioId: string, apenasAtivos: boolean = true) => {
+    const params = new URLSearchParams();
+    params.append('apenas_ativos', apenasAtivos.toString());
+    return api.get<RateioGrupoComValidacao[]>(`/api/v1/orcamento/rateios/cenario/${cenarioId}?${params}`, token);
+  },
+
+  // Obter grupo de rateio
+  obter: (token: string, rateioId: string) => {
+    return api.get<RateioGrupoComValidacao>(`/api/v1/orcamento/rateios/${rateioId}`, token);
+  },
+
+  // Criar grupo de rateio
+  criar: (token: string, cenarioId: string, data: RateioGrupoCreate) => {
+    return api.post<RateioGrupo>(`/api/v1/orcamento/rateios/cenario/${cenarioId}`, data, token);
+  },
+
+  // Atualizar grupo de rateio
+  atualizar: (token: string, rateioId: string, data: RateioGrupoUpdate) => {
+    return api.patch<RateioGrupo>(`/api/v1/orcamento/rateios/${rateioId}`, data, token);
+  },
+
+  // Excluir grupo de rateio
+  excluir: (token: string, rateioId: string) => {
+    return api.delete<void>(`/api/v1/orcamento/rateios/${rateioId}`, token);
+  },
+
+  // Adicionar destino
+  adicionarDestino: (token: string, rateioId: string, data: RateioDestinoCreate) => {
+    return api.post<RateioDestino>(`/api/v1/orcamento/rateios/${rateioId}/destinos`, data, token);
+  },
+
+  // Atualizar percentual do destino
+  atualizarDestino: (token: string, rateioId: string, destinoId: string, percentual: number) => {
+    return api.patch<RateioDestino>(`/api/v1/orcamento/rateios/${rateioId}/destinos/${destinoId}?percentual=${percentual}`, {}, token);
+  },
+
+  // Remover destino
+  removerDestino: (token: string, rateioId: string, destinoId: string) => {
+    return api.delete<void>(`/api/v1/orcamento/rateios/${rateioId}/destinos/${destinoId}`, token);
+  },
+
+  // Validar rateio
+  validar: (token: string, rateioId: string) => {
+    return api.post<{ is_valido: boolean; percentual_total: number; mensagem: string }>(`/api/v1/orcamento/rateios/${rateioId}/validar`, {}, token);
+  },
+
+  // Listar CCs POOL disponíveis
+  listarPoolsDisponiveis: (token: string, cenarioId: string) => {
+    return api.get<Array<{ id: string; codigo: string; nome: string; tipo: string }>>(`/api/v1/orcamento/rateios/cenario/${cenarioId}/pools-disponiveis`, token);
+  },
+
+  // Listar CCs OPERACIONAIS disponíveis
+  listarOperacionaisDisponiveis: (token: string, cenarioId: string) => {
+    return api.get<Array<{ id: string; codigo: string; nome: string; tipo: string }>>(`/api/v1/orcamento/rateios/cenario/${cenarioId}/operacionais-disponiveis`, token);
+  },
+};
+
+// ============================================
+// Seções de Empresa (Nova Hierarquia)
+// ============================================
+
+export const secoesEmpresa = {
+  // Listar seções de uma empresa (nova hierarquia)
+  listar: (token: string, cenarioId: string, cenarioEmpresaId: string, apenasAtivas: boolean = true) => {
+    const params = new URLSearchParams();
+    params.append('apenas_ativas', apenasAtivas.toString());
+    return api.get<CenarioSecao[]>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${cenarioEmpresaId}/secoes?${params}`, token);
+  },
+
+  // Adicionar seção a uma empresa
+  adicionar: (token: string, cenarioId: string, cenarioEmpresaId: string, secaoId: string) => {
+    return api.post<CenarioSecao>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${cenarioEmpresaId}/secoes`, { secao_id: secaoId }, token);
+  },
+
+  // Remover seção de uma empresa
+  remover: (token: string, cenarioId: string, cenarioEmpresaId: string, cenarioSecaoId: string) => {
+    return api.delete<void>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${cenarioEmpresaId}/secoes/${cenarioSecaoId}`, token);
+  },
+};
+
+// ============================================
+// Validação CC vs Seção
+// ============================================
+
+export interface ValidacaoCCSecaoResponse {
+  valido: boolean;
+  mensagem: string;
+  secao: {
+    id: string;
+    codigo: string | null;
+    nome: string;
+    is_corporativo: boolean;
+  };
+  centro_custo: {
+    id: string;
+    codigo: string;
+    nome: string;
+    tipo: string;
+  };
+}
+
+export interface CCDisponivelParaSecao {
+  id: string;
+  codigo: string;
+  nome: string;
+  tipo: string;
+}
+
+export const validacaoCenario = {
+  // Validar se um CC pode ser usado com uma seção
+  validarCCSecao: (token: string, cenarioId: string, secaoId: string, centroCustoId: string) => {
+    const params = new URLSearchParams();
+    params.append('secao_id', secaoId);
+    params.append('centro_custo_id', centroCustoId);
+    return api.post<ValidacaoCCSecaoResponse>(`/api/v1/orcamento/cenarios/${cenarioId}/validar-cc-secao?${params}`, {}, token);
+  },
+
+  // Listar CCs disponíveis para uma seção do cenário
+  listarCCsDisponiveis: (token: string, cenarioId: string, cenarioSecaoId: string) => {
+    const params = new URLSearchParams();
+    params.append('cenario_secao_id', cenarioSecaoId);
+    return api.get<{
+      cenario_secao_id: string;
+      is_corporativo: boolean;
+      tipo_cc_permitido: string;
+      centros_custo: CCDisponivelParaSecao[];
+    }>(`/api/v1/orcamento/cenarios/${cenarioId}/centros-custo-disponiveis?${params}`, token);
   },
 };
 

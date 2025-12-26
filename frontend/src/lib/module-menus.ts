@@ -94,7 +94,7 @@ export const moduleMenus: ModuleMenus = {
             { name: "Eventos de Folha", href: "/controladoria/orcamento/cadastros/rubricas", icon: Receipt },
             { name: "Contas Contábeis", href: "/controladoria/orcamento/cadastros/contas-contabeis", icon: BookOpen },
             { name: "Fornecedores", href: "/controladoria/orcamento/cadastros/fornecedores", icon: Truck },
-            { name: "Produtos Tecnologia", href: "/controladoria/orcamento/cadastros/produtos-tecnologia", icon: Server },
+            { name: "Itens de Custo", href: "/controladoria/orcamento/cadastros/itens-custo", icon: Server },
           ],
         },
         { name: "Indicadores", href: "/controladoria/indicadores", icon: BarChart3 },

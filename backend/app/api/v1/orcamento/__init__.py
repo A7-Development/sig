@@ -22,6 +22,7 @@ from .faixas_salariais import router as faixas_salariais_router
 from .tabela_salarial import router as tabela_salarial_router
 from .cenarios import router as cenarios_router
 from .custos import router as custos_router
+from .rateios import router as rateios_router
 
 router = APIRouter(prefix="/orcamento", tags=["Orçamento"])
 
@@ -45,4 +46,5 @@ router.include_router(faixas_salariais_router)
 router.include_router(tabela_salarial_router)
 router.include_router(cenarios_router)
 router.include_router(custos_router)
+router.include_router(rateios_router)
 

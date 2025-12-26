@@ -216,6 +216,7 @@ class CalculoCustosService:
                             funcao_id=quadro.funcao_id,
                             faixa_id=quadro.tabela_salarial.faixa_id if quadro.tabela_salarial else None,
                             tipo_custo_id=tipo.id,
+                            centro_custo_id=quadro.centro_custo_id,  # CC do quadro de pessoal
                             mes=mes,
                             ano=ano,
                             hc_base=Decimal(str(hc_folha)),
@@ -227,6 +228,7 @@ class CalculoCustosService:
                                 "hc_folha": hc_folha,
                                 "salario": salario,
                                 "tipo_calculo": tipo.tipo_calculo,
+                                "centro_custo_id": str(quadro.centro_custo_id) if quadro.centro_custo_id else None,
                             }
                         )
                         custos.append(custo)
@@ -828,3 +830,104 @@ async def calcular_overhead_ineficiencia(
             "turnover_medio": round(to_medio, 2),
         }
     }
+
+
+# ============================================
+# RATEIO DE CUSTOS (POOL -> OPERACIONAL)
+# ============================================
+
+async def aplicar_rateio_custos(
+    db: AsyncSession,
+    cenario_id: UUID
+) -> Dict[str, Any]:
+    """
+    Aplica os rateios configurados para distribuir custos de CCs POOL para CCs OPERACIONAIS.
+    
+    Esta função:
+    1. Busca todos os grupos de rateio ativos do cenário
+    2. Para cada grupo, calcula o total de custos no CC POOL de origem
+    3. Distribui proporcionalmente para os CCs OPERACIONAIS de destino
+    4. Cria registros de CustoCalculado com os valores rateados
+    
+    Returns:
+        Dict com resumo do rateio aplicado
+    """
+    from app.db.models.orcamento import RateioGrupo, RateioDestino, CentroCusto
+    
+    # Buscar grupos de rateio ativos
+    result = await db.execute(
+        select(RateioGrupo)
+        .where(
+            RateioGrupo.cenario_id == cenario_id,
+            RateioGrupo.ativo == True
+        )
+        .options(
+            selectinload(RateioGrupo.destinos),
+            selectinload(RateioGrupo.cc_origem)
+        )
+    )
+    grupos = result.scalars().all()
+    
+    resumo = {
+        "grupos_processados": 0,
+        "custos_rateados": 0,
+        "valor_total_rateado": Decimal("0"),
+        "erros": []
+    }
+    
+    for grupo in grupos:
+        # Verificar se percentuais somam 100%
+        total_pct = sum(float(d.percentual) for d in grupo.destinos if d.percentual)
+        if abs(total_pct - 100.0) > 0.01:
+            resumo["erros"].append(f"Grupo '{grupo.nome}' tem percentual total de {total_pct}% (deve ser 100%)")
+            continue
+        
+        # Buscar custos do CC origem (POOL)
+        custos_origem = await db.execute(
+            select(CustoCalculado).where(
+                CustoCalculado.cenario_id == cenario_id,
+                CustoCalculado.centro_custo_id == grupo.cc_origem_pool_id
+            )
+        )
+        custos_pool = custos_origem.scalars().all()
+        
+        if not custos_pool:
+            continue
+        
+        # Para cada custo, criar rateios nos destinos
+        for custo_original in custos_pool:
+            for destino in grupo.destinos:
+                valor_rateado = custo_original.valor_calculado * (destino.percentual / 100)
+                
+                # Criar novo registro de custo rateado
+                custo_rateado = CustoCalculado(
+                    cenario_id=cenario_id,
+                    cenario_secao_id=custo_original.cenario_secao_id,
+                    funcao_id=custo_original.funcao_id,
+                    faixa_id=custo_original.faixa_id,
+                    tipo_custo_id=custo_original.tipo_custo_id,
+                    centro_custo_id=destino.cc_destino_id,
+                    mes=custo_original.mes,
+                    ano=custo_original.ano,
+                    hc_base=custo_original.hc_base * (destino.percentual / 100),
+                    valor_base=custo_original.valor_base,
+                    indice_aplicado=custo_original.indice_aplicado,
+                    valor_calculado=valor_rateado,
+                    memoria_calculo={
+                        "tipo": "rateio",
+                        "grupo_rateio": str(grupo.id),
+                        "cc_origem": str(grupo.cc_origem_pool_id),
+                        "percentual": float(destino.percentual),
+                        "custo_original_id": str(custo_original.id),
+                    }
+                )
+                db.add(custo_rateado)
+                resumo["custos_rateados"] += 1
+                resumo["valor_total_rateado"] += valor_rateado
+        
+        resumo["grupos_processados"] += 1
+    
+    await db.commit()
+    
+    resumo["valor_total_rateado"] = float(resumo["valor_total_rateado"])
+    return resumo

@@ -1,26 +1,26 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { ChevronRight, ChevronDown, Building2, Users, Briefcase, User, Loader2, Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { ChevronRight, ChevronDown, Building2, FolderTree, Briefcase, User, Loader2, Building, Split } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api/client";
 import { useAuthStore } from "@/stores/auth-store";
-import type { CenarioEmpresa, CenarioCliente, CenarioSecao, QuadroPessoal, Funcao } from "@/lib/api/orcamento";
+import { secoesEmpresa } from "@/lib/api/orcamento";
+import type { CenarioEmpresa, CenarioSecao, QuadroPessoal, Funcao, Secao, CentroCusto } from "@/lib/api/orcamento";
 
 // ============================================
 // Tipos
 // ============================================
 
-type NodeType = 'empresa' | 'cliente' | 'secao' | 'funcao';
+type NodeType = 'empresa' | 'secao' | 'centro_custo' | 'funcao';
 
 export interface SelectedNodePremissas {
   type: NodeType;
   empresa: CenarioEmpresa;
-  cliente?: CenarioCliente;
   secao?: CenarioSecao;
+  centroCusto?: CentroCusto;
   funcao?: Funcao;
   quadroItem?: QuadroPessoal;
 }
@@ -30,10 +30,25 @@ interface PremissasTreeProps {
   onNodeSelect?: (node: SelectedNodePremissas | null) => void;
 }
 
-interface FuncaoSecao {
+interface FuncaoCC {
   funcao: Funcao;
   quadroItem: QuadroPessoal;
 }
+
+interface CCAgrupado {
+  centroCusto: CentroCusto;
+  funcoes: FuncaoCC[];
+}
+
+/**
+ * Verifica se uma seção é CORPORATIVO com base no código ou nome.
+ */
+const isCorporativo = (secao?: Secao | null): boolean => {
+  if (!secao) return false;
+  const codigo = (secao.codigo || "").toUpperCase();
+  const nome = (secao.nome || "").toUpperCase();
+  return codigo.includes("CORPORATIVO") || nome.includes("CORPORATIVO");
+};
 
 // ============================================
 // Helpers
@@ -55,19 +70,19 @@ export function PremissasTree({
   const { accessToken: token } = useAuthStore();
   
   // Estado principal
-  const [empresas, setEmpresas] = useState<CenarioEmpresa[]>([]);
+  const [empresas, setEmpresas] = useState<(CenarioEmpresa & { secoes_diretas?: CenarioSecao[] })[]>([]);
   const [loading, setLoading] = useState(true);
   
   // Estado de expansão
   const [expandedEmpresas, setExpandedEmpresas] = useState<Set<string>>(new Set());
-  const [expandedClientes, setExpandedClientes] = useState<Set<string>>(new Set());
   const [expandedSecoes, setExpandedSecoes] = useState<Set<string>>(new Set());
+  const [expandedCCs, setExpandedCCs] = useState<Set<string>>(new Set());
   
   // Estado de seleção
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   
-  // Funções por seção
-  const [funcoesPorSecao, setFuncoesPorSecao] = useState<Record<string, FuncaoSecao[]>>({});
+  // Dados por seção (agrupados por CC)
+  const [dadosPorSecao, setDadosPorSecao] = useState<Record<string, CCAgrupado[]>>({});
   const [loadingSecoes, setLoadingSecoes] = useState<Set<string>>(new Set());
   
   // Todas as funções disponíveis
@@ -88,12 +103,39 @@ export function PremissasTree({
         api.get<{ items?: Funcao[] }>(`/api/v1/orcamento/funcoes?limit=1000`, token),
       ]);
       
-      setEmpresas(empresasRes || []);
+      // Para cada empresa, carregar seções da nova hierarquia
+      const empresasComSecoes = await Promise.all(
+        (empresasRes || []).map(async (emp) => {
+          try {
+            const secoesData = await secoesEmpresa.listar(token, cenarioId, emp.id, true);
+            return {
+              ...emp,
+              secoes_diretas: secoesData,
+            };
+          } catch (err) {
+            // Se não encontrar seções na nova hierarquia, tentar a antiga
+            const secoesAntigas: CenarioSecao[] = [];
+            emp.clientes?.forEach(cliente => {
+              cliente.secoes?.forEach(secao => {
+                if (secao.ativo) {
+                  secoesAntigas.push(secao);
+                }
+              });
+            });
+            return {
+              ...emp,
+              secoes_diretas: secoesAntigas,
+            };
+          }
+        })
+      );
+      
+      setEmpresas(empresasComSecoes);
       setTodasFuncoes(funcoesRes?.items || funcoesRes || []);
       
       // Expandir a primeira empresa automaticamente
-      if (empresasRes && empresasRes.length > 0) {
-        setExpandedEmpresas(new Set([empresasRes[0].id]));
+      if (empresasComSecoes.length > 0) {
+        setExpandedEmpresas(new Set([empresasComSecoes[0].id]));
       }
     } catch (error) {
       console.error("Erro ao carregar estrutura:", error);
@@ -107,11 +149,11 @@ export function PremissasTree({
   }, [carregarEstrutura]);
 
   // ============================================
-  // Carregar funções de uma seção
+  // Carregar funções de uma seção (agrupadas por CC)
   // ============================================
 
-  const carregarFuncoesSecao = useCallback(async (secaoId: string) => {
-    if (!cenarioId || !token || funcoesPorSecao[secaoId]) return;
+  const carregarDadosSecao = useCallback(async (secaoId: string) => {
+    if (!cenarioId || !token || dadosPorSecao[secaoId]) return;
     
     setLoadingSecoes(prev => new Set(prev).add(secaoId));
     try {
@@ -121,21 +163,71 @@ export function PremissasTree({
         token
       );
       
-      const quadro = quadroRes || [];
+      let quadro = (quadroRes || []).filter(q => q.ativo !== false);
       
-      // Mapear funções com seus itens de quadro
-      const funcoesSecao: FuncaoSecao[] = quadro
-        .filter(q => q.ativo !== false)
-        .map(q => {
-          const funcao = todasFuncoes.find(f => f.id === q.funcao_id);
-          return funcao ? { funcao, quadroItem: q } : null;
-        })
-        .filter((f): f is FuncaoSecao => f !== null);
+      // ========================================
+      // FILTRAR FUNÇÕES RATEADAS: manter apenas a alocação primária
+      // Para premissas, devemos considerar apenas UMA entrada por grupo de rateio
+      // (a pessoa física é uma só, independente de como o custo é dividido)
+      // ========================================
+      const rateioGruposProcessados = new Set<string>();
+      const quadroFiltrado: QuadroPessoal[] = [];
       
-      setFuncoesPorSecao(prev => ({ ...prev, [secaoId]: funcoesSecao }));
+      // Primeiro, ordenar para que o maior percentual venha primeiro
+      quadro.sort((a, b) => (b.rateio_percentual || 0) - (a.rateio_percentual || 0));
+      
+      quadro.forEach(q => {
+        // Se não é rateio, incluir normalmente
+        if (q.tipo_calculo !== 'rateio' || !q.rateio_grupo_id) {
+          quadroFiltrado.push(q);
+          return;
+        }
+        
+        // Se é rateio, verificar se já processamos este grupo
+        if (rateioGruposProcessados.has(q.rateio_grupo_id)) {
+          // Já incluímos a alocação primária deste grupo, pular
+          return;
+        }
+        
+        // Esta é a alocação primária (maior percentual) do grupo
+        rateioGruposProcessados.add(q.rateio_grupo_id);
+        quadroFiltrado.push(q);
+      });
+      
+      // Agrupar por Centro de Custo
+      const ccMap = new Map<string, CCAgrupado>();
+      
+      quadroFiltrado.forEach(q => {
+        const ccId = q.centro_custo_id || 'sem-cc';
+        const funcao = todasFuncoes.find(f => f.id === q.funcao_id);
+        
+        if (!funcao) return;
+        
+        if (!ccMap.has(ccId)) {
+          ccMap.set(ccId, {
+            centroCusto: q.centro_custo || { 
+              id: 'sem-cc', 
+              codigo: 'N/A', 
+              nome: 'Sem Centro de Custo',
+              tipo: 'OPERACIONAL',
+              ativo: true
+            } as CentroCusto,
+            funcoes: []
+          });
+        }
+        
+        ccMap.get(ccId)!.funcoes.push({ funcao, quadroItem: q });
+      });
+      
+      // Ordenar CCs por nome
+      const ccsAgrupados = Array.from(ccMap.values()).sort((a, b) => 
+        (a.centroCusto.nome || '').localeCompare(b.centroCusto.nome || '')
+      );
+      
+      setDadosPorSecao(prev => ({ ...prev, [secaoId]: ccsAgrupados }));
     } catch (error) {
-      console.error("Erro ao carregar funções da seção:", error);
-      setFuncoesPorSecao(prev => ({ ...prev, [secaoId]: [] }));
+      console.error("Erro ao carregar dados da seção:", error);
+      setDadosPorSecao(prev => ({ ...prev, [secaoId]: [] }));
     } finally {
       setLoadingSecoes(prev => {
         const newSet = new Set(prev);
@@ -143,7 +235,7 @@ export function PremissasTree({
         return newSet;
       });
     }
-  }, [cenarioId, token, todasFuncoes, funcoesPorSecao]);
+  }, [cenarioId, token, todasFuncoes, dadosPorSecao]);
 
   // ============================================
   // Handlers de expansão
@@ -161,22 +253,10 @@ export function PremissasTree({
     });
   };
 
-  const toggleCliente = (clienteId: string) => {
-    setExpandedClientes(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(clienteId)) {
-        newSet.delete(clienteId);
-      } else {
-        newSet.add(clienteId);
-      }
-      return newSet;
-    });
-  };
-
   const toggleSecao = (secaoId: string) => {
-    // Carregar funções se ainda não carregou
-    if (!funcoesPorSecao[secaoId]) {
-      carregarFuncoesSecao(secaoId);
+    // Carregar dados se ainda não carregou
+    if (!dadosPorSecao[secaoId]) {
+      carregarDadosSecao(secaoId);
     }
     
     setExpandedSecoes(prev => {
@@ -190,18 +270,37 @@ export function PremissasTree({
     });
   };
 
+  const toggleCC = (ccKey: string) => {
+    setExpandedCCs(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(ccKey)) {
+        newSet.delete(ccKey);
+      } else {
+        newSet.add(ccKey);
+      }
+      return newSet;
+    });
+  };
+
   // ============================================
   // Handler de seleção
   // ============================================
 
   const handleSelectNode = (node: SelectedNodePremissas) => {
-    const nodeId = node.type === 'funcao' 
-      ? `funcao-${node.quadroItem?.id}`
-      : node.type === 'secao' 
-        ? `secao-${node.secao?.id}`
-        : node.type === 'cliente'
-          ? `cliente-${node.cliente?.id}`
-          : `empresa-${node.empresa.id}`;
+    let nodeId = '';
+    switch (node.type) {
+      case 'funcao':
+        nodeId = `funcao-${node.quadroItem?.id}`;
+        break;
+      case 'centro_custo':
+        nodeId = `cc-${node.secao?.id}-${node.centroCusto?.id}`;
+        break;
+      case 'secao':
+        nodeId = `secao-${node.secao?.id}`;
+        break;
+      default:
+        nodeId = `empresa-${node.empresa.id}`;
+    }
     
     setSelectedNodeId(nodeId);
     onNodeSelect?.(node);
@@ -262,125 +361,174 @@ export function PremissasTree({
               </span>
             </div>
 
-            {/* Clientes da Empresa */}
-            {expandedEmpresas.has(empresa.id) && empresa.clientes && (
+            {/* Seções da Empresa */}
+            {expandedEmpresas.has(empresa.id) && empresa.secoes_diretas && (
               <div className="ml-4 space-y-0.5">
-                {empresa.clientes.map((cliente) => (
-                  <div key={cliente.id}>
-                    {/* Cliente */}
-                    <div
-                      className={cn(
-                        "flex items-center gap-1 py-1 px-2 rounded-md cursor-pointer group",
-                        selectedNodeId === `cliente-${cliente.id}`
-                          ? "bg-orange-100 text-orange-700"
-                          : "hover:bg-muted/50"
-                      )}
-                    >
-                      <button
-                        onClick={() => toggleCliente(cliente.id)}
-                        className="p-0.5 hover:bg-muted rounded"
-                      >
-                        {expandedClientes.has(cliente.id) ? (
-                          <ChevronDown className="h-3 w-3" />
-                        ) : (
-                          <ChevronRight className="h-3 w-3" />
-                        )}
-                      </button>
-                      <Users className="h-3 w-3 text-blue-500 shrink-0" />
-                      <span 
-                        className="text-xs truncate flex-1"
-                        title={cliente.nome_cliente || cliente.cliente_nw_codigo}
-                        onClick={() => handleSelectNode({ type: 'cliente', empresa, cliente })}
-                      >
-                        {truncateText(cliente.nome_cliente || cliente.cliente_nw_codigo)}
-                      </span>
-                    </div>
+                {empresa.secoes_diretas.length === 0 ? (
+                  <div className="py-1 px-2 text-[10px] text-muted-foreground italic">
+                    Nenhuma seção vinculada
+                  </div>
+                ) : (
+                  empresa.secoes_diretas.map((secao) => {
+                    const isCorp = isCorporativo(secao.secao);
+                    const ccsSecao = dadosPorSecao[secao.id] || [];
+                    const totalFuncoes = ccsSecao.reduce((acc, cc) => acc + cc.funcoes.length, 0);
+                    
+                    return (
+                      <div key={secao.id}>
+                        {/* Seção */}
+                        <div
+                          className={cn(
+                            "flex items-center gap-1 py-1 px-2 rounded-md cursor-pointer group",
+                            selectedNodeId === `secao-${secao.id}`
+                              ? "bg-orange-100 text-orange-700"
+                              : isCorp
+                                ? "hover:bg-purple-50"
+                                : "hover:bg-muted/50"
+                          )}
+                        >
+                          <button
+                            onClick={() => toggleSecao(secao.id)}
+                            className="p-0.5 hover:bg-muted rounded"
+                          >
+                            {loadingSecoes.has(secao.id) ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : expandedSecoes.has(secao.id) ? (
+                              <ChevronDown className="h-3 w-3" />
+                            ) : (
+                              <ChevronRight className="h-3 w-3" />
+                            )}
+                          </button>
+                          {isCorp ? (
+                            <Building className="h-3 w-3 text-purple-500 shrink-0" />
+                          ) : (
+                            <FolderTree className="h-3 w-3 text-green-500 shrink-0" />
+                          )}
+                          <span 
+                            className="text-xs truncate flex-1"
+                            title={secao.secao?.nome}
+                            onClick={() => handleSelectNode({ type: 'secao', empresa, secao })}
+                          >
+                            {truncateText(secao.secao?.nome)}
+                          </span>
+                          {isCorp && (
+                            <Badge variant="secondary" className="h-4 text-[9px] px-1 bg-purple-100 text-purple-700">
+                              CORP
+                            </Badge>
+                          )}
+                          {totalFuncoes > 0 && (
+                            <Badge variant="secondary" className="h-4 text-[9px] px-1">
+                              {totalFuncoes}
+                            </Badge>
+                          )}
+                        </div>
 
-                    {/* Seções do Cliente */}
-                    {expandedClientes.has(cliente.id) && cliente.secoes && (
-                      <div className="ml-4 space-y-0.5">
-                        {cliente.secoes.map((secao) => (
-                          <div key={secao.id}>
-                            {/* Seção */}
-                            <div
-                              className={cn(
-                                "flex items-center gap-1 py-1 px-2 rounded-md cursor-pointer group",
-                                selectedNodeId === `secao-${secao.id}`
-                                  ? "bg-orange-100 text-orange-700"
-                                  : "hover:bg-muted/50"
-                              )}
-                            >
-                              <button
-                                onClick={() => toggleSecao(secao.id)}
-                                className="p-0.5 hover:bg-muted rounded"
-                              >
-                                {loadingSecoes.has(secao.id) ? (
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                ) : expandedSecoes.has(secao.id) ? (
-                                  <ChevronDown className="h-3 w-3" />
-                                ) : (
-                                  <ChevronRight className="h-3 w-3" />
-                                )}
-                              </button>
-                              <Briefcase className="h-3 w-3 text-green-500 shrink-0" />
-                              <span 
-                                className="text-xs truncate flex-1"
-                                title={secao.secao?.nome}
-                                onClick={() => handleSelectNode({ type: 'secao', empresa, cliente, secao })}
-                              >
-                                {truncateText(secao.secao?.nome)}
-                              </span>
-                              {funcoesPorSecao[secao.id] && (
-                                <Badge variant="secondary" className="h-4 text-[9px] px-1">
-                                  {funcoesPorSecao[secao.id].length}
-                                </Badge>
-                              )}
-                            </div>
-
-                            {/* Funções da Seção */}
-                            {expandedSecoes.has(secao.id) && funcoesPorSecao[secao.id] && (
-                              <div className="ml-4 space-y-0.5">
-                                {funcoesPorSecao[secao.id].length === 0 ? (
-                                  <div className="py-1 px-2 text-[10px] text-muted-foreground italic">
-                                    Nenhuma função cadastrada
-                                  </div>
-                                ) : (
-                                  funcoesPorSecao[secao.id].map(({ funcao, quadroItem }) => (
+                        {/* Centros de Custo da Seção */}
+                        {expandedSecoes.has(secao.id) && (
+                          <div className="ml-4 space-y-0.5">
+                            {ccsSecao.length === 0 ? (
+                              <div className="py-1 px-2 text-[10px] text-muted-foreground italic">
+                                Nenhuma função cadastrada
+                              </div>
+                            ) : (
+                              ccsSecao.map((ccGroup) => {
+                                const ccKey = `${secao.id}-${ccGroup.centroCusto.id}`;
+                                const isExpanded = expandedCCs.has(ccKey);
+                                
+                                return (
+                                  <div key={ccKey}>
+                                    {/* Centro de Custo */}
                                     <div
-                                      key={quadroItem.id}
                                       className={cn(
-                                        "flex items-center gap-1 py-1 px-2 rounded-md cursor-pointer",
-                                        selectedNodeId === `funcao-${quadroItem.id}`
-                                          ? "bg-orange-100 text-orange-700"
-                                          : "hover:bg-muted/50"
+                                        "flex items-center gap-1 py-1 px-2 rounded-md cursor-pointer group",
+                                        selectedNodeId === `cc-${ccKey}`
+                                          ? "bg-blue-100 text-blue-700"
+                                          : "hover:bg-blue-50"
                                       )}
-                                      onClick={() => handleSelectNode({ 
-                                        type: 'funcao', 
-                                        empresa, 
-                                        cliente, 
-                                        secao, 
-                                        funcao,
-                                        quadroItem 
-                                      })}
                                     >
-                                      <User className="h-3 w-3 text-purple-500 shrink-0" />
+                                      <button
+                                        onClick={() => toggleCC(ccKey)}
+                                        className="p-0.5 hover:bg-muted rounded"
+                                      >
+                                        {isExpanded ? (
+                                          <ChevronDown className="h-3 w-3" />
+                                        ) : (
+                                          <ChevronRight className="h-3 w-3" />
+                                        )}
+                                      </button>
+                                      <Briefcase className="h-3 w-3 text-blue-500 shrink-0" />
                                       <span 
                                         className="text-xs truncate flex-1"
-                                        title={funcao.nome}
+                                        title={ccGroup.centroCusto.nome}
+                                        onClick={() => handleSelectNode({ 
+                                          type: 'centro_custo', 
+                                          empresa, 
+                                          secao,
+                                          centroCusto: ccGroup.centroCusto
+                                        })}
                                       >
-                                        {truncateText(funcao.nome, 20)}
+                                        {truncateText(ccGroup.centroCusto.nome, 18)}
                                       </span>
+                                      <Badge variant="outline" className="h-4 text-[9px] px-1 font-mono">
+                                        {ccGroup.funcoes.length}
+                                      </Badge>
                                     </div>
-                                  ))
-                                )}
-                              </div>
+
+                                    {/* Funções do Centro de Custo */}
+                                    {isExpanded && (
+                                      <div className="ml-4 space-y-0.5">
+                                        {ccGroup.funcoes.map(({ funcao, quadroItem }) => {
+                                          const isRateio = quadroItem.tipo_calculo === 'rateio';
+                                          return (
+                                            <div
+                                              key={quadroItem.id}
+                                              className={cn(
+                                                "flex items-center gap-1 py-1 px-2 rounded-md cursor-pointer",
+                                                selectedNodeId === `funcao-${quadroItem.id}`
+                                                  ? "bg-orange-100 text-orange-700"
+                                                  : "hover:bg-muted/50"
+                                              )}
+                                              onClick={() => handleSelectNode({ 
+                                                type: 'funcao', 
+                                                empresa, 
+                                                secao, 
+                                                centroCusto: ccGroup.centroCusto,
+                                                funcao,
+                                                quadroItem 
+                                              })}
+                                            >
+                                              <User className="h-3 w-3 text-purple-500 shrink-0" />
+                                              <span 
+                                                className="text-xs truncate flex-1"
+                                                title={funcao.nome}
+                                              >
+                                                {truncateText(funcao.nome, 18)}
+                                              </span>
+                                              {isRateio && (
+                                                <Badge 
+                                                  variant="outline" 
+                                                  className="h-4 text-[9px] px-1 bg-green-50 text-green-700 border-green-200"
+                                                  title="Função rateada entre múltiplos CCs - premissas aplicadas a partir deste CC"
+                                                >
+                                                  <Split className="h-2.5 w-2.5 mr-0.5" />
+                                                  {quadroItem.rateio_percentual}%
+                                                </Badge>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })
                             )}
                           </div>
-                        ))}
+                        )}
                       </div>
-                    )}
-                  </div>
-                ))}
+                    );
+                  })
+                )}
               </div>
             )}
           </div>
@@ -389,10 +537,3 @@ export function PremissasTree({
     </ScrollArea>
   );
 }
-
-
-
-
-
-
-

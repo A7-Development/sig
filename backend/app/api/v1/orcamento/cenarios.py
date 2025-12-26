@@ -10,7 +10,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import selectinload, noload
 
 from app.db.session import get_db
-from app.db.models.orcamento import Cenario, QuadroPessoal, CenarioEmpresa, FuncaoSpan, PremissaFuncaoMes, CenarioCliente, CenarioSecao, Secao
+from app.db.models.orcamento import Cenario, QuadroPessoal, CenarioEmpresa, FuncaoSpan, PremissaFuncaoMes, CenarioCliente, CenarioSecao, Secao, CentroCusto
 from app.schemas.orcamento import (
     CenarioCreate, CenarioUpdate, CenarioResponse, CenarioComRelacionamentos,
     QuadroPessoalCreate, QuadroPessoalUpdate, QuadroPessoalResponse, QuadroPessoalComRelacionamentos,
@@ -1543,4 +1543,297 @@ async def delete_secao_cliente(
     await db.delete(cenario_secao)
     await db.commit()
     return {"message": "Seção e todos os dados relacionados removidos com sucesso"}
+
+
+# ============================================
+# SEÇÕES DA EMPRESA - NOVA HIERARQUIA SIMPLIFICADA
+# Empresa -> Seção (sem passar por Cliente)
+# ============================================
+
+@router.get("/{cenario_id}/empresas/{cenario_empresa_id}/secoes", response_model=List[CenarioSecaoResponse])
+async def listar_secoes_empresa(
+    cenario_id: UUID,
+    cenario_empresa_id: UUID,
+    apenas_ativas: bool = True,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Lista seções diretamente associadas a uma empresa do cenário.
+    NOVA HIERARQUIA: Cenário -> Empresa -> Seção (representa Cliente)
+    """
+    query = select(CenarioSecao).where(
+        CenarioSecao.cenario_empresa_id == cenario_empresa_id
+    ).options(selectinload(CenarioSecao.secao))
+    
+    if apenas_ativas:
+        query = query.where(CenarioSecao.ativo == True)
+    
+    result = await db.execute(query)
+    secoes = result.scalars().all()
+    
+    # Converter para response schema
+    from app.schemas.orcamento import CenarioSecaoResponse, SecaoSimples
+    
+    response = []
+    for cs in secoes:
+        secao_simples = None
+        if cs.secao:
+            secao_simples = SecaoSimples(
+                id=cs.secao.id,
+                codigo=cs.secao.codigo,
+                nome=cs.secao.nome
+            )
+        
+        response.append(CenarioSecaoResponse(
+            id=cs.id,
+            cenario_cliente_id=cs.cenario_cliente_id,
+            cenario_empresa_id=cs.cenario_empresa_id,
+            secao_id=cs.secao_id,
+            ativo=cs.ativo,
+            created_at=cs.created_at,
+            updated_at=cs.updated_at,
+            secao=secao_simples,
+            is_corporativo=cs.is_corporativo
+        ))
+    
+    return response
+
+
+@router.post("/{cenario_id}/empresas/{cenario_empresa_id}/secoes", response_model=CenarioSecaoResponse)
+async def adicionar_secao_empresa(
+    cenario_id: UUID,
+    cenario_empresa_id: UUID,
+    data: CenarioSecaoCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Adiciona uma seção diretamente a uma empresa do cenário.
+    NOVA HIERARQUIA: Cenário -> Empresa -> Seção (representa Cliente)
+    A Seção agora representa o "Cliente" (ex: CLARO, VIVO, CORPORATIVO).
+    """
+    # Verificar se empresa existe no cenário
+    empresa_result = await db.execute(
+        select(CenarioEmpresa).where(
+            CenarioEmpresa.id == cenario_empresa_id,
+            CenarioEmpresa.cenario_id == cenario_id
+        )
+    )
+    empresa = empresa_result.scalar_one_or_none()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada no cenário")
+    
+    # Verificar se seção existe
+    secao_result = await db.execute(select(Secao).where(Secao.id == data.secao_id))
+    secao = secao_result.scalar_one_or_none()
+    if not secao:
+        raise HTTPException(status_code=404, detail="Seção não encontrada")
+    
+    # Verificar se seção já está associada a esta empresa
+    existing = await db.execute(
+        select(CenarioSecao).where(
+            CenarioSecao.cenario_empresa_id == cenario_empresa_id,
+            CenarioSecao.secao_id == data.secao_id,
+            CenarioSecao.ativo == True
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Seção já está associada a esta empresa")
+    
+    cenario_secao = CenarioSecao(
+        cenario_empresa_id=cenario_empresa_id,
+        secao_id=data.secao_id
+    )
+    db.add(cenario_secao)
+    await db.commit()
+    await db.refresh(cenario_secao)
+    
+    # Carregar relacionamento para retorno
+    await db.refresh(cenario_secao, attribute_names=['secao'])
+    
+    # Converter para response schema
+    from app.schemas.orcamento import CenarioSecaoResponse, SecaoSimples
+    
+    secao_simples = None
+    if cenario_secao.secao:
+        secao_simples = SecaoSimples(
+            id=cenario_secao.secao.id,
+            codigo=cenario_secao.secao.codigo,
+            nome=cenario_secao.secao.nome
+        )
+    
+    return CenarioSecaoResponse(
+        id=cenario_secao.id,
+        cenario_cliente_id=cenario_secao.cenario_cliente_id,
+        cenario_empresa_id=cenario_secao.cenario_empresa_id,
+        secao_id=cenario_secao.secao_id,
+        ativo=cenario_secao.ativo,
+        created_at=cenario_secao.created_at,
+        updated_at=cenario_secao.updated_at,
+        secao=secao_simples,
+        is_corporativo=cenario_secao.is_corporativo
+    )
+
+
+@router.delete("/{cenario_id}/empresas/{cenario_empresa_id}/secoes/{cenario_secao_id}")
+async def remover_secao_empresa(
+    cenario_id: UUID,
+    cenario_empresa_id: UUID,
+    cenario_secao_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Remove uma seção de uma empresa do cenário.
+    NOTA: Remove também todos os dados relacionados (quadro pessoal, premissas, spans).
+    """
+    # Buscar a seção
+    result = await db.execute(
+        select(CenarioSecao).where(
+            CenarioSecao.id == cenario_secao_id,
+            CenarioSecao.cenario_empresa_id == cenario_empresa_id
+        )
+    )
+    cenario_secao = result.scalar_one_or_none()
+    if not cenario_secao:
+        raise HTTPException(status_code=404, detail="Seção não encontrada na empresa")
+    
+    # Delete físico - remove completamente (CASCADE remove quadro, premissas e spans)
+    await db.delete(cenario_secao)
+    await db.commit()
+    return {"message": "Seção e todos os dados relacionados removidos com sucesso"}
+
+
+# ============================================
+# VALIDAÇÃO DE CENTRO DE CUSTO vs SEÇÃO
+# ============================================
+
+def validar_cc_para_secao(secao: Secao, centro_custo: CentroCusto) -> tuple[bool, str]:
+    """
+    Valida se um Centro de Custo pode ser usado com uma Seção.
+    
+    Regras:
+    - Se Seção é CORPORATIVO -> só pode usar CC tipo POOL
+    - Se Seção não é CORPORATIVO -> só pode usar CC tipo OPERACIONAL
+    
+    Retorna: (is_valid, mensagem_erro)
+    """
+    # Verificar se seção é corporativo (por código ou nome)
+    codigo_upper = (secao.codigo or "").upper()
+    nome_upper = (secao.nome or "").upper()
+    is_corporativo = "CORPORATIVO" in codigo_upper or "CORPORATIVO" in nome_upper
+    
+    # Verificar tipo do CC
+    cc_tipo = (centro_custo.tipo or "").upper()
+    is_pool = cc_tipo == "POOL"
+    is_operacional = cc_tipo in ["OPERACIONAL", "ADMINISTRATIVO", "OVERHEAD"]
+    
+    if is_corporativo:
+        if not is_pool:
+            return False, f"Seção CORPORATIVO só pode usar Centro de Custo tipo POOL. CC '{centro_custo.nome}' é tipo '{cc_tipo}'."
+        return True, ""
+    else:
+        if is_pool:
+            return False, f"Seção '{secao.nome}' não pode usar Centro de Custo tipo POOL. Use um CC tipo OPERACIONAL."
+        return True, ""
+
+
+@router.post("/{cenario_id}/validar-cc-secao")
+async def validar_centro_custo_secao(
+    cenario_id: UUID,
+    secao_id: UUID,
+    centro_custo_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Valida se um Centro de Custo pode ser usado com uma Seção.
+    
+    Regras:
+    - CORPORATIVO → só CC tipo POOL
+    - Outras seções → só CC tipo OPERACIONAL
+    """
+    # Buscar seção
+    secao_result = await db.execute(select(Secao).where(Secao.id == secao_id))
+    secao = secao_result.scalar_one_or_none()
+    if not secao:
+        raise HTTPException(status_code=404, detail="Seção não encontrada")
+    
+    # Buscar centro de custo
+    cc_result = await db.execute(select(CentroCusto).where(CentroCusto.id == centro_custo_id))
+    centro_custo = cc_result.scalar_one_or_none()
+    if not centro_custo:
+        raise HTTPException(status_code=404, detail="Centro de Custo não encontrado")
+    
+    is_valid, mensagem = validar_cc_para_secao(secao, centro_custo)
+    
+    return {
+        "valido": is_valid,
+        "mensagem": mensagem,
+        "secao": {
+            "id": str(secao.id),
+            "codigo": secao.codigo,
+            "nome": secao.nome,
+            "is_corporativo": "CORPORATIVO" in (secao.codigo or "").upper() or "CORPORATIVO" in (secao.nome or "").upper()
+        },
+        "centro_custo": {
+            "id": str(centro_custo.id),
+            "codigo": centro_custo.codigo,
+            "nome": centro_custo.nome,
+            "tipo": centro_custo.tipo
+        }
+    }
+
+
+@router.get("/{cenario_id}/centros-custo-disponiveis")
+async def listar_centros_custo_para_secao(
+    cenario_id: UUID,
+    cenario_secao_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Lista os Centros de Custo disponíveis para uma Seção.
+    Filtra automaticamente com base no tipo da seção:
+    - CORPORATIVO → apenas CC tipo POOL
+    - Outras seções → apenas CC tipo OPERACIONAL
+    """
+    # Buscar cenário seção com a seção
+    cs_result = await db.execute(
+        select(CenarioSecao)
+        .where(CenarioSecao.id == cenario_secao_id)
+        .options(selectinload(CenarioSecao.secao))
+    )
+    cenario_secao = cs_result.scalar_one_or_none()
+    if not cenario_secao:
+        raise HTTPException(status_code=404, detail="Cenário Seção não encontrado")
+    
+    # Determinar se é corporativo
+    is_corporativo = cenario_secao.is_corporativo
+    
+    # Filtrar CCs pelo tipo adequado
+    if is_corporativo:
+        query = select(CentroCusto).where(
+            CentroCusto.ativo == True,
+            CentroCusto.tipo == "POOL"
+        )
+    else:
+        query = select(CentroCusto).where(
+            CentroCusto.ativo == True,
+            CentroCusto.tipo.in_(["OPERACIONAL", "ADMINISTRATIVO", "OVERHEAD"])
+        )
+    
+    result = await db.execute(query.order_by(CentroCusto.nome))
+    centros_custo = result.scalars().all()
+    
+    return {
+        "cenario_secao_id": str(cenario_secao_id),
+        "is_corporativo": is_corporativo,
+        "tipo_cc_permitido": "POOL" if is_corporativo else "OPERACIONAL",
+        "centros_custo": [
+            {
+                "id": str(cc.id),
+                "codigo": cc.codigo,
+                "nome": cc.nome,
+                "tipo": cc.tipo
+            }
+            for cc in centros_custo
+        ]
+    }
 

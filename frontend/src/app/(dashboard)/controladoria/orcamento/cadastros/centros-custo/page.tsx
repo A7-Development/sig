@@ -45,7 +45,8 @@ import { centrosCustoApi, totvsApi, type CentroCusto, type CentroCustoTotvs } fr
 import { useToast } from "@/hooks/use-toast";
 
 const TIPOS_CC = [
-  { value: "OPERACIONAL", label: "Operacional" },
+  { value: "OPERACIONAL", label: "Operacional (Projeto/Contrato)" },
+  { value: "POOL", label: "Pool (Overhead/Rateio)" },
   { value: "ADMINISTRATIVO", label: "Administrativo" },
   { value: "OVERHEAD", label: "Overhead" },
 ];
@@ -68,7 +69,7 @@ export default function CentrosCustoPage() {
     codigo: "",
     nome: "",
     codigo_totvs: "",
-    tipo: "OPERACIONAL" as "OPERACIONAL" | "ADMINISTRATIVO" | "OVERHEAD",
+    tipo: "OPERACIONAL" as "OPERACIONAL" | "ADMINISTRATIVO" | "OVERHEAD" | "POOL",
     cliente: "",
     contrato: "",
     uf: "",
