@@ -611,18 +611,24 @@ async def gerar_dre_cenario(
     linhas = []
     total_geral = 0
     
-    # Separar receitas (valores positivos) e custos (valores negativos)
+    # Separar receitas (valores positivos) e custos (valores negativos para exibição)
     linhas_receita = []
     linhas_custo = []
     
     for dados in rubricas_dict.values():
-        linha = DRELinha(**dados)
         if dados["categoria"] == "RECEITA":
+            # Receitas: valores positivos (créditos)
+            linha = DRELinha(**dados)
             linhas_receita.append(linha)
-            total_geral += dados["total"]  # Receita positiva
+            total_geral += dados["total"]
         else:
+            # Custos: inverter sinal para exibição contábil (valores negativos = débitos)
+            dados_custo = dados.copy()
+            dados_custo["valores_mensais"] = [-v for v in dados["valores_mensais"]]
+            dados_custo["total"] = -dados["total"]
+            linha = DRELinha(**dados_custo)
             linhas_custo.append(linha)
-            total_geral -= dados["total"]  # Custo negativo (subtrai do resultado)
+            total_geral += dados_custo["total"]  # Já está negativo
     
     # Ordenar: Receitas primeiro, depois custos
     linhas = linhas_receita + linhas_custo

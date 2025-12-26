@@ -1,12 +1,11 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -31,21 +30,23 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 import { 
   Plus, Pencil, Trash2, DollarSign, TrendingUp, 
-  Calculator, Info, ChevronDown, ChevronUp 
+  Calculator, ChevronDown, ChevronRight, Briefcase,
+  Building2, User, Loader2, Save, X
 } from 'lucide-react';
 import { 
   ReceitaCenario, ReceitaCenarioCreate, ReceitaPremissaMes, 
-  TipoReceita, CentroCusto, Funcao, ReceitaCalculada 
+  TipoReceita, CentroCusto, Funcao, cenariosApi 
 } from '@/lib/api/orcamento';
+import { useAuthStore } from '@/stores/auth-store';
 
 interface ReceitasPanelProps {
   cenarioId: string;
-  centroCustoId?: string;
   mesInicio: number;
   anoInicio: number;
   mesFim: number;
@@ -54,47 +55,54 @@ interface ReceitasPanelProps {
 
 const TIPOS_CALCULO = [
   { value: 'FIXA_CC', label: 'Fixa por CC', desc: 'Valor fixo mensal por Centro de Custo' },
-  { value: 'FIXA_HC', label: 'Fixa por HC', desc: 'Valor fixo × Quantidade de HC' },
-  { value: 'FIXA_PA', label: 'Fixa por PA', desc: 'Valor fixo × Quantidade de PA' },
-  { value: 'VARIAVEL', label: 'Variável', desc: 'Cálculo com indicadores de vendas' },
+  { value: 'FIXA_HC', label: 'Fixa por HC', desc: 'Valor fixo × Quantidade de HC (requer função)' },
+  { value: 'FIXA_PA', label: 'Fixa por PA', desc: 'Valor fixo × Quantidade de PA (requer função)' },
+  { value: 'VARIAVEL', label: 'Variável', desc: 'Cálculo com indicadores de vendas (requer função)' },
 ];
 
 const MESES_NOMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
+// Helpers
+const truncateText = (text: string | undefined | null, maxLength: number = 20): string => {
+  if (!text) return "";
+  return text.length > maxLength ? text.substring(0, maxLength) + "…" : text;
+};
+
+const formatCurrency = (value: number) => {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+};
+
+// ============================================
+// Componente Principal - Master-Detail Layout
+// ============================================
+
 export function ReceitasPanel({ 
   cenarioId, 
-  centroCustoId,
   mesInicio,
   anoInicio,
   mesFim,
   anoFim
 }: ReceitasPanelProps) {
+  const { accessToken: token } = useAuthStore();
   const queryClient = useQueryClient();
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  
+  // Estado da árvore
+  const [expandedSecoes, setExpandedSecoes] = useState<Set<string>>(new Set());
+  const [selectedCC, setSelectedCC] = useState<{
+    secaoId: string;
+    secaoNome: string;
+    ccId: string;
+    ccNome: string;
+  } | null>(null);
+  
+  // Estado do formulário
+  const [showForm, setShowForm] = useState(false);
+  const [editingReceita, setEditingReceita] = useState<ReceitaCenario | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [selectedForDelete, setSelectedForDelete] = useState<ReceitaCenario | null>(null);
-  const [expandedReceita, setExpandedReceita] = useState<string | null>(null);
-  const [premissasTab, setPremissasTab] = useState<'form' | 'grid'>('form');
+  const [saving, setSaving] = useState(false);
   
-  const [formData, setFormData] = useState<{
-    centro_custo_id: string;
-    tipo_receita_id: string;
-    tipo_calculo: string;
-    funcao_pa_id: string;
-    valor_fixo: string;
-    valor_minimo_pa: string;
-    valor_maximo_pa: string;
-    descricao: string;
-    premissas: Record<string, {
-      vopdu: string;
-      indice_conversao: string;
-      ticket_medio: string;
-      fator: string;
-      indice_estorno: string;
-    }>;
-  }>({
-    centro_custo_id: centroCustoId || '',
+  const [formData, setFormData] = useState({
     tipo_receita_id: '',
     tipo_calculo: 'FIXA_CC',
     funcao_pa_id: '',
@@ -102,8 +110,16 @@ export function ReceitasPanel({
     valor_minimo_pa: '',
     valor_maximo_pa: '',
     descricao: '',
-    premissas: {},
   });
+  
+  // Estado para premissas variáveis (grid mensal)
+  const [premissasVariavel, setPremissasVariavel] = useState<Record<string, {
+    vopdu: string;
+    indice_conversao: string;
+    ticket_medio: string;
+    fator: string;
+    indice_estorno: string;
+  }>>({});
 
   // Gerar lista de meses do cenário
   const mesesPeriodo = useMemo(() => {
@@ -121,98 +137,116 @@ export function ReceitasPanel({
     return meses;
   }, [anoInicio, mesInicio, anoFim, mesFim]);
 
-  // Buscar receitas do cenário
-  const { data: receitas = [], isLoading } = useQuery<ReceitaCenario[]>({
-    queryKey: ['receitas-cenario', cenarioId, centroCustoId],
+  // Buscar estrutura do cenário (seções e CCs)
+  const { data: estrutura, isLoading: loadingEstrutura } = useQuery({
+    queryKey: ['receitas-estrutura', cenarioId],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (centroCustoId) params.append('centro_custo_id', centroCustoId);
-      return await api.get<ReceitaCenario[]>(`/api/v1/orcamento/receitas/cenarios/${cenarioId}?${params}`);
+      if (!token) return [];
+      const empresas = await cenariosApi.getEmpresas(token, cenarioId);
+      
+      // Para cada empresa, buscar seções
+      const secoesPromises = empresas.map(async (emp) => {
+        try {
+          const secoes = await api.get<any[]>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${emp.id}/secoes`, token || undefined);
+          return { empresa: emp, secoes };
+        } catch {
+          return { empresa: emp, secoes: [] };
+        }
+      });
+      
+      const resultado = await Promise.all(secoesPromises);
+      return resultado;
     },
+    enabled: !!token && !!cenarioId,
+  });
+
+  // Buscar CCs de uma seção específica
+  const fetchCCsSecao = useCallback(async (secaoId: string) => {
+    if (!token) return [];
+    try {
+      const ccs = await api.get<any[]>(`/api/v1/orcamento/cenarios/${cenarioId}/secoes/${secaoId}/centros-custo`, token || undefined);
+      return ccs;
+    } catch {
+      return [];
+    }
+  }, [token, cenarioId]);
+
+  // Estado para CCs por seção
+  const [ccsPorSecao, setCCsPorSecao] = useState<Record<string, any[]>>({});
+  const [loadingCCs, setLoadingCCs] = useState<Set<string>>(new Set());
+
+  // Buscar receitas do CC selecionado
+  const { data: receitas = [], isLoading: loadingReceitas, refetch: refetchReceitas } = useQuery<ReceitaCenario[]>({
+    queryKey: ['receitas-cenario', cenarioId, selectedCC?.ccId],
+    queryFn: async () => {
+      if (!selectedCC?.ccId) return [];
+      const params = new URLSearchParams();
+      params.append('centro_custo_id', selectedCC.ccId);
+      return await api.get<ReceitaCenario[]>(`/api/v1/orcamento/receitas/cenarios/${cenarioId}?${params}`, token || undefined);
+    },
+    enabled: !!selectedCC?.ccId && !!token,
   });
 
   // Buscar tipos de receita
   const { data: tiposReceita = [] } = useQuery<TipoReceita[]>({
     queryKey: ['tipos-receita-ativos'],
     queryFn: async () => {
-      return await api.get<TipoReceita[]>('/api/v1/orcamento/tipos-receita?ativo=true');
+      return await api.get<TipoReceita[]>('/api/v1/orcamento/tipos-receita?ativo=true', token || undefined);
     },
+    enabled: !!token,
   });
 
-  // Buscar centros de custo
-  const { data: centrosCusto = [] } = useQuery<CentroCusto[]>({
-    queryKey: ['centros-custo-ativos'],
+  // Buscar funções disponíveis no CC
+  const { data: funcoes = [] } = useQuery<any[]>({
+    queryKey: ['funcoes-cc', cenarioId, selectedCC?.ccId],
     queryFn: async () => {
-      return await api.get<CentroCusto[]>('/api/v1/orcamento/centros-custo?ativo=true');
+      if (!selectedCC?.ccId || !token) return [];
+      // Buscar funções do quadro de pessoal do CC
+      const quadro = await cenariosApi.getQuadro(token, cenarioId, { centro_custo_id: selectedCC.ccId });
+      // Extrair funções únicas
+      const funcoesMap = new Map<string, any>();
+      quadro.forEach(q => {
+        if (q.funcao && !funcoesMap.has(q.funcao.id)) {
+          funcoesMap.set(q.funcao.id, q.funcao);
+        }
+      });
+      return Array.from(funcoesMap.values());
     },
+    enabled: !!selectedCC?.ccId && !!token,
   });
 
-  // Buscar funções (para PA)
-  const { data: funcoes = [] } = useQuery<Funcao[]>({
-    queryKey: ['funcoes-ativas'],
-    queryFn: async () => {
-      return await api.get<Funcao[]>('/api/v1/orcamento/funcoes?ativo=true');
-    },
-  });
-
-  // Criar receita
-  const createMutation = useMutation({
-    mutationFn: async (data: ReceitaCenarioCreate) => {
-      return await api.post<ReceitaCenario>(`/api/v1/orcamento/receitas/cenarios/${cenarioId}`, data);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['receitas-cenario', cenarioId] });
-      toast.success('Receita criada com sucesso!');
-      resetForm();
-      setDialogOpen(false);
-    },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.detail || 'Erro ao criar receita');
-    },
-  });
-
-  // Atualizar receita
-  const updateMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: Partial<ReceitaCenarioCreate> }) => {
-      return await api.put<ReceitaCenario>(`/api/v1/orcamento/receitas/${id}`, data);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['receitas-cenario', cenarioId] });
-      toast.success('Receita atualizada com sucesso!');
-      resetForm();
-      setDialogOpen(false);
-    },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.detail || 'Erro ao atualizar receita');
-    },
-  });
-
-  // Excluir receita
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await api.delete(`/api/v1/orcamento/receitas/${id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['receitas-cenario', cenarioId] });
-      toast.success('Receita excluída com sucesso!');
-      setDeleteConfirmOpen(false);
-      setSelectedForDelete(null);
-    },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.detail || 'Erro ao excluir receita');
-    },
-  });
-
-  // Atualizar centro de custo quando prop mudar
-  useEffect(() => {
-    if (centroCustoId) {
-      setFormData(prev => ({ ...prev, centro_custo_id: centroCustoId }));
+  // Expandir seção e carregar CCs
+  const toggleSecao = async (secaoId: string) => {
+    const newExpanded = new Set(expandedSecoes);
+    if (newExpanded.has(secaoId)) {
+      newExpanded.delete(secaoId);
+    } else {
+      newExpanded.add(secaoId);
+      // Carregar CCs se ainda não carregou
+      if (!ccsPorSecao[secaoId]) {
+        setLoadingCCs(prev => new Set(prev).add(secaoId));
+        const ccs = await fetchCCsSecao(secaoId);
+        setCCsPorSecao(prev => ({ ...prev, [secaoId]: ccs }));
+        setLoadingCCs(prev => {
+          const next = new Set(prev);
+          next.delete(secaoId);
+          return next;
+        });
+      }
     }
-  }, [centroCustoId]);
+    setExpandedSecoes(newExpanded);
+  };
 
+  // Selecionar CC
+  const handleSelectCC = (secaoId: string, secaoNome: string, ccId: string, ccNome: string) => {
+    setSelectedCC({ secaoId, secaoNome, ccId, ccNome });
+    setShowForm(false);
+    setEditingReceita(null);
+  };
+
+  // Reset form
   const resetForm = () => {
     setFormData({
-      centro_custo_id: centroCustoId || '',
       tipo_receita_id: '',
       tipo_calculo: 'FIXA_CC',
       funcao_pa_id: '',
@@ -220,27 +254,15 @@ export function ReceitasPanel({
       valor_minimo_pa: '',
       valor_maximo_pa: '',
       descricao: '',
-      premissas: {},
     });
-    setEditingId(null);
-    setPremissasTab('form');
+    setPremissasVariavel({});
+    setEditingReceita(null);
+    setShowForm(false);
   };
 
-  const handleEditar = (receita: ReceitaCenario) => {
-    // Montar premissas
-    const premissasMap: typeof formData.premissas = {};
-    receita.premissas?.forEach(p => {
-      premissasMap[`${p.ano}-${p.mes}`] = {
-        vopdu: String(p.vopdu || 0),
-        indice_conversao: String(p.indice_conversao || 0),
-        ticket_medio: String(p.ticket_medio || 0),
-        fator: String(p.fator || 1),
-        indice_estorno: String(p.indice_estorno || 0),
-      };
-    });
-
+  // Iniciar edição
+  const handleEdit = (receita: ReceitaCenario) => {
     setFormData({
-      centro_custo_id: receita.centro_custo_id,
       tipo_receita_id: receita.tipo_receita_id,
       tipo_calculo: receita.tipo_calculo,
       funcao_pa_id: receita.funcao_pa_id || '',
@@ -248,514 +270,635 @@ export function ReceitasPanel({
       valor_minimo_pa: receita.valor_minimo_pa?.toString() || '',
       valor_maximo_pa: receita.valor_maximo_pa?.toString() || '',
       descricao: receita.descricao || '',
-      premissas: premissasMap,
     });
-    setEditingId(receita.id);
-    setDialogOpen(true);
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
     
-    if (!formData.tipo_receita_id || !formData.centro_custo_id) {
-      toast.error('Tipo de receita e Centro de Custo são obrigatórios');
-      return;
-    }
-
-    if ((formData.tipo_calculo === 'FIXA_PA' || formData.tipo_calculo === 'VARIAVEL') && !formData.funcao_pa_id) {
-      toast.error('Função PA é obrigatória para este tipo de cálculo');
-      return;
-    }
-
-    // Montar dados
-    const data: ReceitaCenarioCreate = {
-      centro_custo_id: formData.centro_custo_id,
-      tipo_receita_id: formData.tipo_receita_id,
-      tipo_calculo: formData.tipo_calculo as any,
-      funcao_pa_id: formData.funcao_pa_id || undefined,
-      valor_fixo: formData.valor_fixo ? parseFloat(formData.valor_fixo) : undefined,
-      valor_minimo_pa: formData.valor_minimo_pa ? parseFloat(formData.valor_minimo_pa) : undefined,
-      valor_maximo_pa: formData.valor_maximo_pa ? parseFloat(formData.valor_maximo_pa) : undefined,
-      descricao: formData.descricao || undefined,
-    };
-
-    // Adicionar premissas se for variável
-    if (formData.tipo_calculo === 'VARIAVEL') {
-      data.premissas = mesesPeriodo.map(({ ano, mes }) => {
-        const p = formData.premissas[`${ano}-${mes}`] || {};
-        return {
-          mes,
-          ano,
-          vopdu: parseFloat(p.vopdu || '0'),
-          indice_conversao: parseFloat(p.indice_conversao || '0'),
-          ticket_medio: parseFloat(p.ticket_medio || '0'),
-          fator: parseFloat(p.fator || '1'),
-          indice_estorno: parseFloat(p.indice_estorno || '0'),
+    // Carregar premissas variáveis
+    if (receita.premissas) {
+      const premissasMap: typeof premissasVariavel = {};
+      receita.premissas.forEach(p => {
+        premissasMap[`${p.ano}-${p.mes}`] = {
+          vopdu: String(p.vopdu || 0),
+          indice_conversao: String(p.indice_conversao || 0),
+          ticket_medio: String(p.ticket_medio || 0),
+          fator: String(p.fator || 1),
+          indice_estorno: String(p.indice_estorno || 0),
         };
       });
+      setPremissasVariavel(premissasMap);
     }
     
-    if (editingId) {
-      updateMutation.mutate({ id: editingId, data });
-    } else {
-      createMutation.mutate(data);
+    setEditingReceita(receita);
+    setShowForm(true);
+  };
+
+  // Verificar se precisa de função (HC, PA ou Variável)
+  const precisaFuncao = formData.tipo_calculo === 'FIXA_HC' || 
+                        formData.tipo_calculo === 'FIXA_PA' || 
+                        formData.tipo_calculo === 'VARIAVEL';
+
+  // Salvar receita
+  const handleSave = async () => {
+    if (!selectedCC) return;
+    
+    // Validações
+    if (!formData.tipo_receita_id) {
+      toast.error('Selecione um tipo de receita');
+      return;
+    }
+    
+    if (precisaFuncao && !formData.funcao_pa_id) {
+      toast.error('Selecione a função de referência para este tipo de cálculo');
+      return;
+    }
+    
+    if (formData.tipo_calculo !== 'VARIAVEL' && !formData.valor_fixo) {
+      toast.error('Informe o valor fixo');
+      return;
+    }
+    
+    setSaving(true);
+    try {
+      const payload: ReceitaCenarioCreate = {
+        centro_custo_id: selectedCC.ccId,
+        tipo_receita_id: formData.tipo_receita_id,
+        tipo_calculo: formData.tipo_calculo as 'FIXA_CC' | 'FIXA_HC' | 'FIXA_PA' | 'VARIAVEL',
+        funcao_pa_id: formData.funcao_pa_id || undefined,
+        valor_fixo: formData.valor_fixo ? parseFloat(formData.valor_fixo) : undefined,
+        valor_minimo_pa: formData.valor_minimo_pa ? parseFloat(formData.valor_minimo_pa) : undefined,
+        valor_maximo_pa: formData.valor_maximo_pa ? parseFloat(formData.valor_maximo_pa) : undefined,
+        descricao: formData.descricao || undefined,
+      };
+      
+      let receitaId: string;
+      
+      if (editingReceita) {
+        await api.put(`/api/v1/orcamento/receitas/${editingReceita.id}`, payload, token || undefined);
+        receitaId = editingReceita.id;
+        toast.success('Receita atualizada!');
+      } else {
+        const novaReceita = await api.post<ReceitaCenario>(`/api/v1/orcamento/receitas/cenarios/${cenarioId}`, payload, token || undefined);
+        receitaId = novaReceita.id;
+        toast.success('Receita criada!');
+      }
+      
+      // Salvar premissas variáveis se aplicável
+      if (formData.tipo_calculo === 'VARIAVEL') {
+        const premissasData = Object.entries(premissasVariavel).map(([key, values]) => {
+          const [ano, mes] = key.split('-').map(Number);
+          return {
+            receita_cenario_id: receitaId,
+            mes,
+            ano,
+            vopdu: parseFloat(values.vopdu) || 0,
+            indice_conversao: parseFloat(values.indice_conversao) || 0,
+            ticket_medio: parseFloat(values.ticket_medio) || 0,
+            fator: parseFloat(values.fator) || 1,
+            indice_estorno: parseFloat(values.indice_estorno) || 0,
+          };
+        });
+        
+        if (premissasData.length > 0) {
+          await api.post(`/api/v1/orcamento/receitas/${receitaId}/premissas/bulk`, premissasData, token || undefined);
+        }
+      }
+      
+      await refetchReceitas();
+      resetForm();
+    } catch (error: any) {
+      toast.error(error.message || 'Erro ao salvar receita');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const updatePremissa = (key: string, field: string, value: string) => {
-    setFormData(prev => ({
+  // Excluir receita
+  const handleDelete = async () => {
+    if (!selectedForDelete) return;
+    
+    try {
+      await api.delete(`/api/v1/orcamento/receitas/${selectedForDelete.id}`, token || undefined);
+      toast.success('Receita excluída!');
+      await refetchReceitas();
+      setDeleteConfirmOpen(false);
+      setSelectedForDelete(null);
+    } catch (error: any) {
+      toast.error(error.message || 'Erro ao excluir receita');
+    }
+  };
+
+  // Atualizar premissa individual
+  const handlePremissaChange = (key: string, field: keyof typeof premissasVariavel[string], value: string) => {
+    setPremissasVariavel(prev => ({
       ...prev,
-      premissas: {
-        ...prev.premissas,
-        [key]: {
-          ...prev.premissas[key],
-          [field]: value,
-        },
-      },
+      [key]: {
+        ...prev[key] || { vopdu: '0', indice_conversao: '0', ticket_medio: '0', fator: '1', indice_estorno: '0' },
+        [field]: value
+      }
     }));
   };
 
-  const getTipoCalculoLabel = (tipo: string) => {
-    return TIPOS_CALCULO.find(t => t.value === tipo)?.label || tipo;
-  };
+  // Renderizar árvore de seções e CCs
+  const renderTree = () => {
+    if (loadingEstrutura) {
+      return (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="size-5 animate-spin text-muted-foreground" />
+        </div>
+      );
+    }
 
-  const formatCurrency = (value: number | null) => {
-    if (value === null) return '-';
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
-  };
+    if (!estrutura || estrutura.length === 0) {
+      return (
+        <div className="text-center py-8 text-muted-foreground text-sm">
+          Nenhuma estrutura encontrada.<br/>
+          Configure empresas e seções no cenário.
+        </div>
+      );
+    }
 
-  const needsFuncaoPA = formData.tipo_calculo === 'FIXA_PA' || formData.tipo_calculo === 'VARIAVEL';
-  const needsValorFixo = formData.tipo_calculo !== 'VARIAVEL';
-  const needsMinMax = formData.tipo_calculo === 'VARIAVEL';
-  const needsPremissas = formData.tipo_calculo === 'VARIAVEL';
-
-  return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between border-b bg-muted/10 py-3">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-100 rounded-lg">
-              <TrendingUp className="h-5 w-5 text-green-600" />
+    return (
+      <div className="space-y-1">
+        {estrutura.map(({ empresa, secoes }) => (
+          <div key={empresa.id}>
+            {/* Empresa */}
+            <div className="flex items-center gap-2 px-2 py-1.5 text-sm font-medium text-muted-foreground">
+              <Building2 className="size-4" />
+              <span>{truncateText(empresa.empresa?.razao_social || empresa.empresa?.codigo, 25)}</span>
             </div>
-            <div>
-              <CardTitle className="text-base font-semibold">Receitas do Cenário</CardTitle>
-              <p className="text-xs text-muted-foreground">
-                Configure receitas fixas ou variáveis por Centro de Custo
-              </p>
+            
+            {/* Seções */}
+            <div className="ml-4">
+              {secoes.map((secao: any) => {
+                const secaoId = secao.id;
+                const isExpanded = expandedSecoes.has(secaoId);
+                const ccs = ccsPorSecao[secaoId] || [];
+                const isLoadingCC = loadingCCs.has(secaoId);
+                
+                return (
+                  <div key={secaoId}>
+                    <div
+                      className={cn(
+                        "flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer hover:bg-muted/50 text-sm",
+                        isExpanded && "bg-muted/30"
+                      )}
+                      onClick={() => toggleSecao(secaoId)}
+                    >
+                      {isLoadingCC ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : isExpanded ? (
+                        <ChevronDown className="size-3" />
+                      ) : (
+                        <ChevronRight className="size-3" />
+                      )}
+                      <Building2 className="size-3.5 text-orange-600" />
+                      <span className="flex-1">{truncateText(secao.secao?.nome || 'Seção', 20)}</span>
+                      {ccs.length > 0 && (
+                        <Badge variant="secondary" className="text-[10px] h-4 px-1">
+                          {ccs.length}
+                        </Badge>
+                      )}
+                    </div>
+                    
+                    {/* Centros de Custo */}
+                    {isExpanded && (
+                      <div className="ml-4 mt-1 space-y-0.5">
+                        {ccs.map((cc: any) => {
+                          const ccData = cc.centro_custo || cc;
+                          const ccId = ccData.id;
+                          const isSelected = selectedCC?.ccId === ccId;
+                          
+                          return (
+                            <div
+                              key={ccId}
+                              className={cn(
+                                "flex items-center gap-2 px-2 py-1 rounded-md cursor-pointer text-xs",
+                                isSelected 
+                                  ? "bg-primary text-primary-foreground" 
+                                  : "hover:bg-muted/50"
+                              )}
+                              onClick={() => handleSelectCC(
+                                secaoId, 
+                                secao.secao?.nome || 'Seção',
+                                ccId, 
+                                ccData.nome || ccData.codigo
+                              )}
+                            >
+                              <Briefcase className={cn("size-3", isSelected ? "text-primary-foreground" : "text-blue-600")} />
+                              <span className="flex-1">{truncateText(ccData.nome || ccData.codigo, 18)}</span>
+                              <span className={cn("font-mono text-[10px]", isSelected ? "" : "text-muted-foreground")}>
+                                {ccData.codigo}
+                              </span>
+                            </div>
+                          );
+                        })}
+                        {ccs.length === 0 && !isLoadingCC && (
+                          <div className="text-xs text-muted-foreground italic px-2 py-1">
+                            Nenhum CC cadastrado
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
-          <Button onClick={() => { resetForm(); setDialogOpen(true); }} size="sm" className="gap-2">
-            <Plus className="h-4 w-4" />
+        ))}
+      </div>
+    );
+  };
+
+  // Renderizar grid de premissas variáveis (master-detail)
+  const renderPremissasGrid = () => (
+    <div className="border rounded-lg overflow-hidden">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-muted/30">
+            <TableHead className="w-[100px] sticky left-0 bg-muted/30">Mês/Ano</TableHead>
+            <TableHead className="text-center min-w-[80px]">VOPDU</TableHead>
+            <TableHead className="text-center min-w-[80px]">Índice Conv.</TableHead>
+            <TableHead className="text-center min-w-[100px]">Ticket Médio</TableHead>
+            <TableHead className="text-center min-w-[80px]">Fator</TableHead>
+            <TableHead className="text-center min-w-[80px]">% Estorno</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {mesesPeriodo.map(({ ano, mes, key }) => {
+            const valores = premissasVariavel[key] || {
+              vopdu: '0', indice_conversao: '0', ticket_medio: '0', fator: '1', indice_estorno: '0'
+            };
+            
+            return (
+              <TableRow key={key}>
+                <TableCell className="font-medium sticky left-0 bg-background">
+                  {MESES_NOMES[mes - 1]}/{ano}
+                </TableCell>
+                <TableCell className="p-1">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={valores.vopdu}
+                    onChange={(e) => handlePremissaChange(key, 'vopdu', e.target.value)}
+                    className="h-7 text-xs text-center"
+                    placeholder="0"
+                  />
+                </TableCell>
+                <TableCell className="p-1">
+                  <Input
+                    type="number"
+                    step="0.0001"
+                    value={valores.indice_conversao}
+                    onChange={(e) => handlePremissaChange(key, 'indice_conversao', e.target.value)}
+                    className="h-7 text-xs text-center"
+                    placeholder="0"
+                  />
+                </TableCell>
+                <TableCell className="p-1">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={valores.ticket_medio}
+                    onChange={(e) => handlePremissaChange(key, 'ticket_medio', e.target.value)}
+                    className="h-7 text-xs text-center"
+                    placeholder="0"
+                  />
+                </TableCell>
+                <TableCell className="p-1">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={valores.fator}
+                    onChange={(e) => handlePremissaChange(key, 'fator', e.target.value)}
+                    className="h-7 text-xs text-center"
+                    placeholder="1"
+                  />
+                </TableCell>
+                <TableCell className="p-1">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    value={valores.indice_estorno}
+                    onChange={(e) => handlePremissaChange(key, 'indice_estorno', e.target.value)}
+                    className="h-7 text-xs text-center"
+                    placeholder="0"
+                  />
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+
+  // Renderizar painel de detalhe (direita)
+  const renderDetail = () => {
+    if (!selectedCC) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+          <DollarSign className="size-12 mb-4 opacity-30" />
+          <p className="text-sm">Selecione um Centro de Custo</p>
+          <p className="text-xs mt-1">para gerenciar suas receitas</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-col h-full">
+        {/* Header do CC selecionado */}
+        <div className="flex items-center justify-between border-b pb-3 mb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Briefcase className="size-4 text-blue-600" />
+              <h3 className="font-semibold">{selectedCC.ccNome}</h3>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Seção: {selectedCC.secaoNome}
+            </p>
+          </div>
+          <Button onClick={() => { resetForm(); setShowForm(true); }} size="sm">
+            <Plus className="size-4 mr-1" />
             Nova Receita
           </Button>
-        </CardHeader>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="flex items-center justify-center h-48">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+        </div>
+
+        {/* Formulário de cadastro/edição */}
+        {showForm && (
+          <Card className="mb-4 border-primary/20">
+            <CardHeader className="py-3">
+              <CardTitle className="text-sm">
+                {editingReceita ? 'Editar Receita' : 'Nova Receita'}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Tipo de Receita */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-xs">Tipo de Receita *</Label>
+                  <Select
+                    value={formData.tipo_receita_id}
+                    onValueChange={(v) => setFormData(prev => ({ ...prev, tipo_receita_id: v }))}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Selecione..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {tiposReceita.map(tipo => (
+                        <SelectItem key={tipo.id} value={tipo.id}>
+                          {tipo.codigo} - {tipo.nome}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div>
+                  <Label className="text-xs">Tipo de Cálculo *</Label>
+                  <Select
+                    value={formData.tipo_calculo}
+                    onValueChange={(v) => setFormData(prev => ({ ...prev, tipo_calculo: v, funcao_pa_id: '' }))}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TIPOS_CALCULO.map(tipo => (
+                        <SelectItem key={tipo.value} value={tipo.value}>
+                          <div>
+                            <span className="font-medium">{tipo.label}</span>
+                            <span className="text-xs text-muted-foreground ml-2">{tipo.desc}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Função de referência (obrigatório para HC/PA/Variável) */}
+              {precisaFuncao && (
+                <div>
+                  <Label className="text-xs">
+                    Função de Referência * 
+                    <span className="text-muted-foreground ml-1">
+                      (para calcular {formData.tipo_calculo === 'FIXA_HC' ? 'HC' : formData.tipo_calculo === 'FIXA_PA' ? 'PA' : 'produtividade'})
+                    </span>
+                  </Label>
+                  <Select
+                    value={formData.funcao_pa_id}
+                    onValueChange={(v) => setFormData(prev => ({ ...prev, funcao_pa_id: v }))}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Selecione a função..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {funcoes.length === 0 ? (
+                        <div className="text-xs text-muted-foreground p-2">
+                          Nenhuma função cadastrada neste CC
+                        </div>
+                      ) : (
+                        funcoes.map((f: any) => (
+                          <SelectItem key={f.id} value={f.id}>
+                            {f.codigo} - {f.nome}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {/* Valores */}
+              {formData.tipo_calculo !== 'VARIAVEL' && (
+                <div>
+                  <Label className="text-xs">
+                    Valor {formData.tipo_calculo === 'FIXA_CC' ? 'Mensal Fixo' : 'por Unidade'} *
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={formData.valor_fixo}
+                    onChange={(e) => setFormData(prev => ({ ...prev, valor_fixo: e.target.value }))}
+                    placeholder="0.00"
+                    className="h-9"
+                  />
+                </div>
+              )}
+
+              {/* Mínimo/Máximo por PA (apenas variável) */}
+              {formData.tipo_calculo === 'VARIAVEL' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-xs">Valor Mínimo por PA</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={formData.valor_minimo_pa}
+                      onChange={(e) => setFormData(prev => ({ ...prev, valor_minimo_pa: e.target.value }))}
+                      placeholder="0.00"
+                      className="h-9"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Valor Máximo por PA</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={formData.valor_maximo_pa}
+                      onChange={(e) => setFormData(prev => ({ ...prev, valor_maximo_pa: e.target.value }))}
+                      placeholder="0.00"
+                      className="h-9"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Grid de Premissas Variáveis - Master-Detail */}
+              {formData.tipo_calculo === 'VARIAVEL' && (
+                <div>
+                  <Label className="text-xs mb-2 block">
+                    Premissas Mensais de Receita Variável
+                  </Label>
+                  <ScrollArea className="h-[200px]">
+                    {renderPremissasGrid()}
+                  </ScrollArea>
+                </div>
+              )}
+
+              {/* Descrição */}
+              <div>
+                <Label className="text-xs">Descrição</Label>
+                <Input
+                  value={formData.descricao}
+                  onChange={(e) => setFormData(prev => ({ ...prev, descricao: e.target.value }))}
+                  placeholder="Descrição opcional..."
+                  className="h-9"
+                />
+              </div>
+
+              {/* Ações */}
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" size="sm" onClick={resetForm} disabled={saving}>
+                  <X className="size-3 mr-1" />
+                  Cancelar
+                </Button>
+                <Button size="sm" onClick={handleSave} disabled={saving}>
+                  {saving ? (
+                    <Loader2 className="size-3 mr-1 animate-spin" />
+                  ) : (
+                    <Save className="size-3 mr-1" />
+                  )}
+                  Salvar
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Lista de receitas cadastradas */}
+        <div className="flex-1 overflow-auto">
+          <h4 className="text-sm font-medium mb-2">Receitas Cadastradas</h4>
+          
+          {loadingReceitas ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="size-5 animate-spin" />
             </div>
           ) : receitas.length === 0 ? (
-            <div className="empty-state p-12">
-              <DollarSign className="h-12 w-12 text-muted-foreground/40 mx-auto mb-4" />
-              <p className="text-muted-foreground text-center">
-                Nenhuma receita configurada.<br />
-                <span className="text-sm">Clique em "Nova Receita" para começar.</span>
-              </p>
+            <div className="text-center py-8 text-muted-foreground text-sm border rounded-lg bg-muted/10">
+              <TrendingUp className="size-8 mx-auto mb-2 opacity-30" />
+              <p>Nenhuma receita cadastrada</p>
+              <p className="text-xs mt-1">Clique em "Nova Receita" para começar</p>
             </div>
           ) : (
-            <Table className="corporate-table">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[40px]"></TableHead>
-                  <TableHead>Tipo de Receita</TableHead>
-                  <TableHead>Centro de Custo</TableHead>
-                  <TableHead>Cálculo</TableHead>
-                  <TableHead>Função PA</TableHead>
-                  <TableHead className="text-right">Valor</TableHead>
-                  <TableHead className="w-[100px] text-center">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {receitas.map((receita) => (
-                  <>
-                    <TableRow key={receita.id}>
-                      <TableCell>
-                        {receita.tipo_calculo === 'VARIAVEL' && (
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            onClick={() => setExpandedReceita(expandedReceita === receita.id ? null : receita.id)}
-                          >
-                            {expandedReceita === receita.id ? (
-                              <ChevronUp className="h-4 w-4" />
-                            ) : (
-                              <ChevronDown className="h-4 w-4" />
-                            )}
-                          </Button>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div>
-                          <span className="font-medium">{receita.tipo_receita?.nome || '-'}</span>
-                          <p className="text-xs text-muted-foreground font-mono">
-                            {receita.tipo_receita?.codigo}
-                          </p>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm">{receita.centro_custo?.nome || '-'}</span>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">
-                          {getTipoCalculoLabel(receita.tipo_calculo)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {receita.funcao_pa?.nome || '-'}
-                      </TableCell>
-                      <TableCell className="text-right font-mono">
-                        {receita.tipo_calculo === 'VARIAVEL' ? (
-                          <span className="text-xs text-muted-foreground">
-                            Min: {formatCurrency(receita.valor_minimo_pa)} / Max: {formatCurrency(receita.valor_maximo_pa)}
+            <div className="space-y-2">
+              {receitas.map(receita => (
+                <Card key={receita.id} className="hover:bg-muted/30">
+                  <CardContent className="py-3 px-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <DollarSign className="size-4 text-green-600" />
+                          <span className="font-medium text-sm">
+                            {receita.tipo_receita?.nome || 'Receita'}
                           </span>
-                        ) : (
-                          formatCurrency(receita.valor_fixo)
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center justify-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            onClick={() => handleEditar(receita)}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                            onClick={() => { setSelectedForDelete(receita); setDeleteConfirmOpen(true); }}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                          <Badge variant="outline" className="text-[10px]">
+                            {TIPOS_CALCULO.find(t => t.value === receita.tipo_calculo)?.label}
+                          </Badge>
                         </div>
-                      </TableCell>
-                    </TableRow>
-                    {/* Linha expandida para premissas */}
-                    {expandedReceita === receita.id && receita.tipo_calculo === 'VARIAVEL' && (
-                      <TableRow>
-                        <TableCell colSpan={7} className="bg-muted/20 p-4">
-                          <div className="text-xs">
-                            <h4 className="font-semibold mb-2">Premissas Mensais</h4>
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-xs">
-                                <thead>
-                                  <tr className="border-b">
-                                    <th className="text-left py-1 px-2 w-24">Indicador</th>
-                                    {mesesPeriodo.slice(0, 12).map(({ mes, ano }) => (
-                                      <th key={`${ano}-${mes}`} className="text-center py-1 px-1 min-w-[60px]">
-                                        {MESES_NOMES[mes - 1]}/{ano.toString().slice(2)}
-                                      </th>
-                                    ))}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  <tr>
-                                    <td className="py-1 px-2 font-medium">VOPDU</td>
-                                    {mesesPeriodo.slice(0, 12).map(({ mes, ano }) => {
-                                      const p = receita.premissas?.find(pr => pr.mes === mes && pr.ano === ano);
-                                      return (
-                                        <td key={`${ano}-${mes}`} className="text-center py-1 px-1 font-mono">
-                                          {p?.vopdu?.toFixed(2) || '0.00'}
-                                        </td>
-                                      );
-                                    })}
-                                  </tr>
-                                  <tr>
-                                    <td className="py-1 px-2 font-medium">Conversão</td>
-                                    {mesesPeriodo.slice(0, 12).map(({ mes, ano }) => {
-                                      const p = receita.premissas?.find(pr => pr.mes === mes && pr.ano === ano);
-                                      return (
-                                        <td key={`${ano}-${mes}`} className="text-center py-1 px-1 font-mono">
-                                          {((p?.indice_conversao || 0) * 100).toFixed(0)}%
-                                        </td>
-                                      );
-                                    })}
-                                  </tr>
-                                  <tr>
-                                    <td className="py-1 px-2 font-medium">Ticket</td>
-                                    {mesesPeriodo.slice(0, 12).map(({ mes, ano }) => {
-                                      const p = receita.premissas?.find(pr => pr.mes === mes && pr.ano === ano);
-                                      return (
-                                        <td key={`${ano}-${mes}`} className="text-center py-1 px-1 font-mono">
-                                          {p?.ticket_medio?.toFixed(0) || '0'}
-                                        </td>
-                                      );
-                                    })}
-                                  </tr>
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </>
-                ))}
-              </TableBody>
-            </Table>
+                        
+                        <div className="mt-1 text-xs text-muted-foreground space-x-3">
+                          {receita.valor_fixo && (
+                            <span>Valor: {formatCurrency(receita.valor_fixo)}</span>
+                          )}
+                          {receita.funcao_pa && (
+                            <span>Função: {receita.funcao_pa.nome}</span>
+                          )}
+                          {receita.descricao && (
+                            <span className="italic">"{receita.descricao}"</span>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7"
+                          onClick={() => handleEdit(receita)}
+                        >
+                          <Pencil className="size-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7 text-destructive hover:text-destructive"
+                          onClick={() => {
+                            setSelectedForDelete(receita);
+                            setDeleteConfirmOpen(true);
+                          }}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="master-detail-layout">
+      {/* Painel esquerdo - Árvore */}
+      <Card className="master-panel">
+        <CardHeader className="py-3 px-4 border-b">
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <Building2 className="size-4" />
+            Estrutura
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Selecione um Centro de Custo
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-2">
+          <ScrollArea className="h-[calc(100vh-280px)]">
+            {renderTree()}
+          </ScrollArea>
         </CardContent>
       </Card>
 
-      {/* Dialog de criação/edição */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {editingId ? 'Editar Receita' : 'Nova Receita'}
-            </DialogTitle>
-            <DialogDescription>
-              Configure uma receita para o cenário de orçamento.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Tipo de Receita *</Label>
-                <Select
-                  value={formData.tipo_receita_id}
-                  onValueChange={(value) => setFormData({ ...formData, tipo_receita_id: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {tiposReceita.map((tipo) => (
-                      <SelectItem key={tipo.id} value={tipo.id}>
-                        {tipo.codigo} - {tipo.nome}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Centro de Custo *</Label>
-                <Select
-                  value={formData.centro_custo_id}
-                  onValueChange={(value) => setFormData({ ...formData, centro_custo_id: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {centrosCusto.map((cc) => (
-                      <SelectItem key={cc.id} value={cc.id}>
-                        {cc.codigo} - {cc.nome}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Tipo de Cálculo *</Label>
-              <div className="grid grid-cols-2 gap-2">
-                {TIPOS_CALCULO.map((tipo) => (
-                  <Button
-                    key={tipo.value}
-                    type="button"
-                    variant={formData.tipo_calculo === tipo.value ? 'default' : 'outline'}
-                    className="justify-start h-auto py-2 px-3"
-                    onClick={() => setFormData({ ...formData, tipo_calculo: tipo.value })}
-                  >
-                    <div className="text-left">
-                      <div className="font-medium">{tipo.label}</div>
-                      <div className="text-xs opacity-70">{tipo.desc}</div>
-                    </div>
-                  </Button>
-                ))}
-              </div>
-            </div>
-
-            {needsFuncaoPA && (
-              <div className="space-y-2">
-                <Label>Função PA *</Label>
-                <Select
-                  value={formData.funcao_pa_id}
-                  onValueChange={(value) => setFormData({ ...formData, funcao_pa_id: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione a função que representa o PA..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {funcoes.map((f) => (
-                      <SelectItem key={f.id} value={f.id}>
-                        {f.codigo} - {f.nome}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  A quantidade de PA será calculada como HC / Fator PA da função.
-                </p>
-              </div>
-            )}
-
-            {needsValorFixo && (
-              <div className="space-y-2">
-                <Label>Valor Fixo (R$)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={formData.valor_fixo}
-                  onChange={(e) => setFormData({ ...formData, valor_fixo: e.target.value })}
-                  placeholder="0,00"
-                />
-              </div>
-            )}
-
-            {needsMinMax && (
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Valor Mínimo por PA (R$)</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={formData.valor_minimo_pa}
-                    onChange={(e) => setFormData({ ...formData, valor_minimo_pa: e.target.value })}
-                    placeholder="0,00"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Valor Máximo por PA (R$)</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={formData.valor_maximo_pa}
-                    onChange={(e) => setFormData({ ...formData, valor_maximo_pa: e.target.value })}
-                    placeholder="0,00"
-                  />
-                </div>
-              </div>
-            )}
-
-            {needsPremissas && (
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <Calculator className="h-4 w-4" />
-                  Premissas de Receita Variável
-                </Label>
-                <div className="border rounded-lg p-3 space-y-3 max-h-[300px] overflow-y-auto">
-                  <div className="text-xs text-muted-foreground flex items-center gap-2">
-                    <Info className="h-3 w-3" />
-                    Fórmula: HC_PA × VOPDU × Índice × Ticket × Fator × Dias × (1-Estorno)
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b">
-                          <th className="text-left py-2 px-2 w-20">Mês</th>
-                          <th className="text-center py-2 px-1">VOPDU</th>
-                          <th className="text-center py-2 px-1">Conversão</th>
-                          <th className="text-center py-2 px-1">Ticket (R$)</th>
-                          <th className="text-center py-2 px-1">Fator</th>
-                          <th className="text-center py-2 px-1">Estorno</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {mesesPeriodo.map(({ mes, ano, key }) => (
-                          <tr key={key} className="border-b">
-                            <td className="py-1 px-2 font-medium">
-                              {MESES_NOMES[mes - 1]}/{ano.toString().slice(2)}
-                            </td>
-                            <td className="py-1 px-1">
-                              <Input
-                                type="number"
-                                step="0.01"
-                                className="h-7 text-xs text-center"
-                                value={formData.premissas[key]?.vopdu || ''}
-                                onChange={(e) => updatePremissa(key, 'vopdu', e.target.value)}
-                                placeholder="0"
-                              />
-                            </td>
-                            <td className="py-1 px-1">
-                              <Input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                max="1"
-                                className="h-7 text-xs text-center"
-                                value={formData.premissas[key]?.indice_conversao || ''}
-                                onChange={(e) => updatePremissa(key, 'indice_conversao', e.target.value)}
-                                placeholder="0.67"
-                              />
-                            </td>
-                            <td className="py-1 px-1">
-                              <Input
-                                type="number"
-                                step="0.01"
-                                className="h-7 text-xs text-center"
-                                value={formData.premissas[key]?.ticket_medio || ''}
-                                onChange={(e) => updatePremissa(key, 'ticket_medio', e.target.value)}
-                                placeholder="100"
-                              />
-                            </td>
-                            <td className="py-1 px-1">
-                              <Input
-                                type="number"
-                                step="0.01"
-                                className="h-7 text-xs text-center"
-                                value={formData.premissas[key]?.fator || ''}
-                                onChange={(e) => updatePremissa(key, 'fator', e.target.value)}
-                                placeholder="1"
-                              />
-                            </td>
-                            <td className="py-1 px-1">
-                              <Input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                max="1"
-                                className="h-7 text-xs text-center"
-                                value={formData.premissas[key]?.indice_estorno || ''}
-                                onChange={(e) => updatePremissa(key, 'indice_estorno', e.target.value)}
-                                placeholder="0.06"
-                              />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label>Descrição</Label>
-              <Textarea
-                value={formData.descricao}
-                onChange={(e) => setFormData({ ...formData, descricao: e.target.value })}
-                placeholder="Descrição opcional"
-                rows={2}
-              />
-            </div>
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending}>
-                {createMutation.isPending || updateMutation.isPending ? 'Salvando...' : 'Salvar'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {/* Painel direito - Detalhe */}
+      <Card className="detail-panel">
+        <CardContent className="p-4 h-full">
+          {renderDetail()}
+        </CardContent>
+      </Card>
 
       {/* Dialog de confirmação de exclusão */}
       <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
@@ -763,20 +906,15 @@ export function ReceitasPanel({
           <DialogHeader>
             <DialogTitle>Confirmar Exclusão</DialogTitle>
             <DialogDescription>
-              Tem certeza que deseja excluir esta receita?
-              Esta ação não pode ser desfeita.
+              Deseja realmente excluir esta receita? Esta ação não pode ser desfeita.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
               Cancelar
             </Button>
-            <Button
-              variant="destructive"
-              onClick={() => selectedForDelete && deleteMutation.mutate(selectedForDelete.id)}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending ? 'Excluindo...' : 'Excluir'}
+            <Button variant="destructive" onClick={handleDelete}>
+              Excluir
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -784,4 +922,3 @@ export function ReceitasPanel({
     </div>
   );
 }
-

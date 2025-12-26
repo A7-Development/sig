@@ -756,17 +756,14 @@ export default function CenariosPage() {
                 </div>
               </div>
             ) : abaAtiva === 'receitas' ? (
-              /* Painel de Receitas */
-              <div className="h-full overflow-auto p-4">
-                <ReceitasPanel
-                  cenarioId={cenarioSelecionado.id}
-                  centroCustoId={selectedNode?.centroCusto?.id}
-                  mesInicio={cenarioSelecionado.mes_inicio}
-                  anoInicio={cenarioSelecionado.ano_inicio}
-                  mesFim={cenarioSelecionado.mes_fim}
-                  anoFim={cenarioSelecionado.ano_fim}
-                />
-              </div>
+              /* Painel de Receitas - Master-Detail Layout */
+              <ReceitasPanel
+                cenarioId={cenarioSelecionado.id}
+                mesInicio={cenarioSelecionado.mes_inicio}
+                anoInicio={cenarioSelecionado.ano_inicio}
+                mesFim={cenarioSelecionado.mes_fim}
+                anoFim={cenarioSelecionado.ano_fim}
+              />
             ) : abaAtiva === 'dre' ? (
               <div className="h-full overflow-auto">
                 <DREPanel
