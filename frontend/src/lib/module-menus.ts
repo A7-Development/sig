@@ -32,6 +32,10 @@ import {
   Layers,
   CircleDollarSign,
   CalendarDays,
+  Receipt,
+  BookOpen,
+  Truck,
+  Server,
   type LucideIcon,
 } from "lucide-react";
 
@@ -87,6 +91,10 @@ export const moduleMenus: ModuleMenus = {
             { name: "Seções", href: "/controladoria/orcamento/cadastros/secoes", icon: Layers },
             { name: "Centros de Custo", href: "/controladoria/orcamento/cadastros/centros-custo", icon: CircleDollarSign },
             { name: "Feriados", href: "/controladoria/orcamento/cadastros/feriados", icon: CalendarDays },
+            { name: "Eventos de Folha", href: "/controladoria/orcamento/cadastros/rubricas", icon: Receipt },
+            { name: "Contas Contábeis", href: "/controladoria/orcamento/cadastros/contas-contabeis", icon: BookOpen },
+            { name: "Fornecedores", href: "/controladoria/orcamento/cadastros/fornecedores", icon: Truck },
+            { name: "Produtos Tecnologia", href: "/controladoria/orcamento/cadastros/produtos-tecnologia", icon: Server },
           ],
         },
         { name: "Indicadores", href: "/controladoria/indicadores", icon: BarChart3 },

@@ -35,14 +35,20 @@ import {
   FileEdit,
   DollarSign,
   ChevronDown,
-  Building2,
   Calendar,
   Loader2,
-  FileX
+  FileX,
+  User,
+  Server
 } from "lucide-react";
-import { ClienteNWSelector } from "@/components/orcamento/ClienteNWSelector";
-import { FuncoesQuantidadesTab } from "@/components/orcamento/FuncoesQuantidadesTab";
+import { MasterDetailTree } from "@/components/orcamento/MasterDetailTree";
+import { CapacityPlanningPanel } from "@/components/orcamento/CapacityPlanningPanel";
 import { PremissasFuncaoMesGrid } from "@/components/orcamento/PremissasFuncaoMesGrid";
+import { PremissasTree, type SelectedNodePremissas } from "@/components/orcamento/PremissasTree";
+import { PremissasFuncaoGridPanel } from "@/components/orcamento/PremissasFuncaoGridPanel";
+import { DREPanel } from "@/components/orcamento/DREPanel";
+import TecnologiaPanel from "@/components/orcamento/TecnologiaPanel";
+import type { CenarioEmpresa, CenarioCliente, CenarioSecao } from "@/lib/api/orcamento";
 import { useAuthStore } from "@/stores/auth-store";
 import { 
   cenariosApi, 
@@ -52,21 +58,18 @@ import {
   centrosCustoApi,
   tabelaSalarialApi,
   type Cenario,
-  type Premissa,
   type QuadroPessoal,
   type Empresa,
   type Funcao,
   type Secao,
   type CentroCusto,
   type TabelaSalarial,
-  type ResumoCustos,
 } from "@/lib/api/orcamento";
 
 export default function CenariosPage() {
   const { accessToken: token } = useAuthStore();
   const [cenarios, setCenarios] = useState<Cenario[]>([]);
   const [cenarioSelecionado, setCenarioSelecionado] = useState<Cenario | null>(null);
-  const [premissas, setPremissas] = useState<Premissa[]>([]);
   const [quadro, setQuadro] = useState<QuadroPessoal[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingDetalhes, setLoadingDetalhes] = useState(false);
@@ -79,9 +82,21 @@ export default function CenariosPage() {
   const [tabelaSalarial, setTabelaSalarial] = useState<TabelaSalarial[]>([]);
   
   // Abas
-  const [abaAtiva, setAbaAtiva] = useState<'informacoes' | 'configuracao' | 'funcoes' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custos'>('informacoes');
-  const [custos, setCustos] = useState<ResumoCustos | null>(null);
-  const [loadingCustos, setLoadingCustos] = useState(false);
+  const [abaAtiva, setAbaAtiva] = useState<'estrutura' | 'premissas-funcao' | 'premissas' | 'quadro' | 'tecnologia' | 'dre'>('estrutura');
+  
+  // Estado para seleção na árvore Master-Detail
+  const [selectedNode, setSelectedNode] = useState<{
+    type: 'empresa' | 'cliente' | 'secao';
+    empresa: CenarioEmpresa;
+    cliente?: CenarioCliente;
+    secao?: CenarioSecao;
+  } | null>(null);
+  
+  // Estado para seleção na árvore de Premissas (inclui funções)
+  const [selectedNodePremissas, setSelectedNodePremissas] = useState<SelectedNodePremissas | null>(null);
+  
+  // Estado para todas as seções do cenário (para rateio)
+  const [todasSecoescentario, setTodasSecoesCenario] = useState<CenarioSecao[]>([]);
   
   // Modal Cenário
   const [showFormCenario, setShowFormCenario] = useState(false);
@@ -106,12 +121,20 @@ export default function CenariosPage() {
     secao_id: "" as string | null,
     centro_custo_id: "" as string | null,
     tabela_salarial_id: "" as string | null,
+    cenario_secao_id: null as string | null,
     regime: "CLT" as 'CLT' | 'PJ',
     qtd_jan: 0, qtd_fev: 0, qtd_mar: 0, qtd_abr: 0,
     qtd_mai: 0, qtd_jun: 0, qtd_jul: 0, qtd_ago: 0,
     qtd_set: 0, qtd_out: 0, qtd_nov: 0, qtd_dez: 0,
     salario_override: null as number | null,
     span: null as number | null,
+    fator_pa: 1,
+    tipo_calculo: "manual" as 'manual' | 'span' | 'rateio',
+    span_ratio: null as number | null,
+    span_funcoes_base_ids: null as string[] | null,
+    rateio_grupo_id: null as string | null,
+    rateio_percentual: null as number | null,
+    rateio_qtd_total: null as number | null,
     observacao: "",
     ativo: true,
   });
@@ -172,13 +195,8 @@ export default function CenariosPage() {
   const carregarDetalhes = async (cenarioId: string) => {
     if (!token) return;
     setLoadingDetalhes(true);
-    setCustos(null);
     try {
-      const [premissasData, quadroData] = await Promise.all([
-        cenariosApi.getPremissas(token, cenarioId),
-        cenariosApi.getQuadro(token, cenarioId),
-      ]);
-      setPremissas(premissasData);
+      const quadroData = await cenariosApi.getQuadro(token, cenarioId);
       setQuadro(quadroData);
     } catch (error) {
       console.error("Erro ao carregar detalhes:", error);
@@ -293,16 +311,6 @@ export default function CenariosPage() {
     }
   };
 
-  const handleUpdatePremissa = async (premissaId: string, campo: string, valor: number) => {
-    if (!token || !cenarioSelecionado) return;
-    try {
-      await cenariosApi.updatePremissa(token, cenarioSelecionado.id, premissaId, { [campo]: valor });
-      carregarDetalhes(cenarioSelecionado.id);
-    } catch (error) {
-      console.error("Erro ao atualizar premissa:", error);
-    }
-  };
-
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'APROVADO': return <CheckCircle className="h-4 w-4 text-green-500" />;
@@ -328,19 +336,6 @@ export default function CenariosPage() {
 
   const handleEditarCenario = (cenario: Cenario) => {
     setCenarioSelecionado(cenario);
-  };
-
-  const carregarCustos = async () => {
-    if (!cenarioSelecionado || !token) return;
-    setLoadingCustos(true);
-    try {
-      const data = await cenariosApi.calcularCustos(token, cenarioSelecionado.id);
-      setCustos(data);
-    } catch (error) {
-      console.error("Erro ao calcular custos:", error);
-    } finally {
-      setLoadingCustos(false);
-    }
   };
 
   // Se um cenário está selecionado, mostrar tela de parametrização
@@ -399,42 +394,20 @@ export default function CenariosPage() {
           {/* Abas */}
           <div className="shrink-0 flex gap-1 border-b bg-muted/30 rounded-t-lg px-2 overflow-x-auto">
             <button
-              onClick={() => setAbaAtiva('informacoes')}
+              onClick={() => setAbaAtiva('estrutura')}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                abaAtiva === 'informacoes'
-                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Building2 className="h-4 w-4" />
-              Informações
-            </button>
-            <button
-              onClick={() => setAbaAtiva('configuracao')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                abaAtiva === 'configuracao'
+                abaAtiva === 'estrutura'
                   ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
               <Settings className="h-4 w-4" />
-              Configuração
+              Capacity
             </button>
             <button
-              onClick={() => setAbaAtiva('funcoes')}
+              onClick={() => setAbaAtiva('premissas')}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                abaAtiva === 'funcoes'
-                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Users className="h-4 w-4" />
-              Funções
-            </button>
-            <button
-              onClick={() => setAbaAtiva('premissas-funcao')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                abaAtiva === 'premissas-funcao'
+                abaAtiva === 'premissas'
                   ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
@@ -455,18 +428,26 @@ export default function CenariosPage() {
               <Badge variant="secondary" className="text-[10px] ml-1">{quadro.length}</Badge>
             </button>
             <button
-              onClick={() => {
-                setAbaAtiva('custos');
-                if (!custos) carregarCustos();
-              }}
+              onClick={() => setAbaAtiva('tecnologia')}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                abaAtiva === 'custos'
+                abaAtiva === 'tecnologia'
                   ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              <DollarSign className="h-4 w-4" />
-              Custos
+              <Server className="h-4 w-4" />
+              Tecnologia
+            </button>
+            <button
+              onClick={() => setAbaAtiva('dre')}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                abaAtiva === 'dre'
+                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <FileEdit className="h-4 w-4" />
+              DRE
             </button>
           </div>
 
@@ -477,206 +458,44 @@ export default function CenariosPage() {
                 <Skeleton className="h-8 w-64" />
                 <Skeleton className="h-48 w-full" />
               </div>
-            ) : abaAtiva === 'informacoes' ? (
-              <div className="h-full overflow-auto p-6">
-                <div className="mb-4">
-                  <h2 className="section-title">Informações do Cenário</h2>
-                  <p className="page-subtitle">Dados básicos e configurações gerais</p>
+            ) : abaAtiva === 'estrutura' ? (
+              /* Layout Master-Detail: Árvore à esquerda, Painel de detalhes à direita */
+              <div className="h-full flex">
+                {/* Painel Esquerdo: Árvore de Navegação */}
+                <div className="w-80 border-r bg-muted/10 flex-shrink-0">
+                  <MasterDetailTree
+                    cenarioId={cenarioSelecionado.id}
+                    onNodeSelect={setSelectedNode}
+                    onSecoesLoaded={setTodasSecoesCenario}
+                    selectedSecaoId={selectedNode?.secao?.id}
+                  />
                 </div>
                 
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm">Dados do Cenário</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="filter-label">Nome</label>
-                        <p className="text-sm font-medium">{cenarioSelecionado.nome}</p>
-                      </div>
-                      <div>
-                        <label className="filter-label">Código</label>
-                        <p className="text-sm font-mono">{cenarioSelecionado.codigo}</p>
-                      </div>
-                      <div>
-                        <label className="filter-label">Período</label>
-                        <p className="text-sm">
-                          {cenarioSelecionado.mes_inicio.toString().padStart(2, '0')}/{cenarioSelecionado.ano_inicio} a{" "}
-                          {cenarioSelecionado.mes_fim.toString().padStart(2, '0')}/{cenarioSelecionado.ano_fim}
-                        </p>
-                      </div>
-                      <div>
-                        <label className="filter-label">Status</label>
-                        <div className="mt-1">
-                          {getStatusBadge(cenarioSelecionado.status)}
-                        </div>
-                      </div>
-                      {cenarioSelecionado.descricao && (
-                        <div className="col-span-2">
-                          <label className="filter-label">Descrição</label>
-                          <p className="text-sm text-muted-foreground">{cenarioSelecionado.descricao}</p>
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            ) : abaAtiva === 'configuracao' ? (
-              <div className="h-full overflow-auto p-6">
-                <div className="mb-4">
-                  <h2 className="section-title">Configuração do Cenário</h2>
-                  <p className="page-subtitle">Configure Cliente, Empresas e Seção (Projeto)</p>
-                </div>
-                
-                <div className="space-y-6">
-                  {/* Cliente NW */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">Cliente (NW)</CardTitle>
-                      <CardDescription>Selecione o cliente do banco NW</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <ClienteNWSelector
-                        value={cenarioSelecionado.cliente_nw_codigo || undefined}
-                        onValueChange={async (codigo) => {
-                          if (!token) return;
-                          try {
-                            await cenariosApi.atualizar(token, cenarioSelecionado.id, {
-                              cliente_nw_codigo: codigo
-                            });
-                            // Atualizar o cenário selecionado com o novo cliente
-                            setCenarioSelecionado({
-                              ...cenarioSelecionado,
-                              cliente_nw_codigo: codigo
-                            });
-                            // Também atualizar na lista de cenários
-                            setCenarios(prev => prev.map(c => 
-                              c.id === cenarioSelecionado.id 
-                                ? { ...c, cliente_nw_codigo: codigo }
-                                : c
-                            ));
-                          } catch (error: any) {
-                            alert(error.message || "Erro ao atualizar cliente");
-                          }
-                        }}
-                      />
-                    </CardContent>
-                  </Card>
-
-                  {/* Empresas */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">Empresas</CardTitle>
-                      <CardDescription>Selecione as empresas para este cenário</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {empresas.length === 0 ? (
-                        <div className="text-center py-4">
-                          <p className="text-xs text-muted-foreground mb-2">Nenhuma empresa cadastrada</p>
-                          <p className="text-[10px] text-muted-foreground">
-                            Cadastre empresas em: Cadastros → Empresas
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2 max-h-64 overflow-y-auto border rounded-md p-3 bg-background">
-                          {empresas
-                            .filter(emp => emp.ativo !== false)
-                            .map((emp) => {
-                              const isSelected = cenarioSelecionado.empresas?.some(e => e.id === emp.id) || false;
-                              return (
-                                <label key={emp.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/50 p-2 rounded">
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    onChange={async (e) => {
-                                      if (!token) return;
-                                      try {
-                                        const currentEmpresas = cenarioSelecionado.empresas?.map(e => e.id) || [];
-                                        let novasEmpresas: string[];
-                                        if (e.target.checked) {
-                                          novasEmpresas = [...currentEmpresas, emp.id];
-                                        } else {
-                                          novasEmpresas = currentEmpresas.filter(id => id !== emp.id);
-                                        }
-                                        
-                                        // Atualizar via API - usar tipo correto
-                                        await cenariosApi.atualizar(token, cenarioSelecionado.id, {
-                                          empresa_ids: novasEmpresas
-                                        } as any);
-                                        await carregarDetalhes(cenarioSelecionado.id);
-                                      } catch (error: any) {
-                                        alert(error.message || "Erro ao atualizar empresas");
-                                      }
-                                    }}
-                                    className="rounded"
-                                  />
-                                  <span className="flex-1">{emp.nome_fantasia || emp.razao_social}</span>
-                                  <span className="text-xs text-muted-foreground">({emp.codigo})</span>
-                                </label>
-                              );
-                            })}
-                        </div>
-                      )}
-                      <p className="text-xs text-muted-foreground mt-2">
-                        {empresas.length > 0 
-                          ? `${empresas.filter(e => e.ativo !== false).length} empresa${empresas.filter(e => e.ativo !== false).length !== 1 ? 's' : ''} disponível${empresas.filter(e => e.ativo !== false).length !== 1 ? 'is' : ''}`
-                          : "Cadastre empresas primeiro"}
+                {/* Painel Direito: Detalhes / Capacity Planning */}
+                <div className="flex-1 overflow-auto">
+                  {selectedNode?.type === 'secao' && selectedNode.secao ? (
+                    <CapacityPlanningPanel
+                      cenarioId={cenarioSelecionado.id}
+                      empresa={selectedNode.empresa}
+                      cliente={selectedNode.cliente!}
+                      secao={selectedNode.secao}
+                      todasSecoes={todasSecoescentario}
+                      anoInicio={cenarioSelecionado.ano_inicio}
+                      mesInicio={cenarioSelecionado.mes_inicio}
+                      anoFim={cenarioSelecionado.ano_fim}
+                      mesFim={cenarioSelecionado.mes_fim}
+                    />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
+                      <Settings className="h-12 w-12 mb-4 opacity-30" />
+                      <h3 className="text-lg font-medium mb-2">Selecione uma seção</h3>
+                      <p className="text-sm max-w-md text-center">
+                        Navegue pela estrutura à esquerda e clique em uma seção para configurar o quadro de pessoal
                       </p>
-                    </CardContent>
-                  </Card>
-
-                  {/* Seção (Projeto) */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">Seção (Projeto)</CardTitle>
-                      <CardDescription>Selecione a seção que será o projeto deste cenário</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {secoes.length === 0 ? (
-                        <div className="text-center py-4">
-                          <p className="text-xs text-muted-foreground mb-2">Nenhuma seção cadastrada</p>
-                          <p className="text-[10px] text-muted-foreground">
-                            Cadastre seções em: Cadastros → Seções
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <Select
-                            value={""}
-                            onValueChange={(secaoId) => {
-                              // TODO: Implementar quando adicionar campo secao_id ao Cenario
-                              console.log("Seção selecionada:", secaoId);
-                            }}
-                          >
-                            <SelectTrigger className="h-8 text-sm">
-                              <SelectValue placeholder="Selecione a seção (projeto)..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {secoes
-                                .filter(sec => sec.ativo !== false)
-                                .map((sec) => (
-                                  <SelectItem key={sec.id} value={sec.id}>
-                                    {sec.nome} ({sec.codigo})
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            A seção selecionada será usada como projeto padrão para as posições do quadro de pessoal
-                          </p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
+                    </div>
+                  )}
                 </div>
               </div>
-            ) : abaAtiva === 'funcoes' ? (
-              <FuncoesQuantidadesTab
-                cenarioId={cenarioSelecionado.id}
-                funcoes={funcoes}
-                quadro={quadro}
-                onQuadroChange={() => carregarDetalhes(cenarioSelecionado.id)}
-              />
             ) : abaAtiva === 'premissas-funcao' ? (
               <PremissasFuncaoMesGrid
                 cenarioId={cenarioSelecionado.id}
@@ -687,89 +506,43 @@ export default function CenariosPage() {
                 mesFim={cenarioSelecionado.mes_fim}
               />
             ) : abaAtiva === 'premissas' ? (
-              <div className="p-6 h-full overflow-auto">
-                <div className="mb-4">
-                  <h2 className="section-title">Premissas e Índices</h2>
-                  <p className="page-subtitle">Defina os índices de ineficiência e premissas do cenário</p>
+              <div className="h-full flex">
+                {/* Painel Esquerdo: Árvore de navegação com Funções */}
+                <div className="w-72 border-r bg-muted/5 flex flex-col">
+                  <div className="p-3 border-b bg-muted/10">
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Estrutura / Funções</h3>
+                  </div>
+                  <PremissasTree
+                    cenarioId={cenarioSelecionado.id}
+                    onNodeSelect={setSelectedNodePremissas}
+                  />
                 </div>
                 
-                {premissas.length === 0 ? (
-                  <div className="empty-state">
-                    <Settings className="empty-state-icon" />
-                    <p className="empty-state-title">Nenhuma premissa configurada</p>
-                    <p className="empty-state-description">As premissas são criadas automaticamente ao criar o cenário</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                    {premissas.map((premissa) => (
-                      <Card key={premissa.id} className="shadow-sm">
-                        <CardContent className="p-4 space-y-4">
-                          <div className="form-field">
-                            <label className="filter-label">Absenteísmo (%)</label>
-                            <Input
-                              type="number"
-                              step="0.1"
-                              value={premissa.absenteismo}
-                              onChange={(e) => handleUpdatePremissa(premissa.id, 'absenteismo', parseFloat(e.target.value) || 0)}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                          <div className="form-field">
-                            <label className="filter-label">Turnover (%)</label>
-                            <Input
-                              type="number"
-                              step="0.1"
-                              value={premissa.turnover}
-                              onChange={(e) => handleUpdatePremissa(premissa.id, 'turnover', parseFloat(e.target.value) || 0)}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                          <div className="form-field">
-                            <label className="filter-label">Férias Índice (%)</label>
-                            <Input
-                              type="number"
-                              step="0.01"
-                              value={premissa.ferias_indice}
-                              onChange={(e) => handleUpdatePremissa(premissa.id, 'ferias_indice', parseFloat(e.target.value) || 0)}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                          <div className="form-field">
-                            <label className="filter-label">Dias Treinamento</label>
-                            <Input
-                              type="number"
-                              value={premissa.dias_treinamento}
-                              onChange={(e) => handleUpdatePremissa(premissa.id, 'dias_treinamento', parseInt(e.target.value) || 0)}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                          <div className="form-field">
-                            <label className="filter-label">Reajuste (%)</label>
-                            <Input
-                              type="number"
-                              step="0.1"
-                              value={premissa.reajuste_percentual}
-                              onChange={(e) => handleUpdatePremissa(premissa.id, 'reajuste_percentual', parseFloat(e.target.value) || 0)}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                          <div className="form-field">
-                            <label className="filter-label">Dissídio Mês</label>
-                            <Input
-                              type="number"
-                              min="1"
-                              max="12"
-                              value={premissa.dissidio_mes || ""}
-                              onChange={(e) => handleUpdatePremissa(premissa.id, 'dissidio_mes', parseInt(e.target.value) || 0)}
-                              className="h-8 text-sm"
-                              placeholder="1-12"
-                            />
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                )}
+                {/* Painel Direito: Editor de Premissas por Função */}
+                <div className="flex-1 overflow-auto">
+                  {selectedNodePremissas?.type === 'funcao' && selectedNodePremissas.funcao && selectedNodePremissas.quadroItem ? (
+                    <PremissasFuncaoGridPanel
+                      cenarioId={cenarioSelecionado.id}
+                      empresa={selectedNodePremissas.empresa}
+                      cliente={selectedNodePremissas.cliente!}
+                      secao={selectedNodePremissas.secao!}
+                      funcao={selectedNodePremissas.funcao}
+                      quadroItem={selectedNodePremissas.quadroItem}
+                      anoInicio={cenarioSelecionado.ano_inicio}
+                      mesInicio={cenarioSelecionado.mes_inicio}
+                      anoFim={cenarioSelecionado.ano_fim}
+                      mesFim={cenarioSelecionado.mes_fim}
+                    />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
+                      <User className="h-12 w-12 mb-4 opacity-30" />
+                      <h3 className="text-lg font-medium mb-2">Selecione uma função</h3>
+                      <p className="text-sm max-w-md text-center">
+                        Navegue pela estrutura à esquerda, expanda uma seção e clique em uma <strong>função</strong> para configurar as premissas por mês
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : abaAtiva === 'quadro' ? (
               <div className="h-full flex flex-col">
@@ -786,12 +559,20 @@ export default function CenariosPage() {
                       secao_id: null,
                       centro_custo_id: null,
                       tabela_salarial_id: null,
+                      cenario_secao_id: null,
                       regime: "CLT",
                       qtd_jan: 0, qtd_fev: 0, qtd_mar: 0, qtd_abr: 0,
                       qtd_mai: 0, qtd_jun: 0, qtd_jul: 0, qtd_ago: 0,
                       qtd_set: 0, qtd_out: 0, qtd_nov: 0, qtd_dez: 0,
                       salario_override: null,
                       span: null,
+                      fator_pa: 1,
+                      tipo_calculo: "manual",
+                      span_ratio: null,
+                      span_funcoes_base_ids: null,
+                      rateio_grupo_id: null,
+                      rateio_percentual: null,
+                      rateio_qtd_total: null,
                       observacao: "",
                       ativo: true,
                     });
@@ -870,6 +651,7 @@ export default function CenariosPage() {
                                     secao_id: posicao.secao_id,
                                     centro_custo_id: posicao.centro_custo_id,
                                     tabela_salarial_id: posicao.tabela_salarial_id,
+                                    cenario_secao_id: posicao.cenario_secao_id,
                                     regime: posicao.regime,
                                     qtd_jan: posicao.qtd_jan,
                                     qtd_fev: posicao.qtd_fev,
@@ -885,6 +667,13 @@ export default function CenariosPage() {
                                     qtd_dez: posicao.qtd_dez,
                                     salario_override: posicao.salario_override,
                                     span: posicao.span,
+                                    fator_pa: posicao.fator_pa,
+                                    tipo_calculo: posicao.tipo_calculo,
+                                    span_ratio: posicao.span_ratio,
+                                    span_funcoes_base_ids: posicao.span_funcoes_base_ids,
+                                    rateio_grupo_id: posicao.rateio_grupo_id,
+                                    rateio_percentual: posicao.rateio_percentual,
+                                    rateio_qtd_total: posicao.rateio_qtd_total,
                                     observacao: posicao.observacao || "",
                                     ativo: posicao.ativo,
                                   });
@@ -904,138 +693,45 @@ export default function CenariosPage() {
                   )}
                 </div>
               </div>
-            ) : abaAtiva === 'custos' ? (
-              <div className="h-full overflow-auto p-6">
-                <div className="mb-4">
-                  <h2 className="section-title">Custos Calculados</h2>
-                  <p className="page-subtitle">Resumo de custos do cenário</p>
+            ) : abaAtiva === 'tecnologia' ? (
+              /* Layout Master-Detail para Tecnologia: Árvore à esquerda, Painel à direita */
+              <div className="h-full flex">
+                {/* Painel Esquerdo: Árvore de Navegação */}
+                <div className="w-80 border-r bg-muted/10 flex-shrink-0">
+                  <MasterDetailTree
+                    cenarioId={cenarioSelecionado.id}
+                    onNodeSelect={setSelectedNode}
+                    onSecoesLoaded={setTodasSecoesCenario}
+                    selectedSecaoId={selectedNode?.secao?.id}
+                  />
                 </div>
                 
-                {loadingCustos ? (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-4 gap-4">
-                      {[1,2,3,4].map(i => <Skeleton key={i} className="h-24" />)}
+                {/* Painel Direito: Alocações de Tecnologia */}
+                <div className="flex-1 overflow-auto">
+                  {selectedNode?.type === 'secao' && selectedNode.secao ? (
+                    <TecnologiaPanel
+                      cenarioId={cenarioSelecionado.id}
+                      secaoId={selectedNode.secao.id}
+                      secaoNome={selectedNode.secao.secao?.nome || 'Seção'}
+                    />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
+                      <Server className="h-12 w-12 mb-4 opacity-30" />
+                      <h3 className="text-lg font-medium mb-2">Selecione uma seção</h3>
+                      <p className="text-sm max-w-md text-center">
+                        Navegue pela estrutura à esquerda e clique em uma seção para gerenciar alocações de tecnologia
+                      </p>
                     </div>
-                    <Skeleton className="h-32" />
-                    <Skeleton className="h-48" />
-                  </div>
-                ) : !custos ? (
-                  <div className="empty-state">
-                    <AlertCircle className="empty-state-icon" />
-                    <p className="empty-state-title">Não foi possível calcular os custos</p>
-                    <p className="empty-state-description">Verifique se há posições no quadro de pessoal</p>
-                    <Button size="sm" variant="outline" onClick={carregarCustos} className="mt-4">
-                      Tentar novamente
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="space-y-6">
-                    {/* Cards de resumo */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                      <Card className="bg-blue-50 border-blue-200">
-                        <CardContent className="p-4">
-                          <p className="filter-label text-blue-600">Headcount Médio</p>
-                          <p className="text-3xl font-bold text-blue-700 mt-1">{custos.total_headcount_medio.toFixed(0)}</p>
-                        </CardContent>
-                      </Card>
-                      <Card className="bg-green-50 border-green-200">
-                        <CardContent className="p-4">
-                          <p className="filter-label text-green-600">Custo Mensal Médio</p>
-                          <p className="text-2xl font-bold text-green-700 mt-1 font-mono">
-                            {custos.custo_mensal_medio.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                          </p>
-                        </CardContent>
-                      </Card>
-                      <Card className="bg-amber-50 border-amber-200">
-                        <CardContent className="p-4">
-                          <p className="filter-label text-amber-600">Custo Total Anual</p>
-                          <p className="text-2xl font-bold text-amber-700 mt-1 font-mono">
-                            {custos.custo_total_anual.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                          </p>
-                        </CardContent>
-                      </Card>
-                      <Card className="bg-purple-50 border-purple-200">
-                        <CardContent className="p-4">
-                          <p className="filter-label text-purple-600">Funções</p>
-                          <p className="text-3xl font-bold text-purple-700 mt-1">{Object.keys(custos.custos_por_funcao).length}</p>
-                        </CardContent>
-                      </Card>
-                    </div>
-
-                    {/* Custos por mês */}
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm">Custo por Mês</CardTitle>
-                      </CardHeader>
-                      <CardContent className="p-0">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              {['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'].map((mes) => (
-                                <TableHead key={mes} className="text-center">{mes}</TableHead>
-                              ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            <TableRow>
-                              {[1,2,3,4,5,6,7,8,9,10,11,12].map((mes) => (
-                                <TableCell key={mes} className="text-center font-mono text-xs">
-                                  {(custos.custos_por_mes[mes] || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                                </TableCell>
-                              ))}
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </CardContent>
-                    </Card>
-
-                    {/* Custos por função */}
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm">Custo por Função</CardTitle>
-                      </CardHeader>
-                      <CardContent className="p-0">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Função</TableHead>
-                              <TableHead className="text-right">Custo Anual</TableHead>
-                              <TableHead className="w-48">Participação</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {Object.entries(custos.custos_por_funcao)
-                              .sort(([,a], [,b]) => b - a)
-                              .map(([funcao, valor]) => {
-                                const percentual = (valor / custos.custo_total_anual) * 100;
-                                return (
-                                  <TableRow key={funcao}>
-                                    <TableCell className="font-medium">{funcao}</TableCell>
-                                    <TableCell className="text-right font-mono">
-                                      {valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                    </TableCell>
-                                    <TableCell>
-                                      <div className="flex items-center gap-2">
-                                        <div className="flex-1 bg-muted rounded-full h-2">
-                                          <div 
-                                            className="bg-orange-500 h-2 rounded-full" 
-                                            style={{ width: `${percentual}%` }}
-                                          />
-                                        </div>
-                                        <span className="text-xs text-muted-foreground w-12 text-right">
-                                          {percentual.toFixed(1)}%
-                                        </span>
-                                      </div>
-                                    </TableCell>
-                                  </TableRow>
-                                );
-                              })}
-                          </TableBody>
-                        </Table>
-                      </CardContent>
-                    </Card>
-                  </div>
-                )}
+                  )}
+                </div>
+              </div>
+            ) : abaAtiva === 'dre' ? (
+              <div className="h-full overflow-auto">
+                <DREPanel
+                  cenarioId={cenarioSelecionado.id}
+                  anoInicio={cenarioSelecionado.ano_inicio}
+                  anoFim={cenarioSelecionado.ano_fim}
+                />
               </div>
             ) : null}
           </div>

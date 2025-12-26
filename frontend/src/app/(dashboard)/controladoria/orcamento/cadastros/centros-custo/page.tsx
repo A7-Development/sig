@@ -4,6 +4,31 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { 
   Plus, 
   Search, 
@@ -17,29 +42,33 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth-store";
 import { centrosCustoApi, totvsApi, type CentroCusto, type CentroCustoTotvs } from "@/lib/api/orcamento";
+import { useToast } from "@/hooks/use-toast";
 
 const TIPOS_CC = [
-  { value: "OPERACIONAL", label: "Operacional", color: "bg-emerald-100 text-emerald-600" },
-  { value: "ADMINISTRATIVO", label: "Administrativo", color: "bg-blue-100 text-blue-600" },
-  { value: "OVERHEAD", label: "Overhead", color: "bg-orange-100 text-orange-600" },
+  { value: "OPERACIONAL", label: "Operacional" },
+  { value: "ADMINISTRATIVO", label: "Administrativo" },
+  { value: "OVERHEAD", label: "Overhead" },
 ];
 
 export default function CentrosCustoPage() {
   const { accessToken: token } = useAuthStore();
+  const { toast } = useToast();
   const [centrosCusto, setCentrosCusto] = useState<CentroCusto[]>([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState("");
-  const [filtroTipo, setFiltroTipo] = useState("");
+  const [filtroTipo, setFiltroTipo] = useState("ALL");
+  const [apenasAtivos, setApenasAtivos] = useState(true);
   
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editando, setEditando] = useState<CentroCusto | null>(null);
+  const [salvando, setSalvando] = useState(false);
   
   const [formData, setFormData] = useState({
     codigo: "",
     nome: "",
     codigo_totvs: "",
-    tipo: "OPERACIONAL" as const,
+    tipo: "OPERACIONAL" as "OPERACIONAL" | "ADMINISTRATIVO" | "OVERHEAD",
     cliente: "",
     contrato: "",
     uf: "",
@@ -55,7 +84,14 @@ export default function CentrosCustoPage() {
 
   useEffect(() => {
     if (token) carregarDados();
-  }, [token]);
+  }, [token, apenasAtivos, filtroTipo]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (token) carregarDados();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [busca]);
 
   const carregarDados = async () => {
     if (!token) return;
@@ -63,11 +99,17 @@ export default function CentrosCustoPage() {
     try {
       const data = await centrosCustoApi.listar(token, { 
         busca: busca || undefined, 
-        tipo: filtroTipo || undefined 
+        tipo: filtroTipo !== "ALL" ? filtroTipo : undefined,
+        ativo: apenasAtivos,
       });
       setCentrosCusto(data);
     } catch (error) {
       console.error("Erro:", error);
+      toast({
+        title: "Erro ao carregar",
+        description: "Não foi possível carregar os centros de custo.",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -76,17 +118,33 @@ export default function CentrosCustoPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token) return;
+    setSalvando(true);
     try {
       if (editando) {
         await centrosCustoApi.atualizar(token, editando.id, formData);
+        toast({
+          title: "Centro de custo atualizado",
+          description: "Centro de custo atualizado com sucesso.",
+        });
       } else {
         await centrosCustoApi.criar(token, formData);
+        toast({
+          title: "Centro de custo criado",
+          description: "Centro de custo criado com sucesso.",
+        });
       }
       setShowForm(false);
       resetForm();
       carregarDados();
     } catch (error) {
       console.error("Erro:", error);
+      toast({
+        title: "Erro ao salvar",
+        description: "Não foi possível salvar o centro de custo.",
+        variant: "destructive",
+      });
+    } finally {
+      setSalvando(false);
     }
   };
 
@@ -118,9 +176,18 @@ export default function CentrosCustoPage() {
     if (!token || !confirm("Deseja excluir este centro de custo?")) return;
     try {
       await centrosCustoApi.excluir(token, id);
+      toast({
+        title: "Centro de custo excluído",
+        description: "Centro de custo excluído com sucesso.",
+      });
       carregarDados();
     } catch (error) {
       console.error("Erro:", error);
+      toast({
+        title: "Erro ao excluir",
+        description: "Não foi possível excluir o centro de custo.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -133,6 +200,11 @@ export default function CentrosCustoPage() {
       setCcsTotvs(data);
     } catch (error) {
       console.error("Erro:", error);
+      toast({
+        title: "Erro ao carregar TOTVS",
+        description: "Não foi possível carregar os centros de custo do TOTVS.",
+        variant: "destructive",
+      });
     } finally {
       setLoadingTotvs(false);
     }
@@ -143,12 +215,20 @@ export default function CentrosCustoPage() {
     setImportando(true);
     try {
       const resultado = await centrosCustoApi.importarTotvs(token, selectedTotvs, tipoImport);
-      alert(`Importados: ${resultado.importados}, Ignorados: ${resultado.ignorados}`);
+      toast({
+        title: "Importação concluída",
+        description: `Importados: ${resultado.importados}, Ignorados: ${resultado.ignorados}`,
+      });
       setShowImport(false);
       setSelectedTotvs([]);
       carregarDados();
     } catch (error) {
       console.error("Erro:", error);
+      toast({
+        title: "Erro ao importar",
+        description: "Não foi possível importar os centros de custo.",
+        variant: "destructive",
+      });
     } finally {
       setImportando(false);
     }
@@ -160,264 +240,340 @@ export default function CentrosCustoPage() {
     );
   };
 
-  const getTipoInfo = (tipo: string) => TIPOS_CC.find(t => t.value === tipo) || TIPOS_CC[0];
-
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="page-container">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Centros de Custo</h1>
-          <p className="text-muted-foreground">
+          <h1 className="page-title">Centros de Custo</h1>
+          <p className="text-sm text-muted-foreground">
             Objetos de custeio para alocação de custos
           </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={abrirImportacao}>
-            <Download className="h-4 w-4 mr-2" />
+            <Download className="size-4 mr-2" />
             Importar do TOTVS
           </Button>
           <Button onClick={() => { resetForm(); setShowForm(true); }}>
-            <Plus className="h-4 w-4 mr-2" />
+            <Plus className="size-4 mr-2" />
             Novo Centro de Custo
           </Button>
         </div>
       </div>
 
       <Card>
-        <CardContent className="pt-6">
-          <div className="flex gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por código, nome ou cliente..."
-                className="pl-10"
-                value={busca}
-                onChange={(e) => setBusca(e.target.value)}
-              />
-            </div>
-            <select
-              className="border rounded-md px-3 py-2"
-              value={filtroTipo}
-              onChange={(e) => setFiltroTipo(e.target.value)}
-            >
-              <option value="">Todos os tipos</option>
-              {TIPOS_CC.map(t => (
-                <option key={t.value} value={t.value}>{t.label}</option>
-              ))}
-            </select>
-            <Button variant="secondary" onClick={carregarDados}>Buscar</Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
         <CardHeader>
-          <CardTitle>Centros de Custo Cadastrados</CardTitle>
-          <CardDescription>{centrosCusto.length} registros</CardDescription>
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <CardTitle className="section-title">Lista de Centros de Custo</CardTitle>
+              <CardDescription>
+                {centrosCusto.length} registro(s) encontrado(s)
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-4">
+              <Select value={filtroTipo} onValueChange={setFiltroTipo}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Tipo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Todos os tipos</SelectItem>
+                  {TIPOS_CC.map((tipo) => (
+                    <SelectItem key={tipo.value} value={tipo.value}>
+                      {tipo.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="apenas-ativos"
+                  checked={apenasAtivos}
+                  onCheckedChange={(checked) => setApenasAtivos(checked === true)}
+                />
+                <Label htmlFor="apenas-ativos" className="text-sm cursor-pointer">
+                  Apenas ativos
+                </Label>
+              </div>
+              <div className="relative w-[300px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar centro de custo..."
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="size-6 animate-spin text-muted-foreground" />
             </div>
           ) : centrosCusto.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              Nenhum centro de custo cadastrado
+            <div className="empty-state">
+              <CircleDollarSign className="size-12 text-muted-foreground/50 mx-auto mb-4" />
+              <p className="text-muted-foreground">
+                {busca || filtroTipo !== "ALL" ? "Nenhum centro de custo encontrado" : "Nenhum centro de custo cadastrado"}
+              </p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {centrosCusto.map((cc) => {
-                const tipoInfo = getTipoInfo(cc.tipo);
-                return (
-                  <div
-                    key={cc.id}
-                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent/50"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${tipoInfo.color}`}>
-                        <CircleDollarSign className="h-5 w-5" />
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Código</TableHead>
+                  <TableHead>Nome</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Cliente</TableHead>
+                  <TableHead>Localização</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {centrosCusto.map((cc) => (
+                  <TableRow key={cc.id}>
+                    <TableCell className="font-mono text-xs">{cc.codigo}</TableCell>
+                    <TableCell className="font-semibold">{cc.nome}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">
+                        {TIPOS_CC.find(t => t.value === cc.tipo)?.label || cc.tipo}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {cc.cliente || "-"}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {cc.cidade && cc.uf ? `${cc.cidade}/${cc.uf}` : cc.uf || "-"}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {cc.ativo ? (
+                        <Badge variant="success" className="gap-1">
+                          <CheckCircle2 className="size-3" />
+                          Ativo
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="gap-1">
+                          <XCircle className="size-3" />
+                          Inativo
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => handleEdit(cc)}
+                        >
+                          <Edit2 className="size-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => handleDelete(cc.id)}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{cc.nome}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${tipoInfo.color}`}>
-                            {tipoInfo.label}
-                          </span>
-                          {cc.ativo ? (
-                            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                          ) : (
-                            <XCircle className="h-4 w-4 text-gray-400" />
-                          )}
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          {cc.codigo}
-                          {cc.cliente && ` • Cliente: ${cc.cliente}`}
-                          {cc.uf && ` • ${cc.cidade ? `${cc.cidade}/` : ""}${cc.uf}`}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="ghost" size="icon" onClick={() => handleEdit(cc)}>
-                        <Edit2 className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDelete(cc.id)}>
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>
 
-      {/* Modal Form */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-full max-w-lg max-h-[90vh] overflow-auto">
-            <CardHeader>
-              <CardTitle>{editando ? "Editar Centro de Custo" : "Novo Centro de Custo"}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium">Código *</label>
-                    <Input
-                      value={formData.codigo}
-                      onChange={(e) => setFormData({ ...formData, codigo: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium">Tipo *</label>
-                    <select
-                      className="w-full border rounded-md px-3 py-2"
-                      value={formData.tipo}
-                      onChange={(e) => setFormData({ ...formData, tipo: e.target.value as typeof formData.tipo })}
-                    >
-                      {TIPOS_CC.map(t => (
-                        <option key={t.value} value={t.value}>{t.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Nome *</label>
-                  <Input
-                    value={formData.nome}
-                    onChange={(e) => setFormData({ ...formData, nome: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium">Cliente</label>
-                    <Input
-                      value={formData.cliente}
-                      onChange={(e) => setFormData({ ...formData, cliente: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium">Contrato</label>
-                    <Input
-                      value={formData.contrato}
-                      onChange={(e) => setFormData({ ...formData, contrato: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium">UF</label>
-                    <Input
-                      value={formData.uf}
-                      onChange={(e) => setFormData({ ...formData, uf: e.target.value.toUpperCase() })}
-                      maxLength={2}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium">Cidade</label>
-                    <Input
-                      value={formData.cidade}
-                      onChange={(e) => setFormData({ ...formData, cidade: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={formData.ativo}
-                    onChange={(e) => setFormData({ ...formData, ativo: e.target.checked })}
-                  />
-                  <label className="text-sm">Ativo</label>
-                </div>
-                <div className="flex gap-2 justify-end">
-                  <Button type="button" variant="outline" onClick={() => setShowForm(false)}>Cancelar</Button>
-                  <Button type="submit">Salvar</Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Modal Import */}
-      {showImport && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
-            <CardHeader>
-              <CardTitle>Importar do TOTVS</CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 overflow-auto space-y-4">
+      {/* Diálogo de Formulário */}
+      <Dialog open={showForm} onOpenChange={setShowForm}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {editando ? "Editar Centro de Custo" : "Novo Centro de Custo"}
+            </DialogTitle>
+            <DialogDescription>
+              Preencha os dados do centro de custo
+            </DialogDescription>
+          </DialogHeader>
+          
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-sm font-medium">Tipo do CC importado</label>
-                <select
-                  className="w-full border rounded-md px-3 py-2"
-                  value={tipoImport}
-                  onChange={(e) => setTipoImport(e.target.value)}
-                >
-                  {TIPOS_CC.map(t => (
-                    <option key={t.value} value={t.value}>{t.label}</option>
-                  ))}
-                </select>
+                <Label htmlFor="codigo">Código *</Label>
+                <Input
+                  id="codigo"
+                  value={formData.codigo}
+                  onChange={(e) => setFormData({ ...formData, codigo: e.target.value })}
+                  required
+                />
               </div>
-              {loadingTotvs ? (
-                <Loader2 className="h-8 w-8 animate-spin mx-auto" />
-              ) : (
-                <div className="space-y-2 max-h-60 overflow-auto">
-                  {ccsTotvs.map((cc) => (
-                    <div
-                      key={cc.codigo}
-                      className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer ${
-                        selectedTotvs.includes(cc.codigo) ? "bg-emerald-50 border-emerald-300" : "hover:bg-accent/50"
-                      }`}
-                      onClick={() => toggleSelectTotvs(cc.codigo)}
-                    >
-                      <input type="checkbox" checked={selectedTotvs.includes(cc.codigo)} onChange={() => {}} />
-                      <div>
-                        <p className="font-medium">{cc.nome || cc.codigo}</p>
-                        <p className="text-sm text-muted-foreground">Código: {cc.codigo}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-            <div className="p-4 border-t flex justify-between">
-              <span className="text-sm text-muted-foreground">{selectedTotvs.length} selecionados</span>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setShowImport(false)}>Cancelar</Button>
-                <Button onClick={handleImportar} disabled={selectedTotvs.length === 0 || importando}>
-                  {importando && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  Importar
-                </Button>
+              <div>
+                <Label htmlFor="tipo">Tipo *</Label>
+                <Select
+                  value={formData.tipo}
+                  onValueChange={(value) => setFormData({ ...formData, tipo: value as typeof formData.tipo })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TIPOS_CC.map(t => (
+                      <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
-          </Card>
-        </div>
-      )}
+
+            <div>
+              <Label htmlFor="nome">Nome *</Label>
+              <Input
+                id="nome"
+                value={formData.nome}
+                onChange={(e) => setFormData({ ...formData, nome: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="cliente">Cliente</Label>
+                <Input
+                  id="cliente"
+                  value={formData.cliente}
+                  onChange={(e) => setFormData({ ...formData, cliente: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="contrato">Contrato</Label>
+                <Input
+                  id="contrato"
+                  value={formData.contrato}
+                  onChange={(e) => setFormData({ ...formData, contrato: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="uf">UF</Label>
+                <Input
+                  id="uf"
+                  value={formData.uf}
+                  onChange={(e) => setFormData({ ...formData, uf: e.target.value.toUpperCase() })}
+                  maxLength={2}
+                />
+              </div>
+              <div>
+                <Label htmlFor="cidade">Cidade</Label>
+                <Input
+                  id="cidade"
+                  value={formData.cidade}
+                  onChange={(e) => setFormData({ ...formData, cidade: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="ativo"
+                checked={formData.ativo}
+                onCheckedChange={(checked) => setFormData({ ...formData, ativo: checked === true })}
+              />
+              <Label htmlFor="ativo" className="cursor-pointer">Ativo</Label>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4">
+              <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={salvando}>
+                {salvando && <Loader2 className="size-4 mr-2 animate-spin" />}
+                {editando ? "Atualizar" : "Criar"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo de Importação */}
+      <Dialog open={showImport} onOpenChange={setShowImport}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Importar do TOTVS</DialogTitle>
+            <DialogDescription>
+              Selecione os centros de custo para importar
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
+            <div>
+              <Label>Tipo do CC importado</Label>
+              <Select value={tipoImport} onValueChange={setTipoImport}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TIPOS_CC.map(t => (
+                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {loadingTotvs ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="size-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <div className="flex-1 overflow-auto border rounded-md">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12"></TableHead>
+                      <TableHead>Código</TableHead>
+                      <TableHead>Nome</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {ccsTotvs.map((cc) => (
+                      <TableRow 
+                        key={cc.codigo}
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => toggleSelectTotvs(cc.codigo)}
+                      >
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedTotvs.includes(cc.codigo)}
+                            onCheckedChange={() => toggleSelectTotvs(cc.codigo)}
+                          />
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">{cc.codigo}</TableCell>
+                        <TableCell>{cc.nome || cc.codigo}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-between items-center pt-4 border-t">
+            <span className="text-sm text-muted-foreground">{selectedTotvs.length} selecionados</span>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowImport(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleImportar} disabled={selectedTotvs.length === 0 || importando}>
+                {importando && <Loader2 className="size-4 mr-2 animate-spin" />}
+                Importar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
-

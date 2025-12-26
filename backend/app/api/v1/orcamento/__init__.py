@@ -10,6 +10,9 @@ from .secoes import router as secoes_router
 from .centros_custo import router as centros_custo_router
 from .feriados import router as feriados_router
 from .funcoes import router as funcoes_router
+from .fornecedores import router as fornecedores_router
+from .produtos import router as produtos_router
+from .alocacoes import router as alocacoes_router
 from .empresas import router as empresas_router
 from .tributos import router as tributos_router
 from .encargos import router as encargos_router
@@ -18,6 +21,7 @@ from .politicas_beneficio import router as politicas_beneficio_router
 from .faixas_salariais import router as faixas_salariais_router
 from .tabela_salarial import router as tabela_salarial_router
 from .cenarios import router as cenarios_router
+from .custos import router as custos_router
 
 router = APIRouter(prefix="/orcamento", tags=["Orçamento"])
 
@@ -29,6 +33,9 @@ router.include_router(secoes_router)
 router.include_router(centros_custo_router)
 router.include_router(feriados_router)
 router.include_router(funcoes_router)
+router.include_router(fornecedores_router)
+router.include_router(produtos_router)
+router.include_router(alocacoes_router)
 router.include_router(empresas_router)
 router.include_router(tributos_router)
 router.include_router(encargos_router)
@@ -37,4 +44,5 @@ router.include_router(politicas_beneficio_router)
 router.include_router(faixas_salariais_router)
 router.include_router(tabela_salarial_router)
 router.include_router(cenarios_router)
+router.include_router(custos_router)
 

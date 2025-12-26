@@ -62,6 +62,9 @@ export interface Funcao {
   codigo_totvs: string | null;
   nome: string;
   cbo: string | null;
+  jornada_mensal: number;
+  is_home_office: boolean;
+  is_pj: boolean;
   ativo: boolean;
   created_at: string;
   updated_at: string;
@@ -642,21 +645,6 @@ export interface Cenario {
   }[];
 }
 
-export interface Premissa {
-  id: string;
-  cenario_id: string;
-  absenteismo: number;
-  turnover: number;
-  ferias_indice: number;
-  dias_treinamento: number;
-  reajuste_data: string | null;
-  reajuste_percentual: number;
-  dissidio_mes: number | null;
-  dissidio_percentual: number;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface QuadroPessoal {
   id: string;
   cenario_id: string;
@@ -664,6 +652,7 @@ export interface QuadroPessoal {
   secao_id: string | null;
   centro_custo_id: string | null;
   tabela_salarial_id: string | null;
+  cenario_secao_id: string | null;  // Referência para CenarioSecao (estrutura hierárquica)
   regime: 'CLT' | 'PJ';
   qtd_jan: number;
   qtd_fev: number;
@@ -679,6 +668,20 @@ export interface QuadroPessoal {
   qtd_dez: number;
   salario_override: number | null;
   span: number | null;
+  fator_pa: number;
+  
+  // Tipo de cálculo: manual, span, rateio
+  tipo_calculo: 'manual' | 'span' | 'rateio';
+  
+  // Campos para SPAN
+  span_ratio: number | null;
+  span_funcoes_base_ids: string[] | null;
+  
+  // Campos para RATEIO
+  rateio_grupo_id: string | null;
+  rateio_percentual: number | null;
+  rateio_qtd_total: number | null;
+  
   observacao: string | null;
   ativo: boolean;
   created_at: string;
@@ -700,6 +703,54 @@ export interface FuncaoSpan {
   funcao?: { id: string; codigo: string; nome: string } | null;
 }
 
+// ============================================
+// CenarioCliente e CenarioSecao (Fase 1)
+// ============================================
+
+export interface CenarioSecao {
+  id: string;
+  cenario_cliente_id: string;
+  secao_id: string;
+  // Nota: fator_pa foi movido para QuadroPessoal
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+  secao?: Secao;
+}
+
+export interface CenarioCliente {
+  id: string;
+  cenario_empresa_id: string;
+  cliente_nw_codigo: string;
+  nome_cliente: string | null;
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+  secoes?: CenarioSecao[];
+}
+
+export interface CenarioEmpresa {
+  id: string;
+  cenario_id: string;
+  empresa_id: string;
+  created_at: string;
+  empresa?: Empresa;
+  clientes?: CenarioCliente[];
+}
+
+export interface CenarioEmpresaCreate {
+  empresa_id: string;
+}
+
+export interface CenarioClienteCreate {
+  cliente_nw_codigo: string;
+  nome_cliente?: string;
+}
+
+export interface CenarioSecaoCreate {
+  secao_id: string;
+}
+
 export interface FuncaoSpanCreate {
   cenario_id: string;
   funcao_id: string;
@@ -711,10 +762,12 @@ export interface FuncaoSpanCreate {
 export interface PremissaFuncaoMes {
   id: string;
   cenario_id: string;
+  cenario_secao_id?: string | null;
   funcao_id: string;
   mes: number;
   ano: number;
   absenteismo: number;
+  abs_pct_justificado: number;  // % do ABS que e justificado
   turnover: number;
   ferias_indice: number;
   dias_treinamento: number;
@@ -725,10 +778,12 @@ export interface PremissaFuncaoMes {
 
 export interface PremissaFuncaoMesCreate {
   cenario_id: string;
+  cenario_secao_id?: string | null;
   funcao_id: string;
   mes: number;
   ano: number;
   absenteismo: number;
+  abs_pct_justificado: number;
   turnover: number;
   ferias_indice: number;
   dias_treinamento: number;
@@ -761,13 +816,6 @@ export const cenariosApi = {
   duplicar: (token: string, id: string, novoCodigo: string, novoNome: string) =>
     api.post<Cenario>(`/api/v1/orcamento/cenarios/${id}/duplicar?novo_codigo=${encodeURIComponent(novoCodigo)}&novo_nome=${encodeURIComponent(novoNome)}`, {}, token),
   
-  // Premissas
-  getPremissas: (token: string, cenarioId: string) =>
-    api.get<Premissa[]>(`/api/v1/orcamento/cenarios/${cenarioId}/premissas`, token),
-  
-  updatePremissa: (token: string, cenarioId: string, premissaId: string, data: Partial<Premissa>) =>
-    api.put<Premissa>(`/api/v1/orcamento/cenarios/${cenarioId}/premissas/${premissaId}`, data, token),
-  
   // Quadro de Pessoal
   getQuadro: (token: string, cenarioId: string, params?: { funcao_id?: string; secao_id?: string; centro_custo_id?: string; regime?: string }) => {
     const queryParams = new URLSearchParams();
@@ -782,10 +830,22 @@ export const cenariosApi = {
   addPosicao: (token: string, cenarioId: string, data: Omit<QuadroPessoal, 'id' | 'created_at' | 'updated_at' | 'funcao' | 'secao' | 'centro_custo'>) =>
     api.post<QuadroPessoal>(`/api/v1/orcamento/cenarios/${cenarioId}/quadro`, data, token),
   
+  // Alias para addPosicao (usado no CapacityPlanningPanel)
+  addQuadro: (token: string, cenarioId: string, data: Omit<QuadroPessoal, 'id' | 'created_at' | 'updated_at' | 'funcao' | 'secao' | 'centro_custo'>) =>
+    api.post<QuadroPessoal>(`/api/v1/orcamento/cenarios/${cenarioId}/quadro`, data, token),
+  
   updatePosicao: (token: string, cenarioId: string, posicaoId: string, data: Partial<QuadroPessoal>) =>
     api.put<QuadroPessoal>(`/api/v1/orcamento/cenarios/${cenarioId}/quadro/${posicaoId}`, data, token),
   
+  // Alias para updatePosicao
+  updateQuadro: (token: string, cenarioId: string, posicaoId: string, data: Partial<QuadroPessoal>) =>
+    api.put<QuadroPessoal>(`/api/v1/orcamento/cenarios/${cenarioId}/quadro/${posicaoId}`, data, token),
+  
   deletePosicao: (token: string, cenarioId: string, posicaoId: string) =>
+    api.delete(`/api/v1/orcamento/cenarios/${cenarioId}/quadro/${posicaoId}`, token),
+  
+  // Alias para deletePosicao
+  deleteQuadro: (token: string, cenarioId: string, posicaoId: string) =>
     api.delete(`/api/v1/orcamento/cenarios/${cenarioId}/quadro/${posicaoId}`, token),
   
   // Cálculos
@@ -839,6 +899,43 @@ export const cenariosApi = {
   
   bulkPremissasFuncao: (token: string, cenarioId: string, premissas: PremissaFuncaoMesCreate[]) =>
     api.post<PremissaFuncaoMes[]>(`/api/v1/orcamento/cenarios/${cenarioId}/premissas-funcao/bulk`, premissas, token),
+  
+  // ============================================
+  // CenarioCliente - Clientes do cenário
+  // ============================================
+  
+  // ============================================
+  // CenarioEmpresa - Empresas do cenário (hierarquia Master-Detail)
+  // ============================================
+  
+  getEmpresas: (token: string, cenarioId: string) =>
+    api.get<CenarioEmpresa[]>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas`, token),
+  
+  addEmpresa: (token: string, cenarioId: string, data: CenarioEmpresaCreate) =>
+    api.post<CenarioEmpresa>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas`, data, token),
+  
+  deleteEmpresa: (token: string, cenarioId: string, cenarioEmpresaId: string) =>
+    api.delete(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${cenarioEmpresaId}`, token),
+  
+  // ============================================
+  // CenarioCliente - Clientes de cada empresa
+  // ============================================
+  
+  addCliente: (token: string, cenarioId: string, cenarioEmpresaId: string, data: CenarioClienteCreate) =>
+    api.post<CenarioCliente>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${cenarioEmpresaId}/clientes`, data, token),
+  
+  deleteCliente: (token: string, cenarioId: string, cenarioEmpresaId: string, clienteId: string) =>
+    api.delete(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${cenarioEmpresaId}/clientes/${clienteId}`, token),
+  
+  // ============================================
+  // CenarioSecao - Seções de cada cliente
+  // ============================================
+  
+  addSecao: (token: string, cenarioId: string, cenarioEmpresaId: string, clienteId: string, data: CenarioSecaoCreate) =>
+    api.post<CenarioSecao>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${cenarioEmpresaId}/clientes/${clienteId}/secoes`, data, token),
+  
+  deleteSecao: (token: string, cenarioId: string, cenarioEmpresaId: string, clienteId: string, secaoId: string) =>
+    api.delete(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${cenarioEmpresaId}/clientes/${clienteId}/secoes/${secaoId}`, token),
 };
 
 // Types para cálculos
@@ -871,4 +968,370 @@ export interface OverheadResult {
     fator: number;
   }>;
 }
+
+// Tipos para o módulo de custos
+export interface TipoCusto {
+  id: string;
+  codigo: string;
+  nome: string;
+  descricao: string | null;
+  categoria: 'REMUNERACAO' | 'BENEFICIO' | 'ENCARGO' | 'PROVISAO' | 'PREMIO' | 'DESCONTO';
+  tipo_calculo: string;
+  conta_contabil_codigo: string | null;
+  conta_contabil_descricao: string | null;
+  incide_fgts: boolean;
+  incide_inss: boolean;
+  reflexo_ferias: boolean;
+  reflexo_13: boolean;
+  aliquota_padrao: number | null;
+  ordem: number;
+  ativo: boolean;
+}
+
+export interface CustoCalculado {
+  id: string;
+  cenario_id: string;
+  cenario_secao_id: string;
+  funcao_id: string;
+  faixa_id: string | null;
+  tipo_custo_id: string;
+  mes: number;
+  ano: number;
+  hc_base: number;
+  valor_base: number;
+  indice_aplicado: number;
+  valor_calculado: number;
+  memoria_calculo: Record<string, any> | null;
+  funcao?: { id: string; codigo: string; nome: string };
+  tipo_custo?: { id: string; codigo: string; nome: string; categoria: string };
+}
+
+export interface DRELinha {
+  conta_contabil_codigo: string;
+  conta_contabil_descricao: string;
+  conta_contabil_completa: string; // Formato "CODIGO - DESCRICAO"
+  tipo_custo_codigo: string | null;
+  tipo_custo_nome: string | null;
+  categoria: string;
+  valores_mensais: number[];
+  total: number;
+}
+
+export interface DREResponse {
+  cenario_id: string;
+  cenario_secao_id: string | null;
+  ano: number;
+  linhas: DRELinha[];
+  total_geral: number;
+}
+
+// API de Custos
+export const custosApi = {
+  // Tipos de custo (rubricas)
+  listarTipos: (token: string, categoria?: string) => {
+    const params = new URLSearchParams();
+    if (categoria) params.append('categoria', categoria);
+    return api.get<TipoCusto[]>(`/api/v1/orcamento/custos/tipos?${params}`, token);
+  },
+
+  atualizarTipo: (token: string, tipoId: string, data: Partial<TipoCusto>) =>
+    api.put<TipoCusto>(`/api/v1/orcamento/custos/tipos/${tipoId}`, data, token),
+
+  // Cálculo de custos
+  calcular: (token: string, cenarioId: string, cenarioSecaoId?: string, ano?: number) => {
+    const params = new URLSearchParams();
+    if (cenarioSecaoId) params.append('cenario_secao_id', cenarioSecaoId);
+    if (ano) params.append('ano', ano.toString());
+    return api.post<{ success: boolean; message: string; quantidade: number }>(
+      `/api/v1/orcamento/custos/cenarios/${cenarioId}/calcular?${params}`, {}, token
+    );
+  },
+
+  // Listar custos calculados
+  listar: (token: string, cenarioId: string, filtros?: {
+    cenario_secao_id?: string;
+    funcao_id?: string;
+    tipo_custo_id?: string;
+    mes?: number;
+    ano?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (filtros) {
+      Object.entries(filtros).forEach(([key, value]) => {
+        if (value !== undefined) params.append(key, value.toString());
+      });
+    }
+    return api.get<CustoCalculado[]>(
+      `/api/v1/orcamento/custos/cenarios/${cenarioId}?${params}`, token
+    );
+  },
+
+  // Resumo por categoria
+  resumo: (token: string, cenarioId: string, cenarioSecaoId?: string, ano?: number) => {
+    const params = new URLSearchParams();
+    if (cenarioSecaoId) params.append('cenario_secao_id', cenarioSecaoId);
+    if (ano) params.append('ano', ano.toString());
+    return api.get<{
+      cenario_id: string;
+      por_categoria: Record<string, number>;
+      total_geral: number;
+    }>(`/api/v1/orcamento/custos/cenarios/${cenarioId}/resumo?${params}`, token);
+  },
+
+  // DRE
+  dre: (token: string, cenarioId: string, cenarioSecaoId?: string, ano?: number) => {
+    const params = new URLSearchParams();
+    if (cenarioSecaoId) params.append('cenario_secao_id', cenarioSecaoId);
+    if (ano) params.append('ano', ano.toString());
+    return api.get<DREResponse>(
+      `/api/v1/orcamento/custos/cenarios/${cenarioId}/dre?${params}`, token
+    );
+  },
+  
+  // Calcular custos de tecnologia
+  calcularTecnologia: (token: string, cenarioId: string, cenarioSecaoId?: string, ano?: number) => {
+    const params = new URLSearchParams();
+    if (cenarioSecaoId) params.append('cenario_secao_id', cenarioSecaoId);
+    if (ano) params.append('ano', ano.toString());
+    return api.post<{
+      success: boolean;
+      message: string;
+      cenario_id: string;
+      ano: number;
+      alocacoes_processadas: number;
+      custos_criados: number;
+      valor_total: number;
+    }>(`/api/v1/orcamento/custos/cenarios/${cenarioId}/calcular-tecnologia?${params}`, {}, token);
+  },
+};
+
+
+// ============================================
+// Fornecedores
+// ============================================
+
+export interface Fornecedor {
+  id: string;
+  codigo: string;
+  codigo_nw?: string | null;
+  nome: string;
+  nome_fantasia?: string | null;
+  cnpj?: string | null;
+  contato_nome?: string | null;
+  contato_email?: string | null;
+  contato_telefone?: string | null;
+  observacao?: string | null;
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FornecedorCreate {
+  codigo: string;
+  codigo_nw?: string | null;
+  nome: string;
+  nome_fantasia?: string | null;
+  cnpj?: string | null;
+  contato_nome?: string | null;
+  contato_email?: string | null;
+  contato_telefone?: string | null;
+  observacao?: string | null;
+  ativo?: boolean;
+}
+
+export interface FornecedorUpdate extends Partial<FornecedorCreate> {}
+
+export const fornecedores = {
+  // Listar
+  listar: (token: string, filtros?: { apenas_ativos?: boolean; busca?: string }) => {
+    const params = new URLSearchParams();
+    if (filtros?.apenas_ativos !== undefined) params.append('apenas_ativos', filtros.apenas_ativos.toString());
+    if (filtros?.busca) params.append('busca', filtros.busca);
+    return api.get<Fornecedor[]>(`/api/v1/orcamento/fornecedores?${params}`, token);
+  },
+
+  // Obter
+  obter: (token: string, id: string) => {
+    return api.get<Fornecedor>(`/api/v1/orcamento/fornecedores/${id}`, token);
+  },
+
+  // Criar
+  criar: (token: string, data: FornecedorCreate) => {
+    return api.post<Fornecedor>('/api/v1/orcamento/fornecedores', data, token);
+  },
+
+  // Atualizar
+  atualizar: (token: string, id: string, data: FornecedorUpdate) => {
+    return api.put<Fornecedor>(`/api/v1/orcamento/fornecedores/${id}`, data, token);
+  },
+
+  // Excluir
+  excluir: (token: string, id: string, softDelete: boolean = true) => {
+    return api.delete<void>(`/api/v1/orcamento/fornecedores/${id}?soft_delete=${softDelete}`, token);
+  },
+
+  // Listar do NW
+  listarNW: (token: string, filtros?: { apenas_ativos?: boolean; busca?: string }) => {
+    const params = new URLSearchParams();
+    if (filtros?.apenas_ativos !== undefined) params.append('apenas_ativos', filtros.apenas_ativos.toString());
+    if (filtros?.busca) params.append('busca', filtros.busca);
+    return api.get<{ codigo: string; razao_social: string; nome_fantasia?: string; cnpj?: string }[]>(
+      `/api/v1/orcamento/nw/fornecedores?${params}`, token
+    );
+  },
+
+  // Importar do NW
+  importarNW: (token: string, codigos: string[]) => {
+    return api.post<{ importados: number; erros: number; detalhes: any[] }>(
+      '/api/v1/orcamento/nw/fornecedores/importar',
+      { codigos },
+      token
+    );
+  },
+};
+
+
+// ============================================
+// Produtos de Tecnologia
+// ============================================
+
+export interface ProdutoTecnologia {
+  id: string;
+  fornecedor_id: string;
+  codigo: string;
+  nome: string;
+  categoria: string;
+  valor_base?: number | null;
+  unidade_medida?: string | null;
+  conta_contabil_id?: string | null;
+  descricao?: string | null;
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+  fornecedor?: Fornecedor;
+}
+
+export interface ProdutoTecnologiaCreate {
+  fornecedor_id: string;
+  codigo?: string; // AUTO para gerar automaticamente
+  nome: string;
+  categoria: string;
+  valor_base?: number | null;
+  unidade_medida?: string | null;
+  conta_contabil_id?: string | null;
+  descricao?: string | null;
+  ativo?: boolean;
+}
+
+export interface ProdutoTecnologiaUpdate extends Partial<ProdutoTecnologiaCreate> {}
+
+export const produtosTecnologia = {
+  // Listar
+  listar: (token: string, filtros?: { fornecedor_id?: string; categoria?: string; apenas_ativos?: boolean; busca?: string }) => {
+    const params = new URLSearchParams();
+    if (filtros?.fornecedor_id) params.append('fornecedor_id', filtros.fornecedor_id);
+    if (filtros?.categoria) params.append('categoria', filtros.categoria);
+    if (filtros?.apenas_ativos !== undefined) params.append('apenas_ativos', filtros.apenas_ativos.toString());
+    if (filtros?.busca) params.append('busca', filtros.busca);
+    return api.get<ProdutoTecnologia[]>(`/api/v1/orcamento/produtos?${params}`, token);
+  },
+
+  // Obter
+  obter: (token: string, id: string) => {
+    return api.get<ProdutoTecnologia>(`/api/v1/orcamento/produtos/${id}`, token);
+  },
+
+  // Criar
+  criar: (token: string, data: ProdutoTecnologiaCreate) => {
+    return api.post<ProdutoTecnologia>('/api/v1/orcamento/produtos', data, token);
+  },
+
+  // Atualizar
+  atualizar: (token: string, id: string, data: ProdutoTecnologiaUpdate) => {
+    return api.put<ProdutoTecnologia>(`/api/v1/orcamento/produtos/${id}`, data, token);
+  },
+
+  // Excluir
+  excluir: (token: string, id: string, softDelete: boolean = true) => {
+    return api.delete<void>(`/api/v1/orcamento/produtos/${id}?soft_delete=${softDelete}`, token);
+  },
+};
+
+
+// ============================================
+// Alocações de Tecnologia
+// ============================================
+
+export interface AlocacaoTecnologia {
+  id: string;
+  cenario_id: string;
+  cenario_secao_id: string;
+  produto_id: string;
+  tipo_alocacao: 'FIXO' | 'VARIAVEL' | 'RATEIO';
+  qtd_jan?: number | null;
+  qtd_fev?: number | null;
+  qtd_mar?: number | null;
+  qtd_abr?: number | null;
+  qtd_mai?: number | null;
+  qtd_jun?: number | null;
+  qtd_jul?: number | null;
+  qtd_ago?: number | null;
+  qtd_set?: number | null;
+  qtd_out?: number | null;
+  qtd_nov?: number | null;
+  qtd_dez?: number | null;
+  valor_override?: number | null;
+  fator_multiplicador?: number | null;
+  percentual_rateio?: number | null;
+  observacao?: string | null;
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+  produto?: ProdutoTecnologia;
+}
+
+export interface AlocacaoTecnologiaCreate {
+  cenario_id: string;
+  cenario_secao_id: string;
+  produto_id: string;
+  tipo_alocacao: 'FIXO' | 'VARIAVEL' | 'RATEIO';
+  valor_override?: number | null;
+  fator_multiplicador?: number | null;
+  percentual_rateio?: number | null;
+  observacao?: string | null;
+  ativo?: boolean;
+}
+
+export interface AlocacaoTecnologiaUpdate extends Partial<AlocacaoTecnologiaCreate> {}
+
+export const alocacoesTecnologia = {
+  // Listar
+  listar: (token: string, cenarioId: string, filtros?: { cenario_secao_id?: string; ativo?: boolean }) => {
+    const params = new URLSearchParams();
+    params.append('cenario_id', cenarioId);
+    if (filtros?.cenario_secao_id) params.append('cenario_secao_id', filtros.cenario_secao_id);
+    if (filtros?.ativo !== undefined) params.append('ativo', filtros.ativo.toString());
+    return api.get<AlocacaoTecnologia[]>(`/api/v1/orcamento/alocacoes?${params}`, token);
+  },
+
+  // Obter
+  obter: (token: string, id: string) => {
+    return api.get<AlocacaoTecnologia>(`/api/v1/orcamento/alocacoes/${id}`, token);
+  },
+
+  // Criar
+  criar: (token: string, data: AlocacaoTecnologiaCreate) => {
+    return api.post<AlocacaoTecnologia>('/api/v1/orcamento/alocacoes', data, token);
+  },
+
+  // Atualizar
+  atualizar: (token: string, id: string, data: AlocacaoTecnologiaUpdate) => {
+    return api.put<AlocacaoTecnologia>(`/api/v1/orcamento/alocacoes/${id}`, data, token);
+  },
+
+  // Excluir
+  excluir: (token: string, id: string, softDelete: boolean = true) => {
+    return api.delete<void>(`/api/v1/orcamento/alocacoes/${id}?soft_delete=${softDelete}`, token);
+  },
+};
 

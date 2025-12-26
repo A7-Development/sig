@@ -4,7 +4,9 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -13,6 +15,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { 
   Plus, 
   Search, 
@@ -20,22 +29,27 @@ import {
   Edit2, 
   Trash2, 
   Building2,
-  Loader2,
-  FileX
+  CheckCircle2,
+  XCircle,
+  Loader2
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth-store";
 import { departamentosApi, totvsApi, type Departamento, type DepartamentoTotvs } from "@/lib/api/orcamento";
+import { useToast } from "@/hooks/use-toast";
 
 export default function DepartamentosPage() {
   const { accessToken: token } = useAuthStore();
+  const { toast } = useToast();
   const [departamentos, setDepartamentos] = useState<Departamento[]>([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState("");
+  const [apenasAtivos, setApenasAtivos] = useState(true);
   
   // Modal states
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editando, setEditando] = useState<Departamento | null>(null);
+  const [salvando, setSalvando] = useState(false);
   
   // Form state
   const [formData, setFormData] = useState({
@@ -55,16 +69,31 @@ export default function DepartamentosPage() {
     if (token) {
       carregarDepartamentos();
     }
-  }, [token]);
+  }, [token, apenasAtivos]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (token) carregarDepartamentos();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [busca]);
 
   const carregarDepartamentos = async () => {
     if (!token) return;
     setLoading(true);
     try {
-      const data = await departamentosApi.listar(token, { busca: busca || undefined });
+      const data = await departamentosApi.listar(token, { 
+        busca: busca || undefined,
+        ativo: apenasAtivos,
+      });
       setDepartamentos(data);
     } catch (error) {
       console.error("Erro ao carregar departamentos:", error);
+      toast({
+        title: "Erro ao carregar",
+        description: "Não foi possível carregar os departamentos.",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -74,19 +103,39 @@ export default function DepartamentosPage() {
     e.preventDefault();
     if (!token) return;
     
+    setSalvando(true);
     try {
       if (editando) {
         await departamentosApi.atualizar(token, editando.id, formData);
+        toast({
+          title: "Departamento atualizado",
+          description: "Departamento atualizado com sucesso.",
+        });
       } else {
         await departamentosApi.criar(token, formData);
+        toast({
+          title: "Departamento criado",
+          description: "Departamento criado com sucesso.",
+        });
       }
       setShowForm(false);
       setEditando(null);
-      setFormData({ codigo: "", nome: "", codigo_totvs: "", ativo: true });
+      resetForm();
       carregarDepartamentos();
     } catch (error) {
       console.error("Erro ao salvar:", error);
+      toast({
+        title: "Erro ao salvar",
+        description: "Não foi possível salvar o departamento.",
+        variant: "destructive",
+      });
+    } finally {
+      setSalvando(false);
     }
+  };
+
+  const resetForm = () => {
+    setFormData({ codigo: "", nome: "", codigo_totvs: "", ativo: true });
   };
 
   const handleEdit = (depto: Departamento) => {
@@ -105,9 +154,18 @@ export default function DepartamentosPage() {
     
     try {
       await departamentosApi.excluir(token, id);
+      toast({
+        title: "Departamento excluído",
+        description: "Departamento excluído com sucesso.",
+      });
       carregarDepartamentos();
     } catch (error) {
       console.error("Erro ao excluir:", error);
+      toast({
+        title: "Erro ao excluir",
+        description: "Não foi possível excluir o departamento.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -120,6 +178,11 @@ export default function DepartamentosPage() {
       setDeptosTotvs(data);
     } catch (error) {
       console.error("Erro ao carregar TOTVS:", error);
+      toast({
+        title: "Erro ao carregar TOTVS",
+        description: "Não foi possível carregar os departamentos do TOTVS.",
+        variant: "destructive",
+      });
     } finally {
       setLoadingTotvs(false);
     }
@@ -130,12 +193,20 @@ export default function DepartamentosPage() {
     setImportando(true);
     try {
       const resultado = await departamentosApi.importarTotvs(token, selectedTotvs);
-      alert(`Importados: ${resultado.importados}, Ignorados: ${resultado.ignorados}`);
+      toast({
+        title: "Importação concluída",
+        description: `Importados: ${resultado.importados}, Ignorados: ${resultado.ignorados}`,
+      });
       setShowImport(false);
       setSelectedTotvs([]);
       carregarDepartamentos();
     } catch (error) {
       console.error("Erro ao importar:", error);
+      toast({
+        title: "Erro ao importar",
+        description: "Não foi possível importar os departamentos.",
+        variant: "destructive",
+      });
     } finally {
       setImportando(false);
     }
@@ -151,133 +222,116 @@ export default function DepartamentosPage() {
 
   return (
     <div className="page-container">
-      {/* Header da página */}
-      <div className="flex items-start justify-between mb-6">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <div className="flex items-center gap-3 mb-1">
-            <h1 className="page-title">Departamentos</h1>
-            <Badge variant="info" className="text-[10px]">
-              {departamentos.length} registros
-            </Badge>
-          </div>
-          <p className="page-subtitle">
+          <h1 className="page-title">Departamentos</h1>
+          <p className="text-sm text-muted-foreground">
             Gerencie a estrutura organizacional da empresa
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={abrirImportacao}>
-            <Download className="h-4 w-4 mr-2" />
+          <Button variant="outline" onClick={abrirImportacao}>
+            <Download className="size-4 mr-2" />
             Importar do TOTVS
           </Button>
-          <Button 
-            variant="success" 
-            size="sm"
-            onClick={() => { 
-              setEditando(null); 
-              setFormData({ codigo: "", nome: "", codigo_totvs: "", ativo: true }); 
-              setShowForm(true); 
-            }}
-          >
-            <Plus className="h-4 w-4 mr-2" />
+          <Button onClick={() => { setEditando(null); resetForm(); setShowForm(true); }}>
+            <Plus className="size-4 mr-2" />
             Novo Departamento
           </Button>
         </div>
       </div>
 
-      {/* Filtros */}
-      <Card className="mb-4">
-        <CardContent className="py-3">
-          <div className="filter-container">
-            <div className="filter-group flex-1">
-              <label className="filter-label">Buscar</label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <CardTitle className="section-title">Lista de Departamentos</CardTitle>
+              <CardDescription>
+                {departamentos.length} registro(s) encontrado(s)
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="apenas-ativos"
+                  checked={apenasAtivos}
+                  onCheckedChange={(checked) => setApenasAtivos(checked === true)}
+                />
+                <Label htmlFor="apenas-ativos" className="text-sm cursor-pointer">
+                  Apenas ativos
+                </Label>
+              </div>
+              <div className="relative w-[300px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                 <Input
-                  placeholder="Buscar por código ou nome..."
-                  className="pl-9 h-8 text-xs"
+                  placeholder="Buscar departamento..."
                   value={busca}
                   onChange={(e) => setBusca(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && carregarDepartamentos()}
+                  className="pl-9"
                 />
               </div>
             </div>
-            <div className="filter-divider" />
-            <Button variant="secondary" size="sm" onClick={carregarDepartamentos}>
-              <Search className="h-4 w-4 mr-1" />
-              Buscar
-            </Button>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Tabela */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Departamentos Cadastrados</CardTitle>
-          <CardDescription>{departamentos.length} registros encontrados</CardDescription>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent>
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <Loader2 className="size-6 animate-spin text-muted-foreground" />
             </div>
           ) : departamentos.length === 0 ? (
-            <div className="empty-state my-8 mx-4">
-              <FileX className="empty-state-icon" />
-              <p className="empty-state-title">Nenhum departamento cadastrado</p>
-              <p className="empty-state-description">
-                Clique em &quot;Novo Departamento&quot; para adicionar ou importe do TOTVS.
+            <div className="empty-state">
+              <Building2 className="size-12 text-muted-foreground/50 mx-auto mb-4" />
+              <p className="text-muted-foreground">
+                {busca ? "Nenhum departamento encontrado" : "Nenhum departamento cadastrado"}
               </p>
             </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-16"></TableHead>
-                  <TableHead className="w-32">Código</TableHead>
+                  <TableHead>Código</TableHead>
                   <TableHead>Nome</TableHead>
-                  <TableHead className="w-32">Código TOTVS</TableHead>
-                  <TableHead className="w-24 text-center">Status</TableHead>
-                  <TableHead className="w-24 text-right">Ações</TableHead>
+                  <TableHead>Código TOTVS</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {departamentos.map((depto) => (
                   <TableRow key={depto.id}>
-                    <TableCell>
-                      <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${
-                        depto.ativo ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-400"
-                      }`}>
-                        <Building2 className="h-4 w-4" />
-                      </div>
-                    </TableCell>
                     <TableCell className="font-mono text-xs">{depto.codigo}</TableCell>
-                    <TableCell className="font-medium">{depto.nome}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {depto.codigo_totvs || "—"}
+                    <TableCell className="font-semibold">{depto.nome}</TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {depto.codigo_totvs || "-"}
                     </TableCell>
                     <TableCell className="text-center">
-                      <Badge variant={depto.ativo ? "success" : "secondary"} className="text-[10px]">
-                        {depto.ativo ? "Ativo" : "Inativo"}
-                      </Badge>
+                      {depto.ativo ? (
+                        <Badge variant="success" className="gap-1">
+                          <CheckCircle2 className="size-3" />
+                          Ativo
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="gap-1">
+                          <XCircle className="size-3" />
+                          Inativo
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <Button 
-                          variant="ghost" 
-                          size="icon-xs" 
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
                           onClick={() => handleEdit(depto)}
-                          className="hover:bg-orange-50 hover:text-orange-600"
                         >
-                          <Edit2 className="h-3.5 w-3.5" />
+                          <Edit2 className="size-4" />
                         </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon-xs" 
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
                           onClick={() => handleDelete(depto.id)}
-                          className="hover:bg-red-50 hover:text-red-600"
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Trash2 className="size-4" />
                         </Button>
                       </div>
                     </TableCell>
@@ -289,89 +343,92 @@ export default function DepartamentosPage() {
         </CardContent>
       </Card>
 
-      {/* Modal Form */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <CardTitle>{editando ? "Editar Departamento" : "Novo Departamento"}</CardTitle>
-              <CardDescription>
-                {editando ? "Atualize as informações do departamento" : "Preencha os dados do novo departamento"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="form-field">
-                  <label className="filter-label">Código *</label>
-                  <Input
-                    value={formData.codigo}
-                    onChange={(e) => setFormData({ ...formData, codigo: e.target.value })}
-                    className="h-8 text-sm"
-                    required
-                  />
-                </div>
-                <div className="form-field">
-                  <label className="filter-label">Nome *</label>
-                  <Input
-                    value={formData.nome}
-                    onChange={(e) => setFormData({ ...formData, nome: e.target.value })}
-                    className="h-8 text-sm"
-                    required
-                  />
-                </div>
-                <div className="form-field">
-                  <label className="filter-label">Código TOTVS (opcional)</label>
-                  <Input
-                    value={formData.codigo_totvs}
-                    onChange={(e) => setFormData({ ...formData, codigo_totvs: e.target.value })}
-                    className="h-8 text-sm"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="ativo"
-                    checked={formData.ativo}
-                    onChange={(e) => setFormData({ ...formData, ativo: e.target.checked })}
-                    className="h-4 w-4 rounded border-border"
-                  />
-                  <label htmlFor="ativo" className="text-sm">Ativo</label>
-                </div>
-                <div className="flex gap-2 justify-end pt-4 border-t">
-                  <Button type="button" variant="outline" size="sm" onClick={() => setShowForm(false)}>
-                    Cancelar
-                  </Button>
-                  <Button type="submit" variant="success" size="sm">
-                    {editando ? "Atualizar" : "Criar"}
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      {/* Diálogo de Formulário */}
+      <Dialog open={showForm} onOpenChange={setShowForm}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {editando ? "Editar Departamento" : "Novo Departamento"}
+            </DialogTitle>
+            <DialogDescription>
+              Preencha os dados do departamento
+            </DialogDescription>
+          </DialogHeader>
+          
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <Label htmlFor="codigo">Código *</Label>
+              <Input
+                id="codigo"
+                value={formData.codigo}
+                onChange={(e) => setFormData({ ...formData, codigo: e.target.value })}
+                required
+              />
+            </div>
 
-      {/* Modal Importação TOTVS */}
-      {showImport && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
-            <CardHeader>
-              <CardTitle>Importar do TOTVS</CardTitle>
-              <CardDescription>
-                Selecione os departamentos que deseja importar do CORPORERM
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex-1 overflow-auto p-0">
-              {loadingTotvs ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                </div>
-              ) : (
+            <div>
+              <Label htmlFor="nome">Nome *</Label>
+              <Input
+                id="nome"
+                value={formData.nome}
+                onChange={(e) => setFormData({ ...formData, nome: e.target.value })}
+                required
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="codigo_totvs">Código TOTVS (opcional)</Label>
+              <Input
+                id="codigo_totvs"
+                value={formData.codigo_totvs}
+                onChange={(e) => setFormData({ ...formData, codigo_totvs: e.target.value })}
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="ativo"
+                checked={formData.ativo}
+                onCheckedChange={(checked) => setFormData({ ...formData, ativo: checked === true })}
+              />
+              <Label htmlFor="ativo" className="cursor-pointer">Ativo</Label>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4">
+              <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={salvando}>
+                {salvando && <Loader2 className="size-4 mr-2 animate-spin" />}
+                {editando ? "Atualizar" : "Criar"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo de Importação TOTVS */}
+      <Dialog open={showImport} onOpenChange={setShowImport}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Importar Departamentos do TOTVS</DialogTitle>
+            <DialogDescription>
+              Selecione os departamentos que deseja importar do CORPORERM
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {loadingTotvs ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="size-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <div className="flex-1 overflow-auto border rounded-md">
                 <Table>
-                  <TableHeader className="sticky top-0 bg-muted/95 backdrop-blur-sm">
+                  <TableHeader>
                     <TableRow>
                       <TableHead className="w-12"></TableHead>
-                      <TableHead className="w-32">Código</TableHead>
+                      <TableHead>Código</TableHead>
                       <TableHead>Nome</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -379,17 +436,13 @@ export default function DepartamentosPage() {
                     {deptosTotvs.map((depto) => (
                       <TableRow 
                         key={depto.codigo}
-                        className={`cursor-pointer ${
-                          selectedTotvs.includes(depto.codigo) ? "bg-orange-50" : ""
-                        }`}
+                        className="cursor-pointer hover:bg-muted/50"
                         onClick={() => toggleSelectTotvs(depto.codigo)}
                       >
                         <TableCell>
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={selectedTotvs.includes(depto.codigo)}
-                            onChange={() => toggleSelectTotvs(depto.codigo)}
-                            className="h-4 w-4 rounded border-border"
+                            onCheckedChange={() => toggleSelectTotvs(depto.codigo)}
                           />
                         </TableCell>
                         <TableCell className="font-mono text-xs">{depto.codigo}</TableCell>
@@ -398,30 +451,24 @@ export default function DepartamentosPage() {
                     ))}
                   </TableBody>
                 </Table>
-              )}
-            </CardContent>
-            <div className="p-4 border-t flex justify-between items-center bg-muted/5">
-              <span className="text-xs text-muted-foreground">
-                {selectedTotvs.length} selecionados
-              </span>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setShowImport(false)}>
-                  Cancelar
-                </Button>
-                <Button 
-                  variant="success" 
-                  size="sm" 
-                  onClick={handleImportar} 
-                  disabled={selectedTotvs.length === 0 || importando}
-                >
-                  {importando && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  Importar Selecionados
-                </Button>
               </div>
+            )}
+          </div>
+
+          <div className="flex justify-between items-center pt-4 border-t">
+            <span className="text-sm text-muted-foreground">{selectedTotvs.length} selecionados</span>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowImport(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleImportar} disabled={selectedTotvs.length === 0 || importando}>
+                {importando && <Loader2 className="size-4 mr-2 animate-spin" />}
+                Importar
+              </Button>
             </div>
-          </Card>
-        </div>
-      )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

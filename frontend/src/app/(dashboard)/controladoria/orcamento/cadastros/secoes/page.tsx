@@ -4,6 +4,31 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { 
   Plus, 
   Search, 
@@ -24,19 +49,23 @@ import {
   type Departamento,
   type SecaoTotvs 
 } from "@/lib/api/orcamento";
+import { useToast } from "@/hooks/use-toast";
 
 export default function SecoesPage() {
   const { accessToken: token } = useAuthStore();
+  const { toast } = useToast();
   const [secoes, setSecoes] = useState<Secao[]>([]);
   const [departamentos, setDepartamentos] = useState<Departamento[]>([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState("");
-  const [filtroDepto, setFiltroDepto] = useState("");
+  const [filtroDepto, setFiltroDepto] = useState("ALL");
+  const [apenasAtivos, setApenasAtivos] = useState(true);
   
   // Modal states
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editando, setEditando] = useState<Secao | null>(null);
+  const [salvando, setSalvando] = useState(false);
   
   // Form state
   const [formData, setFormData] = useState({
@@ -56,22 +85,45 @@ export default function SecoesPage() {
 
   useEffect(() => {
     if (token) {
+      carregarDepartamentos();
       carregarDados();
     }
-  }, [token]);
+  }, [token, apenasAtivos, filtroDepto]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (token) carregarDados();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [busca]);
+
+  const carregarDepartamentos = async () => {
+    if (!token) return;
+    try {
+      const deptosData = await departamentosApi.listar(token, { ativo: true });
+      setDepartamentos(deptosData);
+    } catch (error) {
+      console.error("Erro ao carregar departamentos:", error);
+    }
+  };
 
   const carregarDados = async () => {
     if (!token) return;
     setLoading(true);
     try {
-      const [secoesData, deptosData] = await Promise.all([
-        secoesApi.listar(token, { busca: busca || undefined, departamento_id: filtroDepto || undefined }),
-        departamentosApi.listar(token, { ativo: true }),
-      ]);
+      const secoesData = await secoesApi.listar(token, { 
+        busca: busca || undefined, 
+        departamento_id: filtroDepto !== "ALL" ? filtroDepto : undefined,
+        ativo: apenasAtivos,
+      });
       setSecoes(secoesData);
-      setDepartamentos(deptosData);
     } catch (error) {
       console.error("Erro ao carregar:", error);
+      toast({
+        title: "Erro ao carregar",
+        description: "Não foi possível carregar as seções.",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -81,11 +133,20 @@ export default function SecoesPage() {
     e.preventDefault();
     if (!token) return;
     
+    setSalvando(true);
     try {
       if (editando) {
         await secoesApi.atualizar(token, editando.id, formData);
+        toast({
+          title: "Seção atualizada",
+          description: "Seção atualizada com sucesso.",
+        });
       } else {
         await secoesApi.criar(token, formData);
+        toast({
+          title: "Seção criada",
+          description: "Seção criada com sucesso.",
+        });
       }
       setShowForm(false);
       setEditando(null);
@@ -93,6 +154,13 @@ export default function SecoesPage() {
       carregarDados();
     } catch (error) {
       console.error("Erro ao salvar:", error);
+      toast({
+        title: "Erro ao salvar",
+        description: "Não foi possível salvar a seção.",
+        variant: "destructive",
+      });
+    } finally {
+      setSalvando(false);
     }
   };
 
@@ -116,9 +184,18 @@ export default function SecoesPage() {
     if (!token || !confirm("Deseja excluir esta seção?")) return;
     try {
       await secoesApi.excluir(token, id);
+      toast({
+        title: "Seção excluída",
+        description: "Seção excluída com sucesso.",
+      });
       carregarDados();
     } catch (error) {
       console.error("Erro ao excluir:", error);
+      toast({
+        title: "Erro ao excluir",
+        description: "Não foi possível excluir a seção.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -131,6 +208,11 @@ export default function SecoesPage() {
       setSecoesTotvs(data);
     } catch (error) {
       console.error("Erro ao carregar TOTVS:", error);
+      toast({
+        title: "Erro ao carregar TOTVS",
+        description: "Não foi possível carregar as seções do TOTVS.",
+        variant: "destructive",
+      });
     } finally {
       setLoadingTotvs(false);
     }
@@ -141,13 +223,21 @@ export default function SecoesPage() {
     setImportando(true);
     try {
       const resultado = await secoesApi.importarTotvs(token, selectedTotvs, deptoImport);
-      alert(`Importados: ${resultado.importados}, Ignorados: ${resultado.ignorados}`);
+      toast({
+        title: "Importação concluída",
+        description: `Importados: ${resultado.importados}, Ignorados: ${resultado.ignorados}`,
+      });
       setShowImport(false);
       setSelectedTotvs([]);
       setDeptoImport("");
       carregarDados();
     } catch (error) {
       console.error("Erro ao importar:", error);
+      toast({
+        title: "Erro ao importar",
+        description: "Não foi possível importar as seções.",
+        variant: "destructive",
+      });
     } finally {
       setImportando(false);
     }
@@ -160,237 +250,297 @@ export default function SecoesPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="page-container">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Seções</h1>
-          <p className="text-muted-foreground">
+          <h1 className="page-title">Seções</h1>
+          <p className="text-sm text-muted-foreground">
             Unidades operacionais dentro dos departamentos
           </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={abrirImportacao}>
-            <Download className="h-4 w-4 mr-2" />
+            <Download className="size-4 mr-2" />
             Importar do TOTVS
           </Button>
           <Button onClick={() => { setEditando(null); resetForm(); setShowForm(true); }}>
-            <Plus className="h-4 w-4 mr-2" />
+            <Plus className="size-4 mr-2" />
             Nova Seção
           </Button>
         </div>
       </div>
 
-      {/* Filtros */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por código ou nome..."
-                className="pl-10"
-                value={busca}
-                onChange={(e) => setBusca(e.target.value)}
-              />
-            </div>
-            <select
-              className="border rounded-md px-3 py-2"
-              value={filtroDepto}
-              onChange={(e) => setFiltroDepto(e.target.value)}
-            >
-              <option value="">Todos os departamentos</option>
-              {departamentos.map(d => (
-                <option key={d.id} value={d.id}>{d.nome}</option>
-              ))}
-            </select>
-            <Button variant="secondary" onClick={carregarDados}>Buscar</Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Lista */}
       <Card>
         <CardHeader>
-          <CardTitle>Seções Cadastradas</CardTitle>
-          <CardDescription>{secoes.length} registros encontrados</CardDescription>
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <CardTitle className="section-title">Lista de Seções</CardTitle>
+              <CardDescription>
+                {secoes.length} registro(s) encontrado(s)
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-4">
+              <Select value={filtroDepto} onValueChange={setFiltroDepto}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Departamento" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Todos os departamentos</SelectItem>
+                  {departamentos.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.nome}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="apenas-ativos"
+                  checked={apenasAtivos}
+                  onCheckedChange={(checked) => setApenasAtivos(checked === true)}
+                />
+                <Label htmlFor="apenas-ativos" className="text-sm cursor-pointer">
+                  Apenas ativos
+                </Label>
+              </div>
+              <div className="relative w-[300px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar seção..."
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="size-6 animate-spin text-muted-foreground" />
             </div>
           ) : secoes.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              Nenhuma seção cadastrada
+            <div className="empty-state">
+              <Layers className="size-12 text-muted-foreground/50 mx-auto mb-4" />
+              <p className="text-muted-foreground">
+                {busca || filtroDepto !== "ALL" ? "Nenhuma seção encontrada" : "Nenhuma seção cadastrada"}
+              </p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {secoes.map((secao) => (
-                <div
-                  key={secao.id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent/50"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${
-                      secao.ativo ? "bg-purple-100 text-purple-600" : "bg-gray-100 text-gray-400"
-                    }`}>
-                      <Layers className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{secao.nome}</span>
-                        {secao.ativo ? (
-                          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-gray-400" />
-                        )}
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Código</TableHead>
+                  <TableHead>Nome</TableHead>
+                  <TableHead>Departamento</TableHead>
+                  <TableHead>Código TOTVS</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {secoes.map((secao) => (
+                  <TableRow key={secao.id}>
+                    <TableCell className="font-mono text-xs">{secao.codigo}</TableCell>
+                    <TableCell className="font-semibold">{secao.nome}</TableCell>
+                    <TableCell className="text-sm">
+                      {secao.departamento?.nome || "-"}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {secao.codigo_totvs || "-"}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {secao.ativo ? (
+                        <Badge variant="success" className="gap-1">
+                          <CheckCircle2 className="size-3" />
+                          Ativo
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="gap-1">
+                          <XCircle className="size-3" />
+                          Inativo
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => handleEdit(secao)}
+                        >
+                          <Edit2 className="size-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => handleDelete(secao.id)}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        Código: {secao.codigo}
-                        {secao.departamento && ` • Depto: ${secao.departamento.nome}`}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="ghost" size="icon" onClick={() => handleEdit(secao)}>
-                      <Edit2 className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => handleDelete(secao.id)}>
-                      <Trash2 className="h-4 w-4 text-red-500" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>
 
-      {/* Modal Form */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <CardTitle>{editando ? "Editar Seção" : "Nova Seção"}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium">Departamento *</label>
-                  <select
-                    className="w-full border rounded-md px-3 py-2"
-                    value={formData.departamento_id}
-                    onChange={(e) => setFormData({ ...formData, departamento_id: e.target.value })}
-                    required
-                  >
-                    <option value="">Selecione...</option>
-                    {departamentos.map(d => (
-                      <option key={d.id} value={d.id}>{d.nome}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Código *</label>
-                  <Input
-                    value={formData.codigo}
-                    onChange={(e) => setFormData({ ...formData, codigo: e.target.value })}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Nome *</label>
-                  <Input
-                    value={formData.nome}
-                    onChange={(e) => setFormData({ ...formData, nome: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={formData.ativo}
-                    onChange={(e) => setFormData({ ...formData, ativo: e.target.checked })}
-                  />
-                  <label className="text-sm">Ativo</label>
-                </div>
-                <div className="flex gap-2 justify-end">
-                  <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
-                    Cancelar
-                  </Button>
-                  <Button type="submit">Salvar</Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Modal Importação TOTVS */}
-      {showImport && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
-            <CardHeader>
-              <CardTitle>Importar Seções do TOTVS</CardTitle>
-              <CardDescription>
-                Selecione o departamento de destino e as seções a importar
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex-1 overflow-auto space-y-4">
-              <div>
-                <label className="text-sm font-medium">Departamento de destino *</label>
-                <select
-                  className="w-full border rounded-md px-3 py-2"
-                  value={deptoImport}
-                  onChange={(e) => setDeptoImport(e.target.value)}
-                >
-                  <option value="">Selecione...</option>
-                  {departamentos.map(d => (
-                    <option key={d.id} value={d.id}>{d.nome}</option>
+      {/* Diálogo de Formulário */}
+      <Dialog open={showForm} onOpenChange={setShowForm}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {editando ? "Editar Seção" : "Nova Seção"}
+            </DialogTitle>
+            <DialogDescription>
+              Preencha os dados da seção
+            </DialogDescription>
+          </DialogHeader>
+          
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <Label htmlFor="departamento_id">Departamento *</Label>
+              <Select
+                value={formData.departamento_id}
+                onValueChange={(value) => setFormData({ ...formData, departamento_id: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {departamentos.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.nome}
+                    </SelectItem>
                   ))}
-                </select>
-              </div>
-              {loadingTotvs ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                </div>
-              ) : (
-                <div className="space-y-2 max-h-60 overflow-auto">
-                  {secoesTotvs.map((secao) => (
-                    <div
-                      key={secao.codigo}
-                      className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer ${
-                        selectedTotvs.includes(secao.codigo) ? "bg-purple-50 border-purple-300" : "hover:bg-accent/50"
-                      }`}
-                      onClick={() => toggleSelectTotvs(secao.codigo)}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedTotvs.includes(secao.codigo)}
-                        onChange={() => {}}
-                      />
-                      <div>
-                        <p className="font-medium">{secao.descricao}</p>
-                        <p className="text-sm text-muted-foreground">Código: {secao.codigo}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-            <div className="p-4 border-t flex justify-between items-center">
-              <span className="text-sm text-muted-foreground">{selectedTotvs.length} selecionados</span>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setShowImport(false)}>Cancelar</Button>
-                <Button onClick={handleImportar} disabled={selectedTotvs.length === 0 || !deptoImport || importando}>
-                  {importando && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  Importar
-                </Button>
-              </div>
+                </SelectContent>
+              </Select>
             </div>
-          </Card>
-        </div>
-      )}
+
+            <div>
+              <Label htmlFor="codigo">Código *</Label>
+              <Input
+                id="codigo"
+                value={formData.codigo}
+                onChange={(e) => setFormData({ ...formData, codigo: e.target.value })}
+                required
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="nome">Nome *</Label>
+              <Input
+                id="nome"
+                value={formData.nome}
+                onChange={(e) => setFormData({ ...formData, nome: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="ativo"
+                checked={formData.ativo}
+                onCheckedChange={(checked) => setFormData({ ...formData, ativo: checked === true })}
+              />
+              <Label htmlFor="ativo" className="cursor-pointer">Ativo</Label>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4">
+              <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={salvando}>
+                {salvando && <Loader2 className="size-4 mr-2 animate-spin" />}
+                {editando ? "Atualizar" : "Criar"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo de Importação TOTVS */}
+      <Dialog open={showImport} onOpenChange={setShowImport}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Importar Seções do TOTVS</DialogTitle>
+            <DialogDescription>
+              Selecione o departamento de destino e as seções a importar
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
+            <div>
+              <Label>Departamento de destino *</Label>
+              <Select value={deptoImport} onValueChange={setDeptoImport}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {departamentos.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.nome}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {loadingTotvs ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="size-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <div className="flex-1 overflow-auto border rounded-md">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12"></TableHead>
+                      <TableHead>Código</TableHead>
+                      <TableHead>Descrição</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {secoesTotvs.map((secao) => (
+                      <TableRow 
+                        key={secao.codigo}
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => toggleSelectTotvs(secao.codigo)}
+                      >
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedTotvs.includes(secao.codigo)}
+                            onCheckedChange={() => toggleSelectTotvs(secao.codigo)}
+                          />
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">{secao.codigo}</TableCell>
+                        <TableCell>{secao.descricao}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-between items-center pt-4 border-t">
+            <span className="text-sm text-muted-foreground">{selectedTotvs.length} selecionados</span>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowImport(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleImportar} disabled={selectedTotvs.length === 0 || !deptoImport || importando}>
+                {importando && <Loader2 className="size-4 mr-2 animate-spin" />}
+                Importar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
-

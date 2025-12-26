@@ -10,16 +10,21 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import selectinload, noload
 
 from app.db.session import get_db
-from app.db.models.orcamento import Cenario, Premissa, QuadroPessoal, CenarioEmpresa, FuncaoSpan, PremissaFuncaoMes
+from app.db.models.orcamento import Cenario, QuadroPessoal, CenarioEmpresa, FuncaoSpan, PremissaFuncaoMes, CenarioCliente, CenarioSecao, Secao
 from app.schemas.orcamento import (
     CenarioCreate, CenarioUpdate, CenarioResponse, CenarioComRelacionamentos,
-    PremissaCreate, PremissaUpdate, PremissaResponse,
     QuadroPessoalCreate, QuadroPessoalUpdate, QuadroPessoalResponse, QuadroPessoalComRelacionamentos,
     FuncaoSpanCreate, FuncaoSpanUpdate, FuncaoSpanResponse, FuncaoSpanComRelacionamentos,
-    PremissaFuncaoMesCreate, PremissaFuncaoMesUpdate, PremissaFuncaoMesResponse, PremissaFuncaoMesComRelacionamentos
+    PremissaFuncaoMesCreate, PremissaFuncaoMesUpdate, PremissaFuncaoMesResponse, PremissaFuncaoMesComRelacionamentos,
+    CenarioEmpresaCreate, CenarioEmpresaResponse, CenarioEmpresaComClientes,
+    CenarioClienteCreate, CenarioClienteUpdate, CenarioClienteResponse, CenarioClienteComSecoes,
+    CenarioSecaoCreate, CenarioSecaoUpdate, CenarioSecaoResponse
 )
 from app.services.calculo_custos import calcular_custos_cenario, calcular_overhead_ineficiencia
-from app.services.capacity_planning import calcular_quantidades_span, aplicar_spans_ao_quadro
+from app.services.capacity_planning import (
+    calcular_quantidades_span, aplicar_spans_ao_quadro,
+    aplicar_calculo_span, recalcular_spans_afetados, recalcular_spans_afetados_sem_commit
+)
 
 router = APIRouter(prefix="/cenarios", tags=["Cenários"])
 
@@ -431,10 +436,6 @@ async def create_cenario(data: CenarioCreate, db: AsyncSession = Depends(get_db)
                     detail=f"Erro ao associar empresa. Tabela cenarios_empresas pode não existir. Erro: {str(e)}"
                 )
     
-    # Criar premissa padrão
-    premissa = Premissa(cenario_id=cenario.id)
-    db.add(premissa)
-    
     await db.commit()
     # Refresh sem carregar relacionamentos que podem causar erro
     await db.refresh(cenario, attribute_names=[col.name for col in Cenario.__table__.columns])
@@ -582,7 +583,6 @@ async def duplicar_cenario(
     result = await db.execute(
         select(Cenario).options(
             selectinload(Cenario.empresas_rel),
-            selectinload(Cenario.premissas),
             selectinload(Cenario.posicoes)
         ).where(Cenario.id == cenario_id)
     )
@@ -621,21 +621,6 @@ async def duplicar_cenario(
     await db.commit()
     await db.refresh(novo_cenario)
     
-    # Duplicar premissas
-    for premissa_orig in original.premissas:
-        nova_premissa = Premissa(
-            cenario_id=novo_cenario.id,
-            absenteismo=premissa_orig.absenteismo,
-            turnover=premissa_orig.turnover,
-            ferias_indice=premissa_orig.ferias_indice,
-            dias_treinamento=premissa_orig.dias_treinamento,
-            reajuste_data=premissa_orig.reajuste_data,
-            reajuste_percentual=premissa_orig.reajuste_percentual,
-            dissidio_mes=premissa_orig.dissidio_mes,
-            dissidio_percentual=premissa_orig.dissidio_percentual
-        )
-        db.add(nova_premissa)
-    
     # Duplicar posições
     for posicao_orig in original.posicoes:
         nova_posicao = QuadroPessoal(
@@ -671,45 +656,6 @@ async def duplicar_cenario(
 # ============================================
 # PREMISSAS
 # ============================================
-
-@router.get("/{cenario_id}/premissas", response_model=List[PremissaResponse])
-async def list_premissas(cenario_id: UUID, db: AsyncSession = Depends(get_db)):
-    """Lista premissas de um cenário."""
-    # Desabilitar carregamento do relacionamento cenario para evitar erro com campos novos
-    result = await db.execute(
-        select(Premissa).options(noload(Premissa.cenario)).where(Premissa.cenario_id == cenario_id)
-    )
-    return result.scalars().all()
-
-
-@router.put("/{cenario_id}/premissas/{premissa_id}", response_model=PremissaResponse)
-async def update_premissa(
-    cenario_id: UUID, 
-    premissa_id: UUID, 
-    data: PremissaUpdate, 
-    db: AsyncSession = Depends(get_db)
-):
-    """Atualiza uma premissa."""
-    result = await db.execute(
-        select(Premissa).options(noload(Premissa.cenario)).where(
-            Premissa.id == premissa_id,
-            Premissa.cenario_id == cenario_id
-        )
-    )
-    premissa = result.scalar_one_or_none()
-    
-    if not premissa:
-        raise HTTPException(status_code=404, detail="Premissa não encontrada")
-    
-    update_data = data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(premissa, key, value)
-    
-    await db.commit()
-    # Refresh sem carregar relacionamento cenario para evitar erro com campos novos
-    await db.refresh(premissa, attribute_names=[col.name for col in Premissa.__table__.columns])
-    return premissa
-
 
 # ============================================
 # QUADRO DE PESSOAL
@@ -787,9 +733,44 @@ async def create_posicao(
     if cenario.status == "BLOQUEADO":
         raise HTTPException(status_code=400, detail="Cenário bloqueado não pode ser alterado")
     
-    posicao = QuadroPessoal(**data.model_dump())
+    # Preparar dados para inserção
+    data_dict = data.model_dump()
+    
+    # Converter span_funcoes_base_ids de List[UUID] para List[str] para o JSONB
+    if data_dict.get('span_funcoes_base_ids'):
+        data_dict['span_funcoes_base_ids'] = [str(uid) for uid in data_dict['span_funcoes_base_ids']]
+    
+    # Se tabela_salarial_id não foi fornecida, buscar automaticamente
+    if not data_dict.get('tabela_salarial_id'):
+        from app.db.models.orcamento import TabelaSalarial
+        regime = data_dict.get('regime', 'CLT')
+        funcao_id = data_dict.get('funcao_id')
+        
+        # Buscar tabela salarial ativa para esta função e regime
+        ts_result = await db.execute(
+            select(TabelaSalarial).where(
+                TabelaSalarial.funcao_id == funcao_id,
+                TabelaSalarial.regime == regime,
+                TabelaSalarial.ativo == True
+            ).limit(1)
+        )
+        tabela_salarial = ts_result.scalar_one_or_none()
+        
+        if tabela_salarial:
+            data_dict['tabela_salarial_id'] = tabela_salarial.id
+    
+    posicao = QuadroPessoal(**data_dict)
     posicao.cenario_id = cenario_id
     db.add(posicao)
+    await db.flush()  # Flush para obter o ID antes do cálculo
+    
+    # Se for tipo SPAN, calcular as quantidades automaticamente
+    if posicao.tipo_calculo == 'span':
+        await aplicar_calculo_span(db, posicao)
+    
+    # Invalidar custos calculados (pois o quadro mudou)
+    await invalidar_custos_cenario(db, cenario_id, posicao.cenario_secao_id)
+    
     await db.commit()
     # Refresh sem carregar relacionamento cenario para evitar erro com campos novos
     await db.refresh(posicao, attribute_names=[col.name for col in QuadroPessoal.__table__.columns])
@@ -804,25 +785,53 @@ async def update_posicao(
     db: AsyncSession = Depends(get_db)
 ):
     """Atualiza uma posição do quadro de pessoal."""
-    result = await db.execute(
-        select(QuadroPessoal).options(noload(QuadroPessoal.cenario)).where(
-            QuadroPessoal.id == posicao_id,
-            QuadroPessoal.cenario_id == cenario_id
+    try:
+        result = await db.execute(
+            select(QuadroPessoal).options(noload(QuadroPessoal.cenario)).where(
+                QuadroPessoal.id == posicao_id,
+                QuadroPessoal.cenario_id == cenario_id
+            )
         )
-    )
-    posicao = result.scalar_one_or_none()
-    
-    if not posicao:
-        raise HTTPException(status_code=404, detail="Posição não encontrada")
-    
-    update_data = data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(posicao, key, value)
-    
-    await db.commit()
-    # Refresh sem carregar relacionamento cenario para evitar erro com campos novos
-    await db.refresh(posicao, attribute_names=[col.name for col in QuadroPessoal.__table__.columns])
-    return posicao
+        posicao = result.scalar_one_or_none()
+        
+        if not posicao:
+            raise HTTPException(status_code=404, detail="Posição não encontrada")
+        
+        update_data = data.model_dump(exclude_unset=True)
+        
+        # Converter span_funcoes_base_ids de List[UUID] para List[str] para o JSONB
+        if 'span_funcoes_base_ids' in update_data and update_data['span_funcoes_base_ids']:
+            update_data['span_funcoes_base_ids'] = [str(uid) for uid in update_data['span_funcoes_base_ids']]
+        
+        # Verificar se quantidades foram alteradas (para recalcular SPANs)
+        qtd_fields = [f'qtd_{m}' for m in ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']]
+        qtd_changed = any(field in update_data for field in qtd_fields)
+        funcao_id = posicao.funcao_id
+        cenario_secao_id = posicao.cenario_secao_id
+        
+        for key, value in update_data.items():
+            setattr(posicao, key, value)
+        
+        # Se quantidades foram alteradas e não é uma posição SPAN, recalcular SPANs afetados
+        # Fazer tudo numa única transação
+        if qtd_changed and posicao.tipo_calculo != 'span':
+            await recalcular_spans_afetados_sem_commit(db, cenario_id, funcao_id, cenario_secao_id)
+        
+        await db.commit()
+        
+        # Invalidar custos calculados (pois o quadro mudou)
+        await invalidar_custos_cenario(db, cenario_id, posicao.cenario_secao_id)
+        
+        # Refresh sem carregar relacionamento cenario para evitar erro com campos novos
+        await db.refresh(posicao, attribute_names=[col.name for col in QuadroPessoal.__table__.columns])
+        return posicao
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro ao atualizar posição: {str(e)}")
 
 
 @router.delete("/{cenario_id}/quadro/{posicao_id}")
@@ -843,9 +852,46 @@ async def delete_posicao(
     if not posicao:
         raise HTTPException(status_code=404, detail="Posição não encontrada")
     
+    # Guardar dados antes de deletar
+    cenario_secao_id = posicao.cenario_secao_id
+    funcao_id = posicao.funcao_id
+    
+    # Remover premissas associadas a esta posição
+    from sqlalchemy import delete as sql_delete
+    stmt_premissas = sql_delete(PremissaFuncaoMes).where(
+        PremissaFuncaoMes.cenario_id == cenario_id,
+        PremissaFuncaoMes.cenario_secao_id == cenario_secao_id,
+        PremissaFuncaoMes.funcao_id == funcao_id
+    )
+    await db.execute(stmt_premissas)
+    
+    # Remover a posição
     await db.delete(posicao)
+    
+    # Invalidar custos calculados (pois o quadro mudou)
+    await invalidar_custos_cenario(db, cenario_id, cenario_secao_id)
+    
     await db.commit()
-    return {"message": "Posição excluída com sucesso"}
+    return {"message": "Posição e premissas excluídas com sucesso"}
+
+
+# ============================================
+# UTILITÁRIOS INTERNOS
+# ============================================
+
+async def invalidar_custos_cenario(db: AsyncSession, cenario_id: UUID, cenario_secao_id: Optional[UUID] = None):
+    """
+    Invalida (remove) os custos calculados de um cenário.
+    Deve ser chamado quando houver mudanças que afetam o cálculo de custos.
+    """
+    from sqlalchemy import delete
+    from app.db.models.orcamento import CustoCalculado
+    
+    stmt = delete(CustoCalculado).where(CustoCalculado.cenario_id == cenario_id)
+    if cenario_secao_id:
+        stmt = stmt.where(CustoCalculado.cenario_secao_id == cenario_secao_id)
+    
+    await db.execute(stmt)
 
 
 # ============================================
@@ -1061,6 +1107,7 @@ async def calcular_spans(
 async def list_premissas_funcao(
     cenario_id: UUID,
     funcao_id: Optional[UUID] = None,
+    cenario_secao_id: Optional[UUID] = None,
     mes: Optional[int] = None,
     ano: Optional[int] = None,
     db: AsyncSession = Depends(get_db)
@@ -1072,6 +1119,8 @@ async def list_premissas_funcao(
     
     if funcao_id:
         query = query.where(PremissaFuncaoMes.funcao_id == funcao_id)
+    if cenario_secao_id:
+        query = query.where(PremissaFuncaoMes.cenario_secao_id == cenario_secao_id)
     if mes:
         query = query.where(PremissaFuncaoMes.mes == mes)
     if ano:
@@ -1102,20 +1151,24 @@ async def create_premissa_funcao(
     if not funcao_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Função não encontrada")
     
-    # Verificar se já existe (upsert)
-    existing = await db.execute(
-        select(PremissaFuncaoMes).where(
-            PremissaFuncaoMes.cenario_id == cenario_id,
-            PremissaFuncaoMes.funcao_id == data.funcao_id,
-            PremissaFuncaoMes.mes == data.mes,
-            PremissaFuncaoMes.ano == data.ano
-        )
+    # Verificar se já existe (upsert) - incluindo cenario_secao_id na verificação
+    query = select(PremissaFuncaoMes).where(
+        PremissaFuncaoMes.cenario_id == cenario_id,
+        PremissaFuncaoMes.funcao_id == data.funcao_id,
+        PremissaFuncaoMes.mes == data.mes,
+        PremissaFuncaoMes.ano == data.ano
     )
+    if data.cenario_secao_id:
+        query = query.where(PremissaFuncaoMes.cenario_secao_id == data.cenario_secao_id)
+    else:
+        query = query.where(PremissaFuncaoMes.cenario_secao_id.is_(None))
+    
+    existing = await db.execute(query)
     premissa = existing.scalar_one_or_none()
     
     if premissa:
         # Atualizar existente
-        update_data = data.model_dump(exclude={'cenario_id', 'funcao_id', 'mes', 'ano'})
+        update_data = data.model_dump(exclude={'cenario_id', 'funcao_id', 'mes', 'ano', 'cenario_secao_id'})
         for key, value in update_data.items():
             setattr(premissa, key, value)
     else:
@@ -1168,7 +1221,7 @@ async def bulk_premissas_funcao(
     if not cenario:
         raise HTTPException(status_code=404, detail="Cenário não encontrado")
     
-    from app.db.models.orcamento import Funcao
+    from app.db.models.orcamento import Funcao, CenarioSecao
     resultados = []
     
     for data in premissas:
@@ -1177,20 +1230,32 @@ async def bulk_premissas_funcao(
         if not funcao_result.scalar_one_or_none():
             continue  # Pular se função não existe
         
-        # Verificar se já existe
-        existing = await db.execute(
-            select(PremissaFuncaoMes).where(
-                PremissaFuncaoMes.cenario_id == cenario_id,
-                PremissaFuncaoMes.funcao_id == data.funcao_id,
-                PremissaFuncaoMes.mes == data.mes,
-                PremissaFuncaoMes.ano == data.ano
+        # Verificar se cenario_secao_id existe (se fornecido)
+        if data.cenario_secao_id:
+            secao_result = await db.execute(
+                select(CenarioSecao).where(CenarioSecao.id == data.cenario_secao_id)
             )
+            if not secao_result.scalar_one_or_none():
+                continue  # Pular se seção não existe (foi excluída)
+        
+        # Verificar se já existe (incluindo cenario_secao_id)
+        query = select(PremissaFuncaoMes).where(
+            PremissaFuncaoMes.cenario_id == cenario_id,
+            PremissaFuncaoMes.funcao_id == data.funcao_id,
+            PremissaFuncaoMes.mes == data.mes,
+            PremissaFuncaoMes.ano == data.ano
         )
+        if data.cenario_secao_id:
+            query = query.where(PremissaFuncaoMes.cenario_secao_id == data.cenario_secao_id)
+        else:
+            query = query.where(PremissaFuncaoMes.cenario_secao_id.is_(None))
+        
+        existing = await db.execute(query)
         premissa = existing.scalar_one_or_none()
         
         if premissa:
             # Atualizar
-            update_data = data.model_dump(exclude={'cenario_id', 'funcao_id', 'mes', 'ano'})
+            update_data = data.model_dump(exclude={'cenario_id', 'funcao_id', 'mes', 'ano', 'cenario_secao_id'})
             for key, value in update_data.items():
                 setattr(premissa, key, value)
         else:
@@ -1199,6 +1264,10 @@ async def bulk_premissas_funcao(
             db.add(premissa)
         
         resultados.append(premissa)
+    
+    # Invalidar custos calculados (pois as premissas mudaram)
+    # Invalida todo o cenário já que as premissas afetam todos os cálculos
+    await invalidar_custos_cenario(db, cenario_id)
     
     await db.commit()
     for premissa in resultados:
@@ -1227,4 +1296,251 @@ async def delete_premissa_funcao(
     await db.delete(premissa)
     await db.commit()
     return {"message": "Premissa excluída com sucesso"}
+
+
+# ============================================
+# EMPRESAS DO CENÁRIO (Hierarquia Master-Detail)
+# Cenário > Empresa > Cliente > Seção
+# ============================================
+
+@router.get("/{cenario_id}/empresas", response_model=List[CenarioEmpresaComClientes])
+async def list_empresas_cenario(
+    cenario_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """Lista as empresas do cenário com clientes e seções (estrutura hierárquica completa)."""
+    # Verificar se cenário existe
+    cenario_result = await db.execute(select(Cenario).where(Cenario.id == cenario_id))
+    if not cenario_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Cenário não encontrado")
+    
+    result = await db.execute(
+        select(CenarioEmpresa)
+        .options(
+            selectinload(CenarioEmpresa.empresa),
+            selectinload(CenarioEmpresa.clientes)
+            .selectinload(CenarioCliente.secoes)
+            .selectinload(CenarioSecao.secao)
+        )
+        .where(CenarioEmpresa.cenario_id == cenario_id)
+        .order_by(CenarioEmpresa.created_at)
+    )
+    return result.scalars().all()
+
+
+@router.post("/{cenario_id}/empresas", response_model=CenarioEmpresaResponse)
+async def add_empresa_cenario(
+    cenario_id: UUID,
+    data: CenarioEmpresaCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Adiciona uma empresa ao cenário."""
+    # Verificar se cenário existe
+    cenario_result = await db.execute(select(Cenario).where(Cenario.id == cenario_id))
+    cenario = cenario_result.scalar_one_or_none()
+    if not cenario:
+        raise HTTPException(status_code=404, detail="Cenário não encontrado")
+    
+    if cenario.status == "BLOQUEADO":
+        raise HTTPException(status_code=400, detail="Cenário bloqueado não pode ser alterado")
+    
+    # Verificar se empresa já existe no cenário
+    existing = await db.execute(
+        select(CenarioEmpresa).where(
+            CenarioEmpresa.cenario_id == cenario_id,
+            CenarioEmpresa.empresa_id == data.empresa_id
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Empresa já existe neste cenário")
+    
+    cenario_empresa = CenarioEmpresa(
+        cenario_id=cenario_id,
+        empresa_id=data.empresa_id
+    )
+    db.add(cenario_empresa)
+    await db.commit()
+    await db.refresh(cenario_empresa)
+    return cenario_empresa
+
+
+@router.delete("/{cenario_id}/empresas/{cenario_empresa_id}")
+async def delete_empresa_cenario(
+    cenario_id: UUID,
+    cenario_empresa_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """Remove uma empresa do cenário (e todos os clientes/seções associados)."""
+    result = await db.execute(
+        select(CenarioEmpresa).where(
+            CenarioEmpresa.id == cenario_empresa_id,
+            CenarioEmpresa.cenario_id == cenario_id
+        )
+    )
+    cenario_empresa = result.scalar_one_or_none()
+    if not cenario_empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada no cenário")
+    
+    await db.delete(cenario_empresa)
+    await db.commit()
+    return {"message": "Empresa removida do cenário com sucesso"}
+
+
+# ============================================
+# CLIENTES DA EMPRESA (CenarioCliente)
+# ============================================
+
+@router.post("/{cenario_id}/empresas/{cenario_empresa_id}/clientes", response_model=CenarioClienteResponse)
+async def add_cliente_empresa(
+    cenario_id: UUID,
+    cenario_empresa_id: UUID,
+    data: CenarioClienteCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Adiciona um cliente a uma empresa do cenário."""
+    # Verificar se empresa existe no cenário
+    empresa_result = await db.execute(
+        select(CenarioEmpresa).where(
+            CenarioEmpresa.id == cenario_empresa_id,
+            CenarioEmpresa.cenario_id == cenario_id
+        )
+    )
+    cenario_empresa = empresa_result.scalar_one_or_none()
+    if not cenario_empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada no cenário")
+    
+    # Verificar se cliente já existe nesta empresa
+    existing = await db.execute(
+        select(CenarioCliente).where(
+            CenarioCliente.cenario_empresa_id == cenario_empresa_id,
+            CenarioCliente.cliente_nw_codigo == data.cliente_nw_codigo,
+            CenarioCliente.ativo == True
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Cliente já existe nesta empresa")
+    
+    cliente = CenarioCliente(
+        cenario_empresa_id=cenario_empresa_id,
+        cliente_nw_codigo=data.cliente_nw_codigo,
+        nome_cliente=data.nome_cliente
+    )
+    db.add(cliente)
+    await db.commit()
+    await db.refresh(cliente)
+    return cliente
+
+
+@router.delete("/{cenario_id}/empresas/{cenario_empresa_id}/clientes/{cliente_id}")
+async def delete_cliente_empresa(
+    cenario_id: UUID,
+    cenario_empresa_id: UUID,
+    cliente_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """Remove um cliente da empresa (e suas seções, quadro e premissas em cascata)."""
+    result = await db.execute(
+        select(CenarioCliente).where(
+            CenarioCliente.id == cliente_id,
+            CenarioCliente.cenario_empresa_id == cenario_empresa_id
+        )
+    )
+    cliente = result.scalar_one_or_none()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado na empresa")
+    
+    # Delete físico - remove completamente (CASCADE remove seções, quadro, premissas e spans)
+    await db.delete(cliente)
+    await db.commit()
+    return {"message": "Cliente e todos os dados relacionados removidos com sucesso"}
+
+
+# ============================================
+# SEÇÕES DO CLIENTE (CenarioSecao)
+# ============================================
+
+@router.post("/{cenario_id}/empresas/{cenario_empresa_id}/clientes/{cliente_id}/secoes", response_model=CenarioSecaoResponse)
+async def add_secao_cliente(
+    cenario_id: UUID,
+    cenario_empresa_id: UUID,
+    cliente_id: UUID,
+    data: CenarioSecaoCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Adiciona uma seção a um cliente."""
+    # Verificar se cliente existe na empresa
+    cliente_result = await db.execute(
+        select(CenarioCliente).where(
+            CenarioCliente.id == cliente_id,
+            CenarioCliente.cenario_empresa_id == cenario_empresa_id,
+            CenarioCliente.ativo == True
+        )
+    )
+    cliente = cliente_result.scalar_one_or_none()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado na empresa")
+    
+    # Verificar se seção existe
+    secao_result = await db.execute(select(Secao).where(Secao.id == data.secao_id))
+    if not secao_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Seção não encontrada")
+    
+    # Verificar se seção já está associada a este cliente
+    existing = await db.execute(
+        select(CenarioSecao).where(
+            CenarioSecao.cenario_cliente_id == cliente_id,
+            CenarioSecao.secao_id == data.secao_id,
+            CenarioSecao.ativo == True
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Seção já está associada a este cliente")
+    
+    cenario_secao = CenarioSecao(
+        cenario_cliente_id=cliente_id,
+        secao_id=data.secao_id
+    )
+    db.add(cenario_secao)
+    await db.commit()
+    await db.refresh(cenario_secao)
+    
+    # Carregar relacionamento para retorno
+    await db.refresh(cenario_secao, attribute_names=['secao'])
+    return cenario_secao
+
+
+@router.delete("/{cenario_id}/empresas/{cenario_empresa_id}/clientes/{cliente_id}/secoes/{secao_id}")
+async def delete_secao_cliente(
+    cenario_id: UUID,
+    cenario_empresa_id: UUID,
+    cliente_id: UUID,
+    secao_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """Remove uma seção de um cliente."""
+    # Verificar se cliente existe na empresa
+    cliente_result = await db.execute(
+        select(CenarioCliente).where(
+            CenarioCliente.id == cliente_id,
+            CenarioCliente.cenario_empresa_id == cenario_empresa_id
+        )
+    )
+    if not cliente_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Cliente não encontrado na empresa")
+    
+    # Buscar a seção
+    result = await db.execute(
+        select(CenarioSecao).where(
+            CenarioSecao.id == secao_id,
+            CenarioSecao.cenario_cliente_id == cliente_id
+        )
+    )
+    cenario_secao = result.scalar_one_or_none()
+    if not cenario_secao:
+        raise HTTPException(status_code=404, detail="Seção não encontrada")
+    
+    # Delete físico - remove completamente (CASCADE remove quadro, premissas e spans)
+    await db.delete(cenario_secao)
+    await db.commit()
+    return {"message": "Seção e todos os dados relacionados removidos com sucesso"}
 
