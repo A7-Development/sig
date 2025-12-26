@@ -756,14 +756,43 @@ export default function CenariosPage() {
                 </div>
               </div>
             ) : abaAtiva === 'receitas' ? (
-              /* Painel de Receitas - Master-Detail Layout */
-              <ReceitasPanel
-                cenarioId={cenarioSelecionado.id}
-                mesInicio={cenarioSelecionado.mes_inicio}
-                anoInicio={cenarioSelecionado.ano_inicio}
-                mesFim={cenarioSelecionado.mes_fim}
-                anoFim={cenarioSelecionado.ano_fim}
-              />
+              /* Layout Master-Detail para Receitas: Árvore à esquerda, Painel à direita */
+              <div className="h-full flex">
+                {/* Painel Esquerdo: Árvore de Navegação */}
+                <div className="w-80 border-r bg-muted/10 flex-shrink-0">
+                  <MasterDetailTree
+                    cenarioId={cenarioSelecionado.id}
+                    onNodeSelect={setSelectedNode}
+                    onSecoesLoaded={setTodasSecoesCenario}
+                    selectedSecaoId={selectedNode?.secao?.id}
+                    selectedCCId={selectedNode?.centroCusto?.id}
+                  />
+                </div>
+                
+                {/* Painel Direito: Receitas */}
+                <div className="flex-1 overflow-auto">
+                  {selectedNode?.type === 'centro_custo' && selectedNode.centroCusto && selectedNode.secao ? (
+                    <ReceitasPanel
+                      cenarioId={cenarioSelecionado.id}
+                      centroCustoId={selectedNode.centroCusto.id}
+                      centroCustoNome={selectedNode.centroCusto.nome}
+                      secaoNome={selectedNode.secao.secao?.nome || 'Seção'}
+                      mesInicio={cenarioSelecionado.mes_inicio}
+                      anoInicio={cenarioSelecionado.ano_inicio}
+                      mesFim={cenarioSelecionado.mes_fim}
+                      anoFim={cenarioSelecionado.ano_fim}
+                    />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
+                      <TrendingUp className="h-12 w-12 mb-4 opacity-30" />
+                      <h3 className="text-lg font-medium mb-2">Selecione um Centro de Custo</h3>
+                      <p className="text-sm max-w-md text-center">
+                        Expanda uma seção na árvore à esquerda e clique em um Centro de Custo para gerenciar receitas
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
             ) : abaAtiva === 'dre' ? (
               <div className="h-full overflow-auto">
                 <DREPanel

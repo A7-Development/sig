@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api/client';
 import { Button } from '@/components/ui/button';
@@ -30,23 +30,24 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
 import { 
   Plus, Pencil, Trash2, DollarSign, TrendingUp, 
-  Calculator, ChevronDown, ChevronRight, Briefcase,
-  Building2, User, Loader2, Save, X
+  Briefcase, Loader2, Save, X
 } from 'lucide-react';
 import { 
   ReceitaCenario, ReceitaCenarioCreate, ReceitaPremissaMes, 
-  TipoReceita, CentroCusto, Funcao, cenariosApi 
+  TipoReceita, Funcao, cenariosApi 
 } from '@/lib/api/orcamento';
 import { useAuthStore } from '@/stores/auth-store';
 
 interface ReceitasPanelProps {
   cenarioId: string;
+  centroCustoId: string;
+  centroCustoNome: string;
+  secaoNome: string;
   mesInicio: number;
   anoInicio: number;
   mesFim: number;
@@ -62,22 +63,15 @@ const TIPOS_CALCULO = [
 
 const MESES_NOMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
-// Helpers
-const truncateText = (text: string | undefined | null, maxLength: number = 20): string => {
-  if (!text) return "";
-  return text.length > maxLength ? text.substring(0, maxLength) + "…" : text;
-};
-
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 };
 
-// ============================================
-// Componente Principal - Master-Detail Layout
-// ============================================
-
 export function ReceitasPanel({ 
   cenarioId, 
+  centroCustoId,
+  centroCustoNome,
+  secaoNome,
   mesInicio,
   anoInicio,
   mesFim,
@@ -85,15 +79,6 @@ export function ReceitasPanel({
 }: ReceitasPanelProps) {
   const { accessToken: token } = useAuthStore();
   const queryClient = useQueryClient();
-  
-  // Estado da árvore
-  const [expandedSecoes, setExpandedSecoes] = useState<Set<string>>(new Set());
-  const [selectedCC, setSelectedCC] = useState<{
-    secaoId: string;
-    secaoNome: string;
-    ccId: string;
-    ccNome: string;
-  } | null>(null);
   
   // Estado do formulário
   const [showForm, setShowForm] = useState(false);
@@ -137,54 +122,15 @@ export function ReceitasPanel({
     return meses;
   }, [anoInicio, mesInicio, anoFim, mesFim]);
 
-  // Buscar estrutura do cenário (seções e CCs)
-  const { data: estrutura, isLoading: loadingEstrutura } = useQuery({
-    queryKey: ['receitas-estrutura', cenarioId],
-    queryFn: async () => {
-      if (!token) return [];
-      const empresas = await cenariosApi.getEmpresas(token, cenarioId);
-      
-      // Para cada empresa, buscar seções
-      const secoesPromises = empresas.map(async (emp) => {
-        try {
-          const secoes = await api.get<any[]>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${emp.id}/secoes`, token || undefined);
-          return { empresa: emp, secoes };
-        } catch {
-          return { empresa: emp, secoes: [] };
-        }
-      });
-      
-      const resultado = await Promise.all(secoesPromises);
-      return resultado;
-    },
-    enabled: !!token && !!cenarioId,
-  });
-
-  // Buscar CCs de uma seção específica
-  const fetchCCsSecao = useCallback(async (secaoId: string) => {
-    if (!token) return [];
-    try {
-      const ccs = await api.get<any[]>(`/api/v1/orcamento/cenarios/${cenarioId}/secoes/${secaoId}/centros-custo`, token || undefined);
-      return ccs;
-    } catch {
-      return [];
-    }
-  }, [token, cenarioId]);
-
-  // Estado para CCs por seção
-  const [ccsPorSecao, setCCsPorSecao] = useState<Record<string, any[]>>({});
-  const [loadingCCs, setLoadingCCs] = useState<Set<string>>(new Set());
-
   // Buscar receitas do CC selecionado
   const { data: receitas = [], isLoading: loadingReceitas, refetch: refetchReceitas } = useQuery<ReceitaCenario[]>({
-    queryKey: ['receitas-cenario', cenarioId, selectedCC?.ccId],
+    queryKey: ['receitas-cenario', cenarioId, centroCustoId],
     queryFn: async () => {
-      if (!selectedCC?.ccId) return [];
       const params = new URLSearchParams();
-      params.append('centro_custo_id', selectedCC.ccId);
+      params.append('centro_custo_id', centroCustoId);
       return await api.get<ReceitaCenario[]>(`/api/v1/orcamento/receitas/cenarios/${cenarioId}?${params}`, token || undefined);
     },
-    enabled: !!selectedCC?.ccId && !!token,
+    enabled: !!centroCustoId && !!token,
   });
 
   // Buscar tipos de receita
@@ -198,11 +144,11 @@ export function ReceitasPanel({
 
   // Buscar funções disponíveis no CC
   const { data: funcoes = [] } = useQuery<any[]>({
-    queryKey: ['funcoes-cc', cenarioId, selectedCC?.ccId],
+    queryKey: ['funcoes-cc', cenarioId, centroCustoId],
     queryFn: async () => {
-      if (!selectedCC?.ccId || !token) return [];
+      if (!centroCustoId || !token) return [];
       // Buscar funções do quadro de pessoal do CC
-      const quadro = await cenariosApi.getQuadro(token, cenarioId, { centro_custo_id: selectedCC.ccId });
+      const quadro = await cenariosApi.getQuadro(token, cenarioId, { centro_custo_id: centroCustoId });
       // Extrair funções únicas
       const funcoesMap = new Map<string, any>();
       quadro.forEach(q => {
@@ -212,37 +158,8 @@ export function ReceitasPanel({
       });
       return Array.from(funcoesMap.values());
     },
-    enabled: !!selectedCC?.ccId && !!token,
+    enabled: !!centroCustoId && !!token,
   });
-
-  // Expandir seção e carregar CCs
-  const toggleSecao = async (secaoId: string) => {
-    const newExpanded = new Set(expandedSecoes);
-    if (newExpanded.has(secaoId)) {
-      newExpanded.delete(secaoId);
-    } else {
-      newExpanded.add(secaoId);
-      // Carregar CCs se ainda não carregou
-      if (!ccsPorSecao[secaoId]) {
-        setLoadingCCs(prev => new Set(prev).add(secaoId));
-        const ccs = await fetchCCsSecao(secaoId);
-        setCCsPorSecao(prev => ({ ...prev, [secaoId]: ccs }));
-        setLoadingCCs(prev => {
-          const next = new Set(prev);
-          next.delete(secaoId);
-          return next;
-        });
-      }
-    }
-    setExpandedSecoes(newExpanded);
-  };
-
-  // Selecionar CC
-  const handleSelectCC = (secaoId: string, secaoNome: string, ccId: string, ccNome: string) => {
-    setSelectedCC({ secaoId, secaoNome, ccId, ccNome });
-    setShowForm(false);
-    setEditingReceita(null);
-  };
 
   // Reset form
   const resetForm = () => {
@@ -298,8 +215,6 @@ export function ReceitasPanel({
 
   // Salvar receita
   const handleSave = async () => {
-    if (!selectedCC) return;
-    
     // Validações
     if (!formData.tipo_receita_id) {
       toast.error('Selecione um tipo de receita');
@@ -319,7 +234,7 @@ export function ReceitasPanel({
     setSaving(true);
     try {
       const payload: ReceitaCenarioCreate = {
-        centro_custo_id: selectedCC.ccId,
+        centro_custo_id: centroCustoId,
         tipo_receita_id: formData.tipo_receita_id,
         tipo_calculo: formData.tipo_calculo as 'FIXA_CC' | 'FIXA_HC' | 'FIXA_PA' | 'VARIAVEL',
         funcao_pa_id: formData.funcao_pa_id || undefined,
@@ -397,118 +312,7 @@ export function ReceitasPanel({
     }));
   };
 
-  // Renderizar árvore de seções e CCs
-  const renderTree = () => {
-    if (loadingEstrutura) {
-      return (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="size-5 animate-spin text-muted-foreground" />
-        </div>
-      );
-    }
-
-    if (!estrutura || estrutura.length === 0) {
-      return (
-        <div className="text-center py-8 text-muted-foreground text-sm">
-          Nenhuma estrutura encontrada.<br/>
-          Configure empresas e seções no cenário.
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-1">
-        {estrutura.map(({ empresa, secoes }) => (
-          <div key={empresa.id}>
-            {/* Empresa */}
-            <div className="flex items-center gap-2 px-2 py-1.5 text-sm font-medium text-muted-foreground">
-              <Building2 className="size-4" />
-              <span>{truncateText(empresa.empresa?.razao_social || empresa.empresa?.codigo, 25)}</span>
-            </div>
-            
-            {/* Seções */}
-            <div className="ml-4">
-              {secoes.map((secao: any) => {
-                const secaoId = secao.id;
-                const isExpanded = expandedSecoes.has(secaoId);
-                const ccs = ccsPorSecao[secaoId] || [];
-                const isLoadingCC = loadingCCs.has(secaoId);
-                
-                return (
-                  <div key={secaoId}>
-                    <div
-                      className={cn(
-                        "flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer hover:bg-muted/50 text-sm",
-                        isExpanded && "bg-muted/30"
-                      )}
-                      onClick={() => toggleSecao(secaoId)}
-                    >
-                      {isLoadingCC ? (
-                        <Loader2 className="size-3 animate-spin" />
-                      ) : isExpanded ? (
-                        <ChevronDown className="size-3" />
-                      ) : (
-                        <ChevronRight className="size-3" />
-                      )}
-                      <Building2 className="size-3.5 text-orange-600" />
-                      <span className="flex-1">{truncateText(secao.secao?.nome || 'Seção', 20)}</span>
-                      {ccs.length > 0 && (
-                        <Badge variant="secondary" className="text-[10px] h-4 px-1">
-                          {ccs.length}
-                        </Badge>
-                      )}
-                    </div>
-                    
-                    {/* Centros de Custo */}
-                    {isExpanded && (
-                      <div className="ml-4 mt-1 space-y-0.5">
-                        {ccs.map((cc: any) => {
-                          const ccData = cc.centro_custo || cc;
-                          const ccId = ccData.id;
-                          const isSelected = selectedCC?.ccId === ccId;
-                          
-                          return (
-                            <div
-                              key={ccId}
-                              className={cn(
-                                "flex items-center gap-2 px-2 py-1 rounded-md cursor-pointer text-xs",
-                                isSelected 
-                                  ? "bg-primary text-primary-foreground" 
-                                  : "hover:bg-muted/50"
-                              )}
-                              onClick={() => handleSelectCC(
-                                secaoId, 
-                                secao.secao?.nome || 'Seção',
-                                ccId, 
-                                ccData.nome || ccData.codigo
-                              )}
-                            >
-                              <Briefcase className={cn("size-3", isSelected ? "text-primary-foreground" : "text-blue-600")} />
-                              <span className="flex-1">{truncateText(ccData.nome || ccData.codigo, 18)}</span>
-                              <span className={cn("font-mono text-[10px]", isSelected ? "" : "text-muted-foreground")}>
-                                {ccData.codigo}
-                              </span>
-                            </div>
-                          );
-                        })}
-                        {ccs.length === 0 && !isLoadingCC && (
-                          <div className="text-xs text-muted-foreground italic px-2 py-1">
-                            Nenhum CC cadastrado
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  // Renderizar grid de premissas variáveis (master-detail)
+  // Renderizar grid de premissas variáveis
   const renderPremissasGrid = () => (
     <div className="border rounded-lg overflow-hidden">
       <Table>
@@ -593,255 +397,259 @@ export function ReceitasPanel({
     </div>
   );
 
-  // Renderizar painel de detalhe (direita)
-  const renderDetail = () => {
-    if (!selectedCC) {
-      return (
-        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-          <DollarSign className="size-12 mb-4 opacity-30" />
-          <p className="text-sm">Selecione um Centro de Custo</p>
-          <p className="text-xs mt-1">para gerenciar suas receitas</p>
-        </div>
-      );
-    }
-
-    return (
-      <div className="flex flex-col h-full">
-        {/* Header do CC selecionado */}
-        <div className="flex items-center justify-between border-b pb-3 mb-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <Briefcase className="size-4 text-blue-600" />
-              <h3 className="font-semibold">{selectedCC.ccNome}</h3>
-            </div>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Seção: {selectedCC.secaoNome}
-            </p>
+  return (
+    <div className="p-4 space-y-4">
+      {/* Header do CC selecionado */}
+      <div className="flex items-center justify-between border-b pb-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <Briefcase className="size-5 text-blue-600" />
+            <h2 className="text-lg font-semibold">{centroCustoNome}</h2>
+            <Badge variant="outline" className="text-xs">RECEITAS</Badge>
           </div>
-          <Button onClick={() => { resetForm(); setShowForm(true); }} size="sm">
-            <Plus className="size-4 mr-1" />
-            Nova Receita
-          </Button>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Seção: {secaoNome}
+          </p>
         </div>
+        <Button onClick={() => { resetForm(); setShowForm(true); }}>
+          <Plus className="size-4 mr-2" />
+          Nova Receita
+        </Button>
+      </div>
 
-        {/* Formulário de cadastro/edição */}
-        {showForm && (
-          <Card className="mb-4 border-primary/20">
-            <CardHeader className="py-3">
-              <CardTitle className="text-sm">
-                {editingReceita ? 'Editar Receita' : 'Nova Receita'}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Tipo de Receita */}
+      {/* Formulário de cadastro/edição */}
+      {showForm && (
+        <Card className="border-primary/20">
+          <CardHeader className="py-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <TrendingUp className="size-4 text-green-600" />
+              {editingReceita ? 'Editar Receita' : 'Nova Receita'}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Tipo de Receita e Tipo de Cálculo */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-xs">Tipo de Receita *</Label>
+                <Select
+                  value={formData.tipo_receita_id}
+                  onValueChange={(v) => setFormData(prev => ({ ...prev, tipo_receita_id: v }))}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Selecione..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tiposReceita.map(tipo => (
+                      <SelectItem key={tipo.id} value={tipo.id}>
+                        {tipo.codigo} - {tipo.nome}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <Label className="text-xs">Tipo de Cálculo *</Label>
+                <Select
+                  value={formData.tipo_calculo}
+                  onValueChange={(v) => setFormData(prev => ({ ...prev, tipo_calculo: v, funcao_pa_id: '' }))}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TIPOS_CALCULO.map(tipo => (
+                      <SelectItem key={tipo.value} value={tipo.value}>
+                        {tipo.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  {TIPOS_CALCULO.find(t => t.value === formData.tipo_calculo)?.desc}
+                </p>
+              </div>
+            </div>
+
+            {/* Função de referência (obrigatório para HC/PA/Variável) */}
+            {precisaFuncao && (
+              <div>
+                <Label className="text-xs">
+                  Função de Referência * 
+                  <span className="text-muted-foreground ml-1">
+                    (para calcular {formData.tipo_calculo === 'FIXA_HC' ? 'HC' : formData.tipo_calculo === 'FIXA_PA' ? 'PA' : 'produtividade'})
+                  </span>
+                </Label>
+                <Select
+                  value={formData.funcao_pa_id}
+                  onValueChange={(v) => setFormData(prev => ({ ...prev, funcao_pa_id: v }))}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Selecione a função..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {funcoes.length === 0 ? (
+                      <div className="text-xs text-muted-foreground p-2">
+                        Nenhuma função cadastrada neste CC
+                      </div>
+                    ) : (
+                      funcoes.map((f: any) => (
+                        <SelectItem key={f.id} value={f.id}>
+                          {f.codigo} - {f.nome}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Valores */}
+            {formData.tipo_calculo !== 'VARIAVEL' && (
+              <div>
+                <Label className="text-xs">
+                  Valor {formData.tipo_calculo === 'FIXA_CC' ? 'Mensal Fixo' : 'por Unidade'} *
+                </Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={formData.valor_fixo}
+                  onChange={(e) => setFormData(prev => ({ ...prev, valor_fixo: e.target.value }))}
+                  placeholder="0.00"
+                  className="h-9"
+                />
+              </div>
+            )}
+
+            {/* Mínimo/Máximo por PA (apenas variável) */}
+            {formData.tipo_calculo === 'VARIAVEL' && (
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label className="text-xs">Tipo de Receita *</Label>
-                  <Select
-                    value={formData.tipo_receita_id}
-                    onValueChange={(v) => setFormData(prev => ({ ...prev, tipo_receita_id: v }))}
-                  >
-                    <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Selecione..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {tiposReceita.map(tipo => (
-                        <SelectItem key={tipo.id} value={tipo.id}>
-                          {tipo.codigo} - {tipo.nome}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div>
-                  <Label className="text-xs">Tipo de Cálculo *</Label>
-                  <Select
-                    value={formData.tipo_calculo}
-                    onValueChange={(v) => setFormData(prev => ({ ...prev, tipo_calculo: v, funcao_pa_id: '' }))}
-                  >
-                    <SelectTrigger className="h-9">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {TIPOS_CALCULO.map(tipo => (
-                        <SelectItem key={tipo.value} value={tipo.value}>
-                          <div>
-                            <span className="font-medium">{tipo.label}</span>
-                            <span className="text-xs text-muted-foreground ml-2">{tipo.desc}</span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Função de referência (obrigatório para HC/PA/Variável) */}
-              {precisaFuncao && (
-                <div>
-                  <Label className="text-xs">
-                    Função de Referência * 
-                    <span className="text-muted-foreground ml-1">
-                      (para calcular {formData.tipo_calculo === 'FIXA_HC' ? 'HC' : formData.tipo_calculo === 'FIXA_PA' ? 'PA' : 'produtividade'})
-                    </span>
-                  </Label>
-                  <Select
-                    value={formData.funcao_pa_id}
-                    onValueChange={(v) => setFormData(prev => ({ ...prev, funcao_pa_id: v }))}
-                  >
-                    <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Selecione a função..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {funcoes.length === 0 ? (
-                        <div className="text-xs text-muted-foreground p-2">
-                          Nenhuma função cadastrada neste CC
-                        </div>
-                      ) : (
-                        funcoes.map((f: any) => (
-                          <SelectItem key={f.id} value={f.id}>
-                            {f.codigo} - {f.nome}
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              {/* Valores */}
-              {formData.tipo_calculo !== 'VARIAVEL' && (
-                <div>
-                  <Label className="text-xs">
-                    Valor {formData.tipo_calculo === 'FIXA_CC' ? 'Mensal Fixo' : 'por Unidade'} *
-                  </Label>
+                  <Label className="text-xs">Valor Mínimo por PA</Label>
                   <Input
                     type="number"
                     step="0.01"
-                    value={formData.valor_fixo}
-                    onChange={(e) => setFormData(prev => ({ ...prev, valor_fixo: e.target.value }))}
+                    value={formData.valor_minimo_pa}
+                    onChange={(e) => setFormData(prev => ({ ...prev, valor_minimo_pa: e.target.value }))}
                     placeholder="0.00"
                     className="h-9"
                   />
                 </div>
-              )}
-
-              {/* Mínimo/Máximo por PA (apenas variável) */}
-              {formData.tipo_calculo === 'VARIAVEL' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label className="text-xs">Valor Mínimo por PA</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={formData.valor_minimo_pa}
-                      onChange={(e) => setFormData(prev => ({ ...prev, valor_minimo_pa: e.target.value }))}
-                      placeholder="0.00"
-                      className="h-9"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Valor Máximo por PA</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={formData.valor_maximo_pa}
-                      onChange={(e) => setFormData(prev => ({ ...prev, valor_maximo_pa: e.target.value }))}
-                      placeholder="0.00"
-                      className="h-9"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Grid de Premissas Variáveis - Master-Detail */}
-              {formData.tipo_calculo === 'VARIAVEL' && (
                 <div>
-                  <Label className="text-xs mb-2 block">
-                    Premissas Mensais de Receita Variável
-                  </Label>
-                  <ScrollArea className="h-[200px]">
-                    {renderPremissasGrid()}
-                  </ScrollArea>
+                  <Label className="text-xs">Valor Máximo por PA</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={formData.valor_maximo_pa}
+                    onChange={(e) => setFormData(prev => ({ ...prev, valor_maximo_pa: e.target.value }))}
+                    placeholder="0.00"
+                    className="h-9"
+                  />
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* Descrição */}
+            {/* Grid de Premissas Variáveis */}
+            {formData.tipo_calculo === 'VARIAVEL' && (
               <div>
-                <Label className="text-xs">Descrição</Label>
-                <Input
-                  value={formData.descricao}
-                  onChange={(e) => setFormData(prev => ({ ...prev, descricao: e.target.value }))}
-                  placeholder="Descrição opcional..."
-                  className="h-9"
-                />
+                <Label className="text-xs mb-2 block">
+                  Premissas Mensais de Receita Variável
+                </Label>
+                <ScrollArea className="h-[200px]">
+                  {renderPremissasGrid()}
+                </ScrollArea>
               </div>
+            )}
 
-              {/* Ações */}
-              <div className="flex justify-end gap-2 pt-2">
-                <Button variant="outline" size="sm" onClick={resetForm} disabled={saving}>
-                  <X className="size-3 mr-1" />
-                  Cancelar
-                </Button>
-                <Button size="sm" onClick={handleSave} disabled={saving}>
-                  {saving ? (
-                    <Loader2 className="size-3 mr-1 animate-spin" />
-                  ) : (
-                    <Save className="size-3 mr-1" />
-                  )}
-                  Salvar
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+            {/* Descrição */}
+            <div>
+              <Label className="text-xs">Descrição</Label>
+              <Input
+                value={formData.descricao}
+                onChange={(e) => setFormData(prev => ({ ...prev, descricao: e.target.value }))}
+                placeholder="Descrição opcional..."
+                className="h-9"
+              />
+            </div>
 
-        {/* Lista de receitas cadastradas */}
-        <div className="flex-1 overflow-auto">
-          <h4 className="text-sm font-medium mb-2">Receitas Cadastradas</h4>
-          
-          {loadingReceitas ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="size-5 animate-spin" />
+            {/* Ações */}
+            <div className="flex justify-end gap-2 pt-2 border-t">
+              <Button variant="outline" size="sm" onClick={resetForm} disabled={saving}>
+                <X className="size-3 mr-1" />
+                Cancelar
+              </Button>
+              <Button size="sm" onClick={handleSave} disabled={saving}>
+                {saving ? (
+                  <Loader2 className="size-3 mr-1 animate-spin" />
+                ) : (
+                  <Save className="size-3 mr-1" />
+                )}
+                Salvar
+              </Button>
             </div>
-          ) : receitas.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground text-sm border rounded-lg bg-muted/10">
-              <TrendingUp className="size-8 mx-auto mb-2 opacity-30" />
-              <p>Nenhuma receita cadastrada</p>
-              <p className="text-xs mt-1">Clique em "Nova Receita" para começar</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {receitas.map(receita => (
-                <Card key={receita.id} className="hover:bg-muted/30">
-                  <CardContent className="py-3 px-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <DollarSign className="size-4 text-green-600" />
-                          <span className="font-medium text-sm">
-                            {receita.tipo_receita?.nome || 'Receita'}
-                          </span>
-                          <Badge variant="outline" className="text-[10px]">
-                            {TIPOS_CALCULO.find(t => t.value === receita.tipo_calculo)?.label}
-                          </Badge>
-                        </div>
-                        
-                        <div className="mt-1 text-xs text-muted-foreground space-x-3">
-                          {receita.valor_fixo && (
-                            <span>Valor: {formatCurrency(receita.valor_fixo)}</span>
-                          )}
-                          {receita.funcao_pa && (
-                            <span>Função: {receita.funcao_pa.nome}</span>
-                          )}
-                          {receita.descricao && (
-                            <span className="italic">"{receita.descricao}"</span>
-                          )}
-                        </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Lista de receitas cadastradas */}
+      <div>
+        <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
+          <DollarSign className="size-4 text-green-600" />
+          Receitas Cadastradas
+          <Badge variant="secondary" className="text-xs">{receitas.length}</Badge>
+        </h4>
+        
+        {loadingReceitas ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="size-5 animate-spin" />
+          </div>
+        ) : receitas.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground text-sm border rounded-lg bg-muted/10">
+            <TrendingUp className="size-8 mx-auto mb-2 opacity-30" />
+            <p>Nenhuma receita cadastrada</p>
+            <p className="text-xs mt-1">Clique em "Nova Receita" para começar</p>
+          </div>
+        ) : (
+          <div className="border rounded-lg overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/30">
+                  <TableHead>Tipo de Receita</TableHead>
+                  <TableHead>Cálculo</TableHead>
+                  <TableHead>Função</TableHead>
+                  <TableHead className="text-right">Valor</TableHead>
+                  <TableHead className="text-center w-[100px]">Ações</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {receitas.map(receita => (
+                  <TableRow key={receita.id}>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="size-4 text-green-600" />
+                        <span className="font-medium">{receita.tipo_receita?.nome || '-'}</span>
                       </div>
-                      
-                      <div className="flex items-center gap-1">
+                      {receita.descricao && (
+                        <p className="text-xs text-muted-foreground mt-0.5">{receita.descricao}</p>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="text-xs">
+                        {TIPOS_CALCULO.find(t => t.value === receita.tipo_calculo)?.label}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {receita.funcao_pa ? (
+                        <span className="text-sm">{receita.funcao_pa.nome}</span>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right font-mono">
+                      {receita.valor_fixo ? formatCurrency(receita.valor_fixo) : '-'}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center justify-center gap-1">
                         <Button
                           variant="ghost"
                           size="icon"
@@ -862,43 +670,14 @@ export function ReceitasPanel({
                           <Trash2 className="size-3.5" />
                         </Button>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
       </div>
-    );
-  };
-
-  return (
-    <div className="master-detail-layout">
-      {/* Painel esquerdo - Árvore */}
-      <Card className="master-panel">
-        <CardHeader className="py-3 px-4 border-b">
-          <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <Building2 className="size-4" />
-            Estrutura
-          </CardTitle>
-          <CardDescription className="text-xs">
-            Selecione um Centro de Custo
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-2">
-          <ScrollArea className="h-[calc(100vh-280px)]">
-            {renderTree()}
-          </ScrollArea>
-        </CardContent>
-      </Card>
-
-      {/* Painel direito - Detalhe */}
-      <Card className="detail-panel">
-        <CardContent className="p-4 h-full">
-          {renderDetail()}
-        </CardContent>
-      </Card>
 
       {/* Dialog de confirmação de exclusão */}
       <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
