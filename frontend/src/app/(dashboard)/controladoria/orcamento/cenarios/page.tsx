@@ -776,7 +776,9 @@ export default function CenariosPage() {
                       cenarioId={cenarioSelecionado.id}
                       centroCustoId={selectedNode.centroCusto.id}
                       centroCustoNome={selectedNode.centroCusto.nome}
+                      centroCustoCodigo={selectedNode.centroCusto.codigo}
                       secaoNome={selectedNode.secao.secao?.nome || 'Seção'}
+                      empresaNome={selectedNode.empresa?.empresa?.nome_fantasia || selectedNode.empresa?.empresa?.razao_social}
                       mesInicio={cenarioSelecionado.mes_inicio}
                       anoInicio={cenarioSelecionado.ano_inicio}
                       mesFim={cenarioSelecionado.mes_fim}
