@@ -17,3 +17,5 @@ CREATE TABLE IF NOT EXISTS cenario_secao_cc (
 CREATE INDEX IF NOT EXISTS ix_cenario_secao_cc_secao ON cenario_secao_cc(cenario_secao_id);
 CREATE INDEX IF NOT EXISTS ix_cenario_secao_cc_cc ON cenario_secao_cc(centro_custo_id);
 
+
+

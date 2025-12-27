@@ -27,3 +27,5 @@ WHERE table_name = 'produtos_tecnologia'
 AND column_name LIKE 'conta_contabil%'
 ORDER BY ordinal_position;
 
+
+

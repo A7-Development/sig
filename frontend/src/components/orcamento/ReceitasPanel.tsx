@@ -71,7 +71,7 @@ const INDICADORES_RECEITA = [
   { key: 'indice_conversao', label: 'Índice Conversão', desc: '% Conversão', step: 0.0001 },
   { key: 'ticket_medio', label: 'Ticket Médio', desc: 'R$ por venda', step: 0.01 },
   { key: 'fator', label: 'Fator', desc: 'Multiplicador', step: 0.01 },
-  { key: 'indice_estorno', label: '% Estorno', desc: 'Cancelamentos', step: 0.01 },
+  { key: 'indice_estorno', label: '% Estorno', desc: 'Cancelamentos (0-100%)', step: 0.01 },
 ] as const;
 
 const formatCurrency = (value: number) => {
@@ -130,6 +130,7 @@ export function ReceitasPanel({
     indice_estorno: number;
   }
   const [premissas, setPremissas] = useState<PremissaMes[]>([]);
+  
 
   // Gerar lista de meses do cenário
   const mesesPeriodo = useMemo(() => {
@@ -188,6 +189,27 @@ export function ReceitasPanel({
     enabled: !!centroCustoId && !!token,
   });
 
+  // Buscar dias úteis de cada mês do período
+  const { data: diasUteisData = [] } = useQuery<{ ano: number; mes: number; dias_uteis: number }[]>({
+    queryKey: ['dias-uteis', anoInicio, mesInicio, anoFim, mesFim],
+    queryFn: async () => {
+      return await api.get<{ ano: number; mes: number; dias_uteis: number }[]>(
+        `/api/v1/orcamento/receitas/dias-uteis?ano_inicio=${anoInicio}&mes_inicio=${mesInicio}&ano_fim=${anoFim}&mes_fim=${mesFim}`, 
+        token || undefined
+      );
+    },
+    enabled: !!token && anoInicio > 0 && anoFim > 0,
+    staleTime: 1000 * 60 * 60, // Cache por 1 hora (dias úteis não mudam frequentemente)
+  });
+
+  // Calcular dias úteis para exibição (memoizado para evitar loops)
+  const diasUteisMapeados = useMemo(() => {
+    return mesesPeriodo.map(m => {
+      const du = diasUteisData.find(d => d.ano === m.ano && d.mes === m.mes);
+      return du?.dias_uteis ?? 22; // Fallback para 22 dias úteis
+    });
+  }, [mesesPeriodo, diasUteisData]);
+
   // Carregar premissas quando selecionar uma receita variável
   useEffect(() => {
     if (selectedReceita?.tipo_calculo === 'VARIAVEL') {
@@ -205,7 +227,7 @@ export function ReceitasPanel({
           indice_conversao: existente?.indice_conversao ?? 0,
           ticket_medio: existente?.ticket_medio ?? 0,
           fator: existente?.fator ?? 1,
-          indice_estorno: existente?.indice_estorno ?? 0,
+          indice_estorno: Number(existente?.indice_estorno ?? 0), // Garantir que seja sempre um número
         };
       });
       
@@ -346,11 +368,11 @@ export function ReceitasPanel({
       const premissasData = premissas.map(p => ({
         mes: p.mes,
         ano: p.ano,
-        vopdu: p.vopdu,
-        indice_conversao: p.indice_conversao,
-        ticket_medio: p.ticket_medio,
-        fator: p.fator,
-        indice_estorno: p.indice_estorno,
+        vopdu: Number(p.vopdu) || 0,
+        indice_conversao: Number(p.indice_conversao) || 0,
+        ticket_medio: Number(p.ticket_medio) || 0,
+        fator: Number(p.fator) || 1,
+        indice_estorno: Number(p.indice_estorno) || 0, // Garantir que seja sempre um número válido
       }));
       
       // PUT com objeto { premissas: [...] }
@@ -584,6 +606,21 @@ export function ReceitasPanel({
                             </TableRow>
                           </TableHeader>
                           <TableBody>
+                            {/* Linha de Dias Úteis - Calculado pelo sistema (não editável) */}
+                            <TableRow className="bg-blue-50/50">
+                              <TableCell className="sticky left-0 bg-blue-50/50 z-10 text-[10px] font-medium text-blue-700">
+                                Dias Úteis (DU)
+                              </TableCell>
+                              {diasUteisMapeados.map((du, idx) => (
+                                <TableCell key={idx} className="text-center p-0.5">
+                                  <span className="w-full h-6 text-[10px] font-mono text-blue-700 flex items-center justify-center">
+                                    {du}
+                                  </span>
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                            
+                            {/* Indicadores editáveis */}
                             {INDICADORES_RECEITA.map((indicador) => (
                               <TableRow key={indicador.key}>
                                 <TableCell className="sticky left-0 bg-background z-10 text-[10px] font-medium">
@@ -600,8 +637,19 @@ export function ReceitasPanel({
                                         type="number"
                                         step={indicador.step}
                                         min={0}
-                                        value={(p as any)[indicador.key]}
-                                        onChange={(e) => handleUpdateValue(idx, indicador.key, parseFloat(e.target.value) || 0)}
+                                        max={indicador.key === 'indice_estorno' ? 100 : undefined}
+                                        value={indicador.key === 'indice_estorno' 
+                                          ? ((p as any)[indicador.key] * 100) // Exibir como percentual (0-100)
+                                          : (p as any)[indicador.key]
+                                        }
+                                        onChange={(e) => {
+                                          const rawValue = parseFloat(e.target.value) || 0;
+                                          // Converter de percentual (0-100) para decimal (0-1) para indice_estorno
+                                          const finalValue = indicador.key === 'indice_estorno' 
+                                            ? Math.max(0, Math.min(100, rawValue)) / 100
+                                            : rawValue;
+                                          handleUpdateValue(idx, indicador.key, finalValue);
+                                        }}
                                         onBlur={() => setEditingCell(null)}
                                         onKeyDown={(e) => {
                                           if (e.key === 'Enter') {
@@ -661,7 +709,9 @@ export function ReceitasPanel({
                                           ? (p as any)[indicador.key].toFixed(2)
                                           : indicador.key === 'indice_conversao'
                                             ? (p as any)[indicador.key].toFixed(4)
-                                            : (p as any)[indicador.key].toFixed(2)
+                                            : indicador.key === 'indice_estorno'
+                                              ? ((p as any)[indicador.key] * 100).toFixed(2) // Exibir como percentual
+                                              : (p as any)[indicador.key].toFixed(2)
                                         }
                                       </button>
                                     )}
@@ -682,7 +732,7 @@ export function ReceitasPanel({
                         <div className="flex items-center gap-4">
                           <span className="text-muted-foreground">Fórmula:</span>
                           <code className="bg-background px-2 py-1 rounded text-[10px]">
-                            Receita = PA × VOPDU × Índice × Ticket × Fator × Dias Úteis × (1 - Estorno%)
+                            Receita = HC Capacity × VOPDU × Índice × Ticket × Fator × Dias Úteis × (1 - Estorno%)
                           </code>
                         </div>
                       </div>

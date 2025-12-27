@@ -60,6 +60,7 @@ class CalculoCustosService:
         self._tipos_custo: Dict[str, TipoCusto] = {}
         self._parametros: Dict[str, float] = {}
         self._custos_calculados: Dict[str, Decimal] = {}  # Para referências entre rubricas
+        self._premissas_cache: Dict[tuple, Dict] = {}  # Cache de premissas: (funcao_id, mes) -> dados
     
     async def carregar_tipos_custo(self) -> None:
         """Carrega todos os tipos de custo ativos."""
@@ -145,6 +146,42 @@ class CalculoCustosService:
         
         return todos_custos
     
+    async def _carregar_premissas_secao(
+        self, 
+        cenario_id: UUID, 
+        cenario_secao_id: UUID, 
+        ano: int
+    ) -> None:
+        """
+        Pré-carrega TODAS as premissas de uma seção de uma vez.
+        Otimização: evita N queries (1 por função/mês) substituindo por 1 query.
+        """
+        self._premissas_cache = {}
+        
+        result = await self.db.execute(
+            select(PremissaFuncaoMes).where(
+                PremissaFuncaoMes.cenario_id == cenario_id,
+                PremissaFuncaoMes.cenario_secao_id == cenario_secao_id,
+                PremissaFuncaoMes.ano == ano
+            )
+        )
+        premissas = result.scalars().all()
+        
+        # Indexar por (funcao_id, mes) para acesso O(1)
+        for p in premissas:
+            key = (p.funcao_id, p.mes)
+            self._premissas_cache[key] = {
+                'absenteismo': float(p.absenteismo or 0),
+                'abs_pct_justificado': float(p.abs_pct_justificado or 75),
+                'turnover': float(p.turnover or 0),
+                'ferias_indice': float(p.ferias_indice or 8.33),
+                'dias_treinamento': p.dias_treinamento,
+            }
+    
+    def _get_premissa_cached(self, funcao_id: UUID, mes: int) -> Optional[Dict]:
+        """Obtém premissa do cache (acesso O(1))."""
+        return self._premissas_cache.get((funcao_id, mes))
+    
     async def _calcular_custos_secao(
         self, 
         cenario_id: UUID, 
@@ -152,6 +189,9 @@ class CalculoCustosService:
         ano: int
     ) -> List[CustoCalculado]:
         """Calcula custos para uma seção específica."""
+        
+        # OTIMIZAÇÃO: Pré-carregar todas as premissas de uma vez
+        await self._carregar_premissas_secao(cenario_id, cenario_secao_id, ano)
         
         # Carregar quadro pessoal da seção
         result = await self.db.execute(
@@ -183,8 +223,8 @@ class CalculoCustosService:
                 if hc_operando <= 0:
                     continue
                 
-                # Carregar premissas do mês
-                premissa = await self._get_premissa(cenario_id, cenario_secao_id, quadro.funcao_id, mes, ano)
+                # OTIMIZAÇÃO: Usar premissa do cache (sem query)
+                premissa = self._get_premissa_cached(quadro.funcao_id, mes)
                 
                 # Calcular HC Folha (com ineficiências)
                 hc_folha = self._calcular_hc_folha(hc_operando, premissa)
@@ -640,10 +680,12 @@ async def calcular_e_salvar_custos(
     Returns:
         Quantidade de custos calculados
     """
+    from sqlalchemy import delete
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    
     service = CalculoCustosService(db)
     
     # Limpar custos anteriores
-    from sqlalchemy import delete
     stmt = delete(CustoCalculado).where(CustoCalculado.cenario_id == cenario_id)
     if cenario_secao_id:
         stmt = stmt.where(CustoCalculado.cenario_secao_id == cenario_secao_id)
@@ -652,9 +694,40 @@ async def calcular_e_salvar_custos(
     # Calcular novos custos
     custos = await service.calcular_custos_cenario(cenario_id, cenario_secao_id, ano)
     
-    # Salvar custos
-    for custo in custos:
-        db.add(custo)
+    if not custos:
+        await db.commit()
+        return 0
+    
+    # OTIMIZAÇÃO: Bulk insert em vez de add() individual
+    # Converter objetos para dicts para bulk insert
+    BATCH_SIZE = 1000  # Inserir em lotes para evitar memory issues
+    
+    for i in range(0, len(custos), BATCH_SIZE):
+        batch = custos[i:i + BATCH_SIZE]
+        valores = [
+            {
+                "cenario_id": c.cenario_id,
+                "cenario_secao_id": c.cenario_secao_id,
+                "funcao_id": c.funcao_id,
+                "faixa_id": c.faixa_id,
+                "tipo_custo_id": c.tipo_custo_id,
+                "centro_custo_id": c.centro_custo_id,
+                "mes": c.mes,
+                "ano": c.ano,
+                "hc_base": c.hc_base,
+                "valor_base": c.valor_base,
+                "indice_aplicado": c.indice_aplicado,
+                "valor_calculado": c.valor_calculado,
+                "memoria_calculo": c.memoria_calculo,
+            }
+            for c in batch
+        ]
+        
+        # Usar insert nativo do SQLAlchemy (funciona com qualquer banco)
+        await db.execute(
+            CustoCalculado.__table__.insert(),
+            valores
+        )
     
     await db.commit()
     
@@ -712,10 +785,11 @@ async def calcular_custos_cenario(
     Returns:
         ResumoCustos com os custos calculados
     """
+    from sqlalchemy import delete
+    
     service = CalculoCustosService(db)
     
     # Limpar custos anteriores
-    from sqlalchemy import delete
     stmt = delete(CustoCalculado).where(CustoCalculado.cenario_id == cenario_id)
     if cenario_secao_id:
         stmt = stmt.where(CustoCalculado.cenario_secao_id == cenario_secao_id)
@@ -724,9 +798,35 @@ async def calcular_custos_cenario(
     # Calcular novos custos
     custos = await service.calcular_custos_cenario(cenario_id, cenario_secao_id, ano)
     
-    # Salvar custos
-    for custo in custos:
-        db.add(custo)
+    if custos:
+        # OTIMIZAÇÃO: Bulk insert em vez de add() individual
+        BATCH_SIZE = 1000
+        
+        for i in range(0, len(custos), BATCH_SIZE):
+            batch = custos[i:i + BATCH_SIZE]
+            valores = [
+                {
+                    "cenario_id": c.cenario_id,
+                    "cenario_secao_id": c.cenario_secao_id,
+                    "funcao_id": c.funcao_id,
+                    "faixa_id": c.faixa_id,
+                    "tipo_custo_id": c.tipo_custo_id,
+                    "centro_custo_id": c.centro_custo_id,
+                    "mes": c.mes,
+                    "ano": c.ano,
+                    "hc_base": c.hc_base,
+                    "valor_base": c.valor_base,
+                    "indice_aplicado": c.indice_aplicado,
+                    "valor_calculado": c.valor_calculado,
+                    "memoria_calculo": c.memoria_calculo,
+                }
+                for c in batch
+            ]
+            
+            await db.execute(
+                CustoCalculado.__table__.insert(),
+                valores
+            )
     
     await db.commit()
     

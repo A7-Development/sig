@@ -54,6 +54,19 @@ class SecaoBase(BaseModel):
     nome: str = Field(..., min_length=1, max_length=200)
     codigo_totvs: Optional[str] = Field(None, max_length=50)
     ativo: bool = True
+    
+    # Política de trabalho - dias da semana
+    trabalha_sabado: Decimal = Field(default=Decimal("0"), ge=0, le=1)  # 0=não, 0.5=meio período, 1=integral
+    trabalha_domingo: bool = False
+    
+    # Política de trabalho - feriados
+    trabalha_feriado_nacional: bool = False
+    trabalha_feriado_estadual: bool = False
+    trabalha_feriado_municipal: bool = False
+    
+    # Localização (para feriados estaduais/municipais)
+    uf: Optional[str] = Field(None, min_length=2, max_length=2)
+    cidade: Optional[str] = Field(None, max_length=100)
 
 
 class SecaoCreate(SecaoBase):
@@ -66,6 +79,15 @@ class SecaoUpdate(BaseModel):
     nome: Optional[str] = Field(None, min_length=1, max_length=200)
     codigo_totvs: Optional[str] = Field(None, max_length=50)
     ativo: Optional[bool] = None
+    
+    # Política de trabalho
+    trabalha_sabado: Optional[Decimal] = Field(None, ge=0, le=1)
+    trabalha_domingo: Optional[bool] = None
+    trabalha_feriado_nacional: Optional[bool] = None
+    trabalha_feriado_estadual: Optional[bool] = None
+    trabalha_feriado_municipal: Optional[bool] = None
+    uf: Optional[str] = Field(None, min_length=2, max_length=2)
+    cidade: Optional[str] = Field(None, max_length=100)
 
 
 class SecaoResponse(SecaoBase):

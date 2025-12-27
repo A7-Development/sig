@@ -492,3 +492,5 @@ async def listar_operacionais_disponiveis(
         for cc in operacionais
     ]
 
+
+

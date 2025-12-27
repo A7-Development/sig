@@ -33,3 +33,5 @@ INSERT INTO tipos_receita (codigo, nome, categoria, conta_contabil_codigo, conta
     ('REC004', 'Receita por PA', 'FIXA', '31104001', 'Receita por Posição de Atendimento', 4)
 ON CONFLICT (codigo) DO NOTHING;
 
+
+

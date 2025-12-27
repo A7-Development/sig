@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -26,8 +27,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { FileSpreadsheet, Download, AlertCircle, ChevronRight, ChevronDown, Calculator } from "lucide-react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { FileSpreadsheet, Download, AlertCircle, AlertTriangle, ChevronRight, ChevronDown, Calculator, X } from "lucide-react";
 import { api } from "@/lib/api/client";
+import { custosApi, ValidacaoResponse } from "@/lib/api/orcamento";
 import { useAuthStore } from "@/stores/auth-store";
 import { toast } from "sonner";
 
@@ -76,6 +83,8 @@ export function DREPanel({ cenarioId, cenarioSecaoId, anoInicio, anoFim }: DREPa
   const queryClient = useQueryClient();
   const [anoSelecionado, setAnoSelecionado] = useState(anoInicio);
   const [expandedContas, setExpandedContas] = useState<Set<string>>(new Set());
+  const [alertaDismissed, setAlertaDismissed] = useState(false);
+  const [alertaExpandido, setAlertaExpandido] = useState(false);
 
   // Gerar lista de anos disponíveis
   const anos = [];
@@ -87,6 +96,13 @@ export function DREPanel({ cenarioId, cenarioSecaoId, anoInicio, anoFim }: DREPa
   const mesesCabecalho = Array.from({ length: 12 }, (_, i) => {
     const mes = String(i + 1).padStart(2, "0");
     return `${mes}/${anoSelecionado}`;
+  });
+
+  // Query para validação de configuração
+  const { data: validacao } = useQuery<ValidacaoResponse>({
+    queryKey: ["validacao-custos", cenarioId, cenarioSecaoId],
+    queryFn: () => custosApi.validar(token || '', cenarioId, cenarioSecaoId || undefined),
+    enabled: !!cenarioId && !!token,
   });
 
   // Query para DRE
@@ -269,9 +285,94 @@ export function DREPanel({ cenarioId, cenarioSecaoId, anoInicio, anoFim }: DREPa
 
   const temDados = dre && contasAgrupadas.length > 0;
 
+  // Verifica se há alertas de validação para mostrar
+  const temAlertasValidacao = validacao && (validacao.tem_erros || validacao.tem_avisos) && !alertaDismissed;
+
   return (
     <TooltipProvider>
       <div className="p-6 space-y-4">
+        {/* Banner de alerta de configuração (políticas de benefícios) */}
+        {temAlertasValidacao && (
+          <Collapsible open={alertaExpandido} onOpenChange={setAlertaExpandido}>
+            <Card className={`border ${validacao.tem_erros ? 'border-red-300 bg-red-50' : 'border-amber-300 bg-amber-50'}`}>
+              <CardContent className="p-4">
+                <div className="flex items-start gap-3">
+                  {validacao.tem_erros ? (
+                    <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
+                  ) : (
+                    <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                  )}
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className={`font-semibold ${validacao.tem_erros ? 'text-red-900' : 'text-amber-900'} mb-1`}>
+                          {validacao.tem_erros ? 'Erro de Configuração' : 'Atenção: Configuração Incompleta'}
+                        </h3>
+                        <p className={`text-sm ${validacao.tem_erros ? 'text-red-800' : 'text-amber-800'}`}>
+                          {validacao.total_funcoes_sem_politica} {validacao.total_funcoes_sem_politica === 1 ? 'função' : 'funções'} com 
+                          aproximadamente {Math.round(validacao.total_hc_sem_politica)} HC sem política de benefícios vinculada.
+                          <strong className="ml-1">VT, VR e VA serão calculados como zero para essas posições.</strong>
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <CollapsibleTrigger asChild>
+                          <Button variant="ghost" size="sm" className={`h-7 ${validacao.tem_erros ? 'text-red-700 hover:bg-red-100' : 'text-amber-700 hover:bg-amber-100'}`}>
+                            {alertaExpandido ? (
+                              <>
+                                <ChevronDown className="h-4 w-4 mr-1" />
+                                Ocultar Detalhes
+                              </>
+                            ) : (
+                              <>
+                                <ChevronRight className="h-4 w-4 mr-1" />
+                                Ver Detalhes
+                              </>
+                            )}
+                          </Button>
+                        </CollapsibleTrigger>
+                        <Button 
+                          variant="ghost" 
+                          size="icon-sm" 
+                          onClick={() => setAlertaDismissed(true)}
+                          className={`h-6 w-6 ${validacao.tem_erros ? 'text-red-700 hover:bg-red-100' : 'text-amber-700 hover:bg-amber-100'}`}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                    
+                    <CollapsibleContent className="mt-3">
+                      <div className={`rounded-md ${validacao.tem_erros ? 'bg-red-100' : 'bg-amber-100'} p-3 space-y-2`}>
+                        <p className={`text-xs font-medium ${validacao.tem_erros ? 'text-red-900' : 'text-amber-900'}`}>
+                          Funções afetadas:
+                        </p>
+                        <div className="space-y-1.5">
+                          {validacao.items.map((item, idx) => (
+                            <div key={idx} className={`text-xs ${item.tipo === 'erro' ? 'text-red-800' : 'text-amber-800'} flex items-start gap-2`}>
+                              <Badge 
+                                variant={item.tipo === 'erro' ? 'destructive' : 'warning'} 
+                                className="text-[10px] px-1.5 py-0 h-4 flex-shrink-0"
+                              >
+                                {item.tipo === 'erro' ? 'ERRO' : 'AVISO'}
+                              </Badge>
+                              <span>
+                                <strong>{item.funcoes_afetadas.join(', ')}</strong> - {Math.round(item.hc_total_afetado)} HC afetado
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        <p className={`text-[11px] ${validacao.tem_erros ? 'text-red-700' : 'text-amber-700'} mt-2 pt-2 border-t ${validacao.tem_erros ? 'border-red-200' : 'border-amber-200'}`}>
+                          <strong>Como resolver:</strong> Acesse Cadastros → Tabela Salarial e vincule uma Política de Benefícios a cada função.
+                        </p>
+                      </div>
+                    </CollapsibleContent>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </Collapsible>
+        )}
+
         {/* Banner de alerta quando não há dados */}
         {!isLoading && !temDados && (
           <Card className="border-orange-200 bg-orange-50">

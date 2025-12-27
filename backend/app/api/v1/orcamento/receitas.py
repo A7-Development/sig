@@ -16,7 +16,7 @@ from sqlalchemy.orm import selectinload
 from app.db.session import get_db
 from app.db.models.orcamento import (
     ReceitaCenario, ReceitaPremissaMes, TipoReceita,
-    Cenario, CentroCusto, Funcao, QuadroPessoal, Feriado
+    Cenario, CentroCusto, Funcao, QuadroPessoal, Feriado, Secao
 )
 from app.schemas.orcamento import (
     ReceitaCenarioCreate,
@@ -28,7 +28,234 @@ from app.schemas.orcamento import (
     ReceitaCalculadaResponse,
 )
 
+
+# ============================================
+# Funções Auxiliares de Cálculo de Dias Úteis
+# ============================================
+
+async def _calcular_dias_uteis(ano: int, mes: int, uf: Optional[str], db: AsyncSession) -> int:
+    """Calcula dias úteis do mês (dias totais - fins de semana - feriados).
+    Versão legada mantida para compatibilidade."""
+    # Total de dias no mês
+    _, dias_mes = calendar.monthrange(ano, mes)
+    
+    # Contar fins de semana
+    fins_semana = 0
+    for dia in range(1, dias_mes + 1):
+        data = date(ano, mes, dia)
+        if data.weekday() >= 5:  # Sábado = 5, Domingo = 6
+            fins_semana += 1
+    
+    # Buscar feriados do mês
+    query = select(Feriado).where(
+        func.extract('month', Feriado.data) == mes,
+        func.extract('year', Feriado.data) == ano
+    )
+    
+    # Feriados nacionais
+    query_nacional = query.where(Feriado.tipo == "NACIONAL")
+    result = await db.execute(query_nacional)
+    feriados_nacionais = result.scalars().all()
+    
+    # Feriados estaduais (se UF informado)
+    feriados_estaduais = []
+    if uf:
+        query_estadual = query.where(Feriado.tipo == "ESTADUAL", Feriado.uf == uf)
+        result = await db.execute(query_estadual)
+        feriados_estaduais = result.scalars().all()
+    
+    # Contar feriados que não caem no fim de semana
+    feriados_uteis = 0
+    for f in feriados_nacionais + feriados_estaduais:
+        if f.data.weekday() < 5:  # Dia útil
+            feriados_uteis += 1
+    
+    dias_uteis = dias_mes - fins_semana - feriados_uteis
+    return max(dias_uteis, 0)
+
+
+async def _calcular_dias_uteis_secao(ano: int, mes: int, secao_id: UUID, db: AsyncSession) -> float:
+    """
+    Calcula dias úteis do mês considerando política de trabalho da seção.
+    
+    Considera:
+    - trabalha_sabado: 0=não, 0.5=meio período, 1=integral
+    - trabalha_domingo: True/False
+    - trabalha_feriado_nacional/estadual/municipal: True/False
+    - uf/cidade da seção para feriados estaduais/municipais
+    
+    Retorna float para suportar dias parciais (ex: meio período nos sábados).
+    """
+    # Buscar configuração da seção
+    result = await db.execute(select(Secao).where(Secao.id == secao_id))
+    secao = result.scalar_one_or_none()
+    
+    if not secao:
+        # Fallback para cálculo padrão sem seção
+        return float(await _calcular_dias_uteis(ano, mes, None, db))
+    
+    # Total de dias no mês
+    _, dias_mes = calendar.monthrange(ano, mes)
+    
+    # Contar sábados e domingos
+    sabados = 0
+    domingos = 0
+    for dia in range(1, dias_mes + 1):
+        data = date(ano, mes, dia)
+        if data.weekday() == 5:  # Sábado
+            sabados += 1
+        elif data.weekday() == 6:  # Domingo
+            domingos += 1
+    
+    # Calcular desconto de fins de semana
+    # trabalha_sabado: 0=desconta tudo, 0.5=desconta metade, 1=não desconta
+    fator_sabado = float(secao.trabalha_sabado or 0)
+    desconto_sabados = sabados * (1 - fator_sabado)
+    
+    # Domingos: trabalha=não desconta, não trabalha=desconta tudo
+    desconto_domingos = 0 if secao.trabalha_domingo else domingos
+    
+    # Buscar feriados do mês
+    query_base = select(Feriado).where(
+        func.extract('month', Feriado.data) == mes,
+        func.extract('year', Feriado.data) == ano
+    )
+    
+    # Feriados nacionais
+    feriados_nacionais = []
+    if not secao.trabalha_feriado_nacional:
+        result = await db.execute(query_base.where(Feriado.tipo == "NACIONAL"))
+        feriados_nacionais = result.scalars().all()
+    
+    # Feriados estaduais
+    feriados_estaduais = []
+    if not secao.trabalha_feriado_estadual and secao.uf:
+        result = await db.execute(
+            query_base.where(Feriado.tipo == "ESTADUAL", Feriado.uf == secao.uf)
+        )
+        feriados_estaduais = result.scalars().all()
+    
+    # Feriados municipais
+    feriados_municipais = []
+    if not secao.trabalha_feriado_municipal and secao.uf and secao.cidade:
+        result = await db.execute(
+            query_base.where(
+                Feriado.tipo == "MUNICIPAL",
+                Feriado.uf == secao.uf,
+                Feriado.cidade == secao.cidade
+            )
+        )
+        feriados_municipais = result.scalars().all()
+    
+    # Contar feriados que não caem no fim de semana (evitar duplicidade)
+    feriados_uteis = 0
+    for f in feriados_nacionais + feriados_estaduais + feriados_municipais:
+        dia_semana = f.data.weekday()
+        
+        # Se cai em dia de semana (seg-sex), sempre desconta
+        if dia_semana < 5:
+            feriados_uteis += 1
+        # Se cai em sábado e não trabalha sábado integral
+        elif dia_semana == 5 and fator_sabado < 1:
+            # Já foi descontado no cálculo de sábados, não contar novamente
+            pass
+        # Se cai em domingo e não trabalha domingo
+        elif dia_semana == 6 and not secao.trabalha_domingo:
+            # Já foi descontado no cálculo de domingos, não contar novamente
+            pass
+    
+    dias_uteis = dias_mes - desconto_sabados - desconto_domingos - feriados_uteis
+    return max(dias_uteis, 0.0)
+
+
 router = APIRouter(prefix="/receitas", tags=["Receitas do Cenário"])
+
+
+# ============================================
+# Endpoints de Dias Úteis (DEVEM VIR ANTES das rotas dinâmicas)
+# ============================================
+
+@router.get("/dias-uteis")
+async def listar_dias_uteis(
+    ano_inicio: int = Query(..., description="Ano de início"),
+    mes_inicio: int = Query(..., ge=1, le=12, description="Mês de início"),
+    ano_fim: int = Query(..., description="Ano de fim"),
+    mes_fim: int = Query(..., ge=1, le=12, description="Mês de fim"),
+    uf: Optional[str] = Query(default=None, description="UF para feriados estaduais"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retorna os dias úteis de cada mês em um período.
+    Considera fins de semana e feriados (nacionais e estaduais se UF informado).
+    Endpoint legado - use /dias-uteis-secao para cálculo por seção.
+    """
+    print(f"[DEBUG] dias-uteis chamado: ano_inicio={ano_inicio}, mes_inicio={mes_inicio}, ano_fim={ano_fim}, mes_fim={mes_fim}, uf={uf}")
+    resultado = []
+    ano = ano_inicio
+    mes = mes_inicio
+    
+    while (ano, mes) <= (ano_fim, mes_fim):
+        dias = await _calcular_dias_uteis(ano, mes, uf, db)
+        resultado.append({
+            "ano": ano,
+            "mes": mes,
+            "dias_uteis": dias
+        })
+        
+        mes += 1
+        if mes > 12:
+            mes = 1
+            ano += 1
+    
+    return resultado
+
+
+@router.get("/dias-uteis-secao")
+async def listar_dias_uteis_secao(
+    secao_id: UUID = Query(..., description="ID da seção"),
+    ano_inicio: int = Query(..., description="Ano de início"),
+    mes_inicio: int = Query(..., ge=1, le=12, description="Mês de início"),
+    ano_fim: int = Query(..., description="Ano de fim"),
+    mes_fim: int = Query(..., ge=1, le=12, description="Mês de fim"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retorna os dias úteis de cada mês em um período, considerando a política de trabalho da seção.
+    
+    Considera:
+    - trabalha_sabado: 0=não, 0.5=meio período, 1=integral
+    - trabalha_domingo: True/False
+    - trabalha_feriado_nacional/estadual/municipal: True/False
+    - uf/cidade da seção para feriados estaduais/municipais
+    """
+    # Verificar se seção existe
+    result = await db.execute(select(Secao).where(Secao.id == secao_id))
+    secao = result.scalar_one_or_none()
+    
+    if not secao:
+        raise HTTPException(status_code=404, detail="Seção não encontrada")
+    
+    resultado = []
+    ano = ano_inicio
+    mes = mes_inicio
+    
+    while (ano, mes) <= (ano_fim, mes_fim):
+        dias = await _calcular_dias_uteis_secao(ano, mes, secao_id, db)
+        resultado.append({
+            "ano": ano,
+            "mes": mes,
+            "dias_uteis": round(dias, 2),  # Arredondar para 2 casas (suporta meio período)
+            "secao_id": str(secao_id),
+            "secao_codigo": secao.codigo,
+            "secao_nome": secao.nome
+        })
+        
+        mes += 1
+        if mes > 12:
+            mes = 1
+            ano += 1
+    
+    return resultado
 
 
 # ============================================
@@ -355,9 +582,24 @@ async def _calcular_receita_mes(
         # Buscar premissa do mês
         premissa = next((p for p in receita.premissas if p.mes == mes and p.ano == ano), None)
         
+        # DEBUG: Log para identificar problemas
+        print(f"[DEBUG RECEITA] receita_id={receita.id}, mes={mes}, ano={ano}")
+        print(f"[DEBUG RECEITA] funcao_pa_id={receita.funcao_pa_id}, centro_custo_id={receita.centro_custo_id}")
+        print(f"[DEBUG RECEITA] premissas encontradas para este mes/ano: {premissa is not None}")
+        
         if premissa:
             # Buscar HC do PA (função)
+            # CORREÇÃO: Se não tiver centro_custo_id específico, buscar de toda a operação
             hc_pa = await _get_hc_funcao(receita.cenario_id, receita.centro_custo_id, receita.funcao_pa_id, ano, mes, db)
+            
+            # DEBUG: Log valores
+            print(f"[DEBUG RECEITA] hc_pa retornado: {hc_pa}")
+            
+            # Se hc_pa for 0, tentar buscar sem filtro de centro de custo
+            if hc_pa == 0 and receita.funcao_pa_id:
+                print(f"[DEBUG RECEITA] hc_pa=0, tentando buscar sem filtro de CC...")
+                hc_pa = await _get_hc_funcao_sem_cc(receita.cenario_id, receita.funcao_pa_id, ano, mes, db)
+                print(f"[DEBUG RECEITA] hc_pa (sem filtro CC): {hc_pa}")
             
             # Calcular dias úteis
             dias_uteis = await _calcular_dias_uteis(ano, mes, receita.centro_custo.uf if receita.centro_custo else None, db)
@@ -368,7 +610,12 @@ async def _calcular_receita_mes(
             fator = float(premissa.fator or 1)
             estorno = float(premissa.indice_estorno or 0)
             
+            # DEBUG: Log premissas
+            print(f"[DEBUG RECEITA] vopdu={vopdu}, indice={indice}, ticket={ticket}, fator={fator}, dias_uteis={dias_uteis}, estorno={estorno}")
+            
             valor_bruto = hc_pa * vopdu * indice * ticket * fator * dias_uteis * (1 - estorno)
+            
+            print(f"[DEBUG RECEITA] valor_bruto calculado: {valor_bruto}")
             
             # Aplicar limites min/max por PA
             qtd_pa = await _get_pa_funcao(receita.cenario_id, receita.centro_custo_id, receita.funcao_pa_id, ano, mes, db)
@@ -439,10 +686,36 @@ async def _get_hc_funcao(cenario_id: UUID, cc_id: UUID, funcao_id: UUID, ano: in
     col_map = {1: 'qtd_jan', 2: 'qtd_fev', 3: 'qtd_mar', 4: 'qtd_abr', 5: 'qtd_mai', 6: 'qtd_jun',
                7: 'qtd_jul', 8: 'qtd_ago', 9: 'qtd_set', 10: 'qtd_out', 11: 'qtd_nov', 12: 'qtd_dez'}
     
+    # Construir query base
+    query = select(QuadroPessoal).where(
+        QuadroPessoal.cenario_id == cenario_id,
+        QuadroPessoal.funcao_id == funcao_id,
+        QuadroPessoal.ativo == True
+    )
+    
+    # Só filtrar por CC se foi informado
+    if cc_id:
+        query = query.where(QuadroPessoal.centro_custo_id == cc_id)
+    
+    result = await db.execute(query)
+    quadros = result.scalars().all()
+    
+    total = 0.0
+    for q in quadros:
+        qtd = getattr(q, col_map[mes], 0) or 0
+        total += float(qtd)
+    
+    return total
+
+
+async def _get_hc_funcao_sem_cc(cenario_id: UUID, funcao_id: UUID, ano: int, mes: int, db: AsyncSession) -> float:
+    """Obtém o HC total de uma função no cenário (sem filtrar por CC)."""
+    col_map = {1: 'qtd_jan', 2: 'qtd_fev', 3: 'qtd_mar', 4: 'qtd_abr', 5: 'qtd_mai', 6: 'qtd_jun',
+               7: 'qtd_jul', 8: 'qtd_ago', 9: 'qtd_set', 10: 'qtd_out', 11: 'qtd_nov', 12: 'qtd_dez'}
+    
     result = await db.execute(
         select(QuadroPessoal).where(
             QuadroPessoal.cenario_id == cenario_id,
-            QuadroPessoal.centro_custo_id == cc_id,
             QuadroPessoal.funcao_id == funcao_id,
             QuadroPessoal.ativo == True
         )
@@ -454,6 +727,8 @@ async def _get_hc_funcao(cenario_id: UUID, cc_id: UUID, funcao_id: UUID, ano: in
         qtd = getattr(q, col_map[mes], 0) or 0
         total += float(qtd)
     
+    print(f"[DEBUG _get_hc_funcao_sem_cc] cenario={cenario_id}, funcao={funcao_id}, mes={mes}, quadros_encontrados={len(quadros)}, total_hc={total}")
+    
     return total
 
 
@@ -462,14 +737,18 @@ async def _get_pa_funcao(cenario_id: UUID, cc_id: UUID, funcao_id: UUID, ano: in
     col_map = {1: 'qtd_jan', 2: 'qtd_fev', 3: 'qtd_mar', 4: 'qtd_abr', 5: 'qtd_mai', 6: 'qtd_jun',
                7: 'qtd_jul', 8: 'qtd_ago', 9: 'qtd_set', 10: 'qtd_out', 11: 'qtd_nov', 12: 'qtd_dez'}
     
-    result = await db.execute(
-        select(QuadroPessoal).where(
-            QuadroPessoal.cenario_id == cenario_id,
-            QuadroPessoal.centro_custo_id == cc_id,
-            QuadroPessoal.funcao_id == funcao_id,
-            QuadroPessoal.ativo == True
-        )
+    # Construir query base
+    query = select(QuadroPessoal).where(
+        QuadroPessoal.cenario_id == cenario_id,
+        QuadroPessoal.funcao_id == funcao_id,
+        QuadroPessoal.ativo == True
     )
+    
+    # Só filtrar por CC se foi informado
+    if cc_id:
+        query = query.where(QuadroPessoal.centro_custo_id == cc_id)
+    
+    result = await db.execute(query)
     quadros = result.scalars().all()
     
     total_pa = 0.0
@@ -480,44 +759,4 @@ async def _get_pa_funcao(cenario_id: UUID, cc_id: UUID, funcao_id: UUID, ano: in
             total_pa += float(qtd) / fator
     
     return total_pa
-
-
-async def _calcular_dias_uteis(ano: int, mes: int, uf: Optional[str], db: AsyncSession) -> int:
-    """Calcula dias úteis do mês (dias totais - fins de semana - feriados)."""
-    # Total de dias no mês
-    _, dias_mes = calendar.monthrange(ano, mes)
-    
-    # Contar fins de semana
-    fins_semana = 0
-    for dia in range(1, dias_mes + 1):
-        data = date(ano, mes, dia)
-        if data.weekday() >= 5:  # Sábado = 5, Domingo = 6
-            fins_semana += 1
-    
-    # Buscar feriados do mês
-    query = select(Feriado).where(
-        func.extract('month', Feriado.data) == mes,
-        func.extract('year', Feriado.data) == ano
-    )
-    
-    # Feriados nacionais
-    query_nacional = query.where(Feriado.tipo == "NACIONAL")
-    result = await db.execute(query_nacional)
-    feriados_nacionais = result.scalars().all()
-    
-    # Feriados estaduais (se UF informado)
-    feriados_estaduais = []
-    if uf:
-        query_estadual = query.where(Feriado.tipo == "ESTADUAL", Feriado.uf == uf)
-        result = await db.execute(query_estadual)
-        feriados_estaduais = result.scalars().all()
-    
-    # Contar feriados que não caem no fim de semana
-    feriados_uteis = 0
-    for f in feriados_nacionais + feriados_estaduais:
-        if f.data.weekday() < 5:  # Dia útil
-            feriados_uteis += 1
-    
-    dias_uteis = dias_mes - fins_semana - feriados_uteis
-    return max(dias_uteis, 0)
 

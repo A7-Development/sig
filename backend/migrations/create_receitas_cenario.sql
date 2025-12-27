@@ -64,3 +64,5 @@ CREATE INDEX IF NOT EXISTS ix_receitas_cenario_ativo ON receitas_cenario(ativo);
 CREATE INDEX IF NOT EXISTS ix_receita_premissa_mes_receita ON receita_premissa_mes(receita_cenario_id);
 CREATE INDEX IF NOT EXISTS ix_receita_premissa_mes_periodo ON receita_premissa_mes(ano, mes);
 
+
+

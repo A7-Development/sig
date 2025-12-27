@@ -525,3 +525,5 @@ export function RateioConfigPanel({ cenarioId }: RateioConfigPanelProps) {
   );
 }
 
+
+

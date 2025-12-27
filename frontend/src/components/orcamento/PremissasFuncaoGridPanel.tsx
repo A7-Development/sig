@@ -136,7 +136,7 @@ export function PremissasFuncaoGridPanel({
             abs_pct_justificado: existente.abs_pct_justificado ?? 0,
             turnover: existente.turnover ?? 0,
             ferias_indice: existente.ferias_indice ?? 0,
-            dias_treinamento: existente.dias_treinamento ?? 0,
+            dias_treinamento: Math.round(existente.dias_treinamento ?? 0), // Garantir que seja sempre um inteiro
             id: existente.id,
           };
         }
@@ -216,7 +216,7 @@ export function PremissasFuncaoGridPanel({
         abs_pct_justificado: p.abs_pct_justificado,
         turnover: p.turnover,
         ferias_indice: p.ferias_indice,
-        dias_treinamento: p.dias_treinamento,
+        dias_treinamento: Math.round(p.dias_treinamento), // Garantir que seja sempre um inteiro
       }));
 
       await api.post(
@@ -359,7 +359,12 @@ export function PremissasFuncaoGridPanel({
                               min={0}
                               max={indicador.max}
                               value={(p as any)[indicador.key]}
-                              onChange={(e) => handleUpdateValue(idx, indicador.key, parseFloat(e.target.value) || 0)}
+                              onChange={(e) => {
+                                const value = indicador.key === 'dias_treinamento' 
+                                  ? parseInt(e.target.value) || 0
+                                  : parseFloat(e.target.value) || 0;
+                                handleUpdateValue(idx, indicador.key, value);
+                              }}
                               onBlur={() => setEditingCell(null)}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter' || e.key === 'Tab') {

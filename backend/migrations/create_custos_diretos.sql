@@ -48,3 +48,5 @@ COMMENT ON COLUMN custos_diretos.tipo_medida IS 'HC_TOTAL: total do CC, HC_FUNCA
 
 SELECT 'Tabela custos_diretos criada com sucesso!' as resultado;
 
+
+

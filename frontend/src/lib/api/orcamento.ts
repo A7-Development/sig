@@ -25,9 +25,32 @@ export interface Secao {
   codigo_totvs: string | null;
   nome: string;
   ativo: boolean;
+  
+  // Política de trabalho - dias da semana
+  trabalha_sabado: number;  // 0=não, 0.5=meio período, 1=integral
+  trabalha_domingo: boolean;
+  
+  // Política de trabalho - feriados
+  trabalha_feriado_nacional: boolean;
+  trabalha_feriado_estadual: boolean;
+  trabalha_feriado_municipal: boolean;
+  
+  // Localização (para feriados estaduais/municipais)
+  uf: string | null;
+  cidade: string | null;
+  
   created_at: string;
   updated_at: string;
   departamento?: Departamento;
+}
+
+export interface DiasUteisSecao {
+  ano: number;
+  mes: number;
+  dias_uteis: number;
+  secao_id: string;
+  secao_codigo: string;
+  secao_nome: string;
 }
 
 export interface CentroCusto {
@@ -289,6 +312,22 @@ export const secoesApi = {
       { codigos },
       token
     ),
+  
+  /**
+   * Calcula os dias úteis por mês para uma seção específica.
+   * Considera política de trabalho da seção (sábados, domingos, feriados).
+   */
+  diasUteis: (
+    token: string, 
+    secaoId: string, 
+    anoInicio: number, 
+    mesInicio: number, 
+    anoFim: number, 
+    mesFim: number
+  ) => api.get<DiasUteisSecao[]>(
+    `/api/v1/orcamento/receitas/dias-uteis-secao?secao_id=${secaoId}&ano_inicio=${anoInicio}&mes_inicio=${mesInicio}&ano_fim=${anoFim}&mes_fim=${mesFim}`,
+    token
+  ),
 };
 
 // ============================================
@@ -1030,6 +1069,24 @@ export interface DREResponse {
   total_geral: number;
 }
 
+// Validação de Configuração
+export interface ValidacaoItem {
+  tipo: 'erro' | 'aviso';
+  categoria: string;
+  titulo: string;
+  descricao: string;
+  funcoes_afetadas: string[];
+  hc_total_afetado: number;
+}
+
+export interface ValidacaoResponse {
+  tem_erros: boolean;
+  tem_avisos: boolean;
+  total_hc_sem_politica: number;
+  total_funcoes_sem_politica: number;
+  items: ValidacaoItem[];
+}
+
 // API de Custos
 export const custosApi = {
   // Tipos de custo (rubricas)
@@ -1090,6 +1147,15 @@ export const custosApi = {
     if (ano) params.append('ano', ano.toString());
     return api.get<DREResponse>(
       `/api/v1/orcamento/custos/cenarios/${cenarioId}/dre?${params}`, token
+    );
+  },
+
+  // Validar configuração do cenário
+  validar: (token: string, cenarioId: string, cenarioSecaoId?: string) => {
+    const params = new URLSearchParams();
+    if (cenarioSecaoId) params.append('cenario_secao_id', cenarioSecaoId);
+    return api.get<ValidacaoResponse>(
+      `/api/v1/orcamento/custos/cenarios/${cenarioId}/validar?${params}`, token
     );
   },
   

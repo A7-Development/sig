@@ -32,15 +32,29 @@ class Departamento(Base):
 
 
 class Secao(Base):
-    """SeÃ§Ã£o dentro de um departamento."""
+    """Seção dentro de um departamento."""
     __tablename__ = "secoes"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     departamento_id = Column(UUID(as_uuid=True), ForeignKey("departamentos.id", ondelete="CASCADE"), nullable=False)
     codigo = Column(String(50), unique=True, nullable=False, index=True)
-    codigo_totvs = Column(String(50), nullable=True, index=True)  # VÃ­nculo opcional com PSECAO
+    codigo_totvs = Column(String(50), nullable=True, index=True)  # Vínculo opcional com PSECAO
     nome = Column(String(200), nullable=False)
     ativo = Column(Boolean, default=True)
+    
+    # Política de trabalho - dias da semana
+    trabalha_sabado = Column(Numeric(3, 2), default=0)  # 0=não, 0.5=meio período, 1=integral
+    trabalha_domingo = Column(Boolean, default=False)
+    
+    # Política de trabalho - feriados
+    trabalha_feriado_nacional = Column(Boolean, default=False)
+    trabalha_feriado_estadual = Column(Boolean, default=False)
+    trabalha_feriado_municipal = Column(Boolean, default=False)
+    
+    # Localização (para determinar quais feriados estaduais/municipais se aplicam)
+    uf = Column(String(2), nullable=True)
+    cidade = Column(String(100), nullable=True)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     

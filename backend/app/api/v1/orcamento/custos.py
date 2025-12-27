@@ -11,7 +11,8 @@ from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
 from app.db.models.orcamento import (
-    TipoCusto, CustoCalculado, CustoTecnologia, ParametroCusto, Cenario
+    TipoCusto, CustoCalculado, CustoTecnologia, ParametroCusto, Cenario,
+    QuadroPessoal, TabelaSalarial, Funcao
 )
 from app.schemas.orcamento import (
     TipoCustoBase, TipoCustoCreate, TipoCustoUpdate, TipoCustoResponse,
@@ -22,6 +23,30 @@ from app.schemas.orcamento import (
 )
 from app.services.calculo_custos import calcular_e_salvar_custos
 from app.services.calculo_custos_tecnologia import calcular_e_salvar_custos_tecnologia
+from pydantic import BaseModel
+
+
+# ============================================
+# Schemas de Validação
+# ============================================
+
+class ValidacaoItem(BaseModel):
+    """Item de validação com alerta ou erro."""
+    tipo: str  # "erro" ou "aviso"
+    categoria: str  # "politica_beneficio", "tabela_salarial", etc.
+    titulo: str
+    descricao: str
+    funcoes_afetadas: List[str] = []
+    hc_total_afetado: float = 0
+
+
+class ValidacaoResponse(BaseModel):
+    """Resposta do endpoint de validação."""
+    tem_erros: bool
+    tem_avisos: bool
+    total_hc_sem_politica: float
+    total_funcoes_sem_politica: int
+    items: List[ValidacaoItem]
 
 router = APIRouter(prefix="/custos", tags=["Custos"])
 
@@ -31,6 +56,107 @@ router = APIRouter(prefix="/custos", tags=["Custos"])
 async def test_endpoint():
     """Teste simples."""
     return {"status": "ok", "message": "Endpoint de custos funcionando"}
+
+
+# ============================================
+# Validação de Configuração
+# ============================================
+
+@router.get("/cenarios/{cenario_id}/validar", response_model=ValidacaoResponse)
+async def validar_configuracao_cenario(
+    cenario_id: UUID,
+    cenario_secao_id: Optional[UUID] = Query(None, description="Validar apenas uma seção"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Valida a configuração do cenário e retorna avisos/erros.
+    Verifica se todas as funções no quadro de pessoal têm:
+    - Tabela salarial vinculada
+    - Política de benefícios vinculada à tabela salarial
+    """
+    # Verificar se cenário existe
+    cenario = await db.get(Cenario, cenario_id)
+    if not cenario:
+        raise HTTPException(status_code=404, detail="Cenário não encontrado")
+    
+    items: List[ValidacaoItem] = []
+    
+    # Buscar quadro de pessoal com relacionamentos
+    query = select(QuadroPessoal).options(
+        selectinload(QuadroPessoal.funcao),
+        selectinload(QuadroPessoal.tabela_salarial).selectinload(TabelaSalarial.politica)
+    ).where(
+        QuadroPessoal.cenario_id == cenario_id,
+        QuadroPessoal.ativo == True
+    )
+    
+    if cenario_secao_id:
+        query = query.where(QuadroPessoal.cenario_secao_id == cenario_secao_id)
+    
+    result = await db.execute(query)
+    quadros = result.scalars().all()
+    
+    # Agrupar por função para análise
+    funcoes_sem_tabela: dict = {}  # funcao_nome -> hc_total
+    funcoes_sem_politica: dict = {}  # funcao_nome -> hc_total
+    
+    MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
+    
+    for quadro in quadros:
+        funcao_nome = quadro.funcao.nome if quadro.funcao else "Função não definida"
+        
+        # Calcular HC total dessa posição
+        hc_total = sum(float(getattr(quadro, f"qtd_{mes}", 0) or 0) for mes in MESES)
+        
+        if hc_total <= 0:
+            continue  # Ignora posições sem HC
+        
+        # Verificar se tem tabela salarial
+        if not quadro.tabela_salarial:
+            if funcao_nome not in funcoes_sem_tabela:
+                funcoes_sem_tabela[funcao_nome] = 0
+            funcoes_sem_tabela[funcao_nome] += hc_total
+        # Verificar se a tabela salarial tem política de benefícios
+        elif not quadro.tabela_salarial.politica:
+            if funcao_nome not in funcoes_sem_politica:
+                funcoes_sem_politica[funcao_nome] = 0
+            funcoes_sem_politica[funcao_nome] += hc_total
+    
+    # Gerar alertas para funções sem tabela salarial
+    for funcao_nome, hc_total in funcoes_sem_tabela.items():
+        items.append(ValidacaoItem(
+            tipo="erro",
+            categoria="tabela_salarial",
+            titulo="Função sem Tabela Salarial",
+            descricao=f"A função '{funcao_nome}' não possui tabela salarial vinculada. O cálculo de salários e benefícios não será realizado.",
+            funcoes_afetadas=[funcao_nome],
+            hc_total_afetado=hc_total
+        ))
+    
+    # Gerar alertas para funções sem política de benefícios
+    for funcao_nome, hc_total in funcoes_sem_politica.items():
+        items.append(ValidacaoItem(
+            tipo="aviso",
+            categoria="politica_beneficio",
+            titulo="Função sem Política de Benefícios",
+            descricao=f"A função '{funcao_nome}' possui tabela salarial, mas não tem política de benefícios vinculada. Os valores de VT, VR e VA serão calculados como zero.",
+            funcoes_afetadas=[funcao_nome],
+            hc_total_afetado=hc_total
+        ))
+    
+    # Calcular totais
+    total_hc_sem_politica = sum(funcoes_sem_politica.values()) + sum(funcoes_sem_tabela.values())
+    total_funcoes_sem_politica = len(funcoes_sem_politica) + len(funcoes_sem_tabela)
+    tem_erros = len(funcoes_sem_tabela) > 0
+    tem_avisos = len(funcoes_sem_politica) > 0
+    
+    return ValidacaoResponse(
+        tem_erros=tem_erros,
+        tem_avisos=tem_avisos,
+        total_hc_sem_politica=total_hc_sem_politica,
+        total_funcoes_sem_politica=total_funcoes_sem_politica,
+        items=items
+    )
 
 
 # ============================================
@@ -432,33 +558,49 @@ async def gerar_dre_cenario(
     result_diretos = await db.execute(query_diretos)
     custos_diretos = result_diretos.scalars().all()
     
-    # Pré-calcular HC/PA por mês para custos variáveis
-    # Buscar quadro de pessoal para calcular HC por mês
+    # OTIMIZAÇÃO: Pré-carregar TODO o quadro de pessoal de uma vez e criar cache
     MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
     
-    async def calcular_hc_mes(centro_custo_id, funcao_id, mes_idx, ano_calc):
-        """Calcula HC para um mês específico."""
-        query = select(QuadroPessoal).where(
+    # Buscar todo o quadro de pessoal do cenário (1 query apenas)
+    result_quadro = await db.execute(
+        select(QuadroPessoal).where(
             QuadroPessoal.cenario_id == cenario_id,
             QuadroPessoal.ativo == True
         )
-        if centro_custo_id:
-            query = query.where(QuadroPessoal.centro_custo_id == centro_custo_id)
+    )
+    todos_quadros = result_quadro.scalars().all()
+    
+    # Criar caches indexados para acesso O(1)
+    # Cache por centro de custo: {(cc_id, mes_idx): total_hc}
+    hc_cache_por_cc: dict = {}
+    # Cache por função: {(funcao_id, mes_idx): total_hc}
+    hc_cache_por_funcao: dict = {}
+    # Cache geral: {mes_idx: total_hc}
+    hc_cache_geral: dict = {i: 0.0 for i in range(12)}
+    
+    for q in todos_quadros:
+        for mes_idx, mes_key in enumerate(MESES):
+            qtd = float(getattr(q, f"qtd_{mes_key}", 0) or 0)
+            if qtd > 0:
+                # Cache por CC
+                cc_key = (q.centro_custo_id, mes_idx)
+                hc_cache_por_cc[cc_key] = hc_cache_por_cc.get(cc_key, 0.0) + qtd
+                
+                # Cache por função
+                func_key = (q.funcao_id, mes_idx)
+                hc_cache_por_funcao[func_key] = hc_cache_por_funcao.get(func_key, 0.0) + qtd
+                
+                # Cache geral
+                hc_cache_geral[mes_idx] += qtd
+    
+    def obter_hc_cache(centro_custo_id, funcao_id, mes_idx):
+        """Obtém HC do cache (acesso O(1) sem query)."""
         if funcao_id:
-            query = query.where(QuadroPessoal.funcao_id == funcao_id)
-        
-        result = await db.execute(query)
-        quadros = result.scalars().all()
-        
-        total_hc = 0.0
-        mes_key = f"qtd_{MESES[mes_idx]}"
-        for q in quadros:
-            # Verificar se o registro tem dados para este ano
-            if hasattr(q, mes_key):
-                valor = getattr(q, mes_key, 0) or 0
-                total_hc += float(valor)
-        
-        return total_hc
+            return hc_cache_por_funcao.get((funcao_id, mes_idx), 0.0)
+        elif centro_custo_id:
+            return hc_cache_por_cc.get((centro_custo_id, mes_idx), 0.0)
+        else:
+            return hc_cache_geral.get(mes_idx, 0.0)
     
     # Para cada custo direto, calcular o valor por mês
     for custo in custos_diretos:
@@ -505,21 +647,19 @@ async def gerar_dre_cenario(
                 valor_unitario = float(custo.valor_unitario_variavel or 0)
                 
                 if custo.unidade_medida == "HC":
-                    # Buscar HC do centro de custo (ou função específica)
-                    hc = await calcular_hc_mes(
+                    # OTIMIZAÇÃO: Usar cache de HC (sem query)
+                    hc = obter_hc_cache(
                         custo.centro_custo_id if custo.tipo_medida in ["HC_TOTAL", None] else None,
                         custo.funcao_base_id if custo.tipo_medida == "HC_FUNCAO" else None,
-                        mes_idx,
-                        ano
+                        mes_idx
                     )
                     valor_mensal = valor_unitario * hc
                 elif custo.unidade_medida == "PA":
                     # PA = Posição de Atendimento (usar mesmo cálculo de HC por simplicidade)
-                    pa = await calcular_hc_mes(
+                    pa = obter_hc_cache(
                         custo.centro_custo_id,
                         custo.funcao_base_id if custo.tipo_medida == "PA_FUNCAO" else None,
-                        mes_idx,
-                        ano
+                        mes_idx
                     )
                     valor_mensal = valor_unitario * pa
                 else:
@@ -530,12 +670,11 @@ async def gerar_dre_cenario(
                 valor_fixo = float(custo.valor_fixo or 0)
                 valor_unitario = float(custo.valor_unitario_variavel or 0)
                 
-                # Calcular componente variável
-                hc = await calcular_hc_mes(
+                # OTIMIZAÇÃO: Usar cache de HC (sem query)
+                hc = obter_hc_cache(
                     custo.centro_custo_id,
                     custo.funcao_base_id,
-                    mes_idx,
-                    ano
+                    mes_idx
                 )
                 valor_mensal = valor_fixo + (valor_unitario * hc)
             
