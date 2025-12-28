@@ -64,6 +64,7 @@ export interface CentroCusto {
   contrato: string | null;
   uf: string | null;
   cidade: string | null;
+  area_m2: number | null;  // Área em m² para rateio por área
   ativo: boolean;
   created_at: string;
   updated_at: string;
@@ -233,6 +234,16 @@ export interface ClienteNW {
   cnpj: string | null;
 }
 
+export interface ContaContabilNW {
+  codigo: string;
+  descricao: string;
+  nivel1: string | null;
+  nivel2: string | null;
+  nivel3: string | null;
+  nivel4: string | null;
+  nivel5: string | null;
+}
+
 export const nwApi = {
   getEmpresas: (token: string, busca?: string) =>
     api.get<EmpresaNW[]>(`/api/v1/orcamento/nw/empresas${busca ? `?busca=${busca}` : ''}`, token),
@@ -249,6 +260,16 @@ export const nwApi = {
   
   getCliente: (token: string, codigo: string) =>
     api.get<ClienteNW>(`/api/v1/orcamento/nw/clientes/${codigo}`, token),
+
+  getContasContabeis: (token: string, busca?: string, limit: number = 100) => {
+    const params = new URLSearchParams();
+    if (busca) params.set('busca', busca);
+    params.set('limit', String(limit));
+    return api.get<ContaContabilNW[]>(`/api/v1/orcamento/nw/contas-contabeis?${params.toString()}`, token);
+  },
+  
+  getContaContabil: (token: string, codigo: string) =>
+    api.get<ContaContabilNW>(`/api/v1/orcamento/nw/contas-contabeis/${codigo}`, token),
 };
 
 // ============================================
@@ -596,6 +617,8 @@ export interface Tributo {
   codigo: string;
   nome: string;
   aliquota: number;
+  conta_contabil_codigo: string | null;
+  conta_contabil_descricao: string | null;
   ordem: number;
   ativo: boolean;
   created_at: string;
@@ -1069,6 +1092,41 @@ export interface DREResponse {
   total_geral: number;
 }
 
+// DRE por Centro de Custo
+export interface DRELinhaPorCC {
+  conta_contabil_codigo: string;
+  conta_contabil_descricao: string;
+  conta_contabil_completa: string;
+  tipo_custo_codigo: string | null;
+  tipo_custo_nome: string | null;
+  categoria: string;
+  origem: 'DIRETO' | 'INDIRETO';
+  valores_mensais: number[];
+  total: number;
+}
+
+export interface DRECentroCusto {
+  centro_custo_id: string;
+  centro_custo_codigo: string;
+  centro_custo_nome: string;
+  linhas_diretas: DRELinhaPorCC[];
+  linhas_indiretas: DRELinhaPorCC[];
+  total_receitas: number;
+  total_custos_diretos: number;
+  total_custos_indiretos: number;
+  total_custos: number;
+  margem: number;
+  margem_percentual: number;
+}
+
+export interface DREPorCCResponse {
+  cenario_id: string;
+  ano: number;
+  visao: string;
+  centros_custo: DRECentroCusto[];
+  consolidado: DRECentroCusto | null;
+}
+
 // Validação de Configuração
 export interface ValidacaoItem {
   tipo: 'erro' | 'aviso';
@@ -1147,6 +1205,16 @@ export const custosApi = {
     if (ano) params.append('ano', ano.toString());
     return api.get<DREResponse>(
       `/api/v1/orcamento/custos/cenarios/${cenarioId}/dre?${params}`, token
+    );
+  },
+
+  // DRE por Centro de Custo
+  drePorCC: (token: string, cenarioId: string, ano?: number, centroCustoId?: string) => {
+    const params = new URLSearchParams();
+    if (ano) params.append('ano', ano.toString());
+    if (centroCustoId) params.append('centro_custo_id', centroCustoId);
+    return api.get<DREPorCCResponse>(
+      `/api/v1/orcamento/custos/cenarios/${cenarioId}/dre-por-cc?${params}`, token
     );
   },
 
@@ -1521,12 +1589,15 @@ export interface RateioDestinoCreate {
   percentual: number;
 }
 
+export type TipoRateio = 'MANUAL' | 'HC' | 'AREA' | 'PA';
+
 export interface RateioGrupo {
   id: string;
   cenario_id: string;
   cc_origem_pool_id: string;
   nome: string;
   descricao: string | null;
+  tipo_rateio: TipoRateio;
   ativo: boolean;
   created_at: string;
   updated_at: string;
@@ -1544,6 +1615,7 @@ export interface RateioGrupoCreate {
   cc_origem_pool_id: string;
   nome: string;
   descricao?: string | null;
+  tipo_rateio?: TipoRateio;
   ativo?: boolean;
   destinos?: RateioDestinoCreate[];
 }
@@ -1551,6 +1623,7 @@ export interface RateioGrupoCreate {
 export interface RateioGrupoUpdate {
   nome?: string;
   descricao?: string | null;
+  tipo_rateio?: TipoRateio;
   ativo?: boolean;
 }
 

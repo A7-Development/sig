@@ -83,6 +83,9 @@ class CentroCusto(Base):
     uf = Column(String(2), nullable=True)
     cidade = Column(String(100), nullable=True)
     
+    # Área em metros quadrados (para rateio proporcional à área)
+    area_m2 = Column(Numeric(10, 2), nullable=True, comment="Área em m² para rateio por área")
+    
     ativo = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -225,12 +228,16 @@ class Tributo(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     empresa_id = Column(UUID(as_uuid=True), ForeignKey("empresas.id", ondelete="CASCADE"), nullable=False)
     
-    # IdentificaÃ§Ã£o
+    # Identificação
     codigo = Column(String(50), nullable=False)  # PIS, COFINS, ISS, CPREV
     nome = Column(String(200), nullable=False)
     
     # Valor
     aliquota = Column(Numeric(10, 4), nullable=False)  # Percentual
+    
+    # Conta Contábil para DRE (código e descrição cacheados do NW)
+    conta_contabil_codigo = Column(String(50), nullable=True, index=True)
+    conta_contabil_descricao = Column(String(255), nullable=True)
     
     # Controle
     ordem = Column(Integer, default=0)
@@ -857,10 +864,10 @@ class CustoCalculado(Base):
     
     # Vínculos com cenário
     cenario_id = Column(UUID(as_uuid=True), ForeignKey("cenarios.id", ondelete="CASCADE"), nullable=False, index=True)
-    cenario_secao_id = Column(UUID(as_uuid=True), ForeignKey("cenario_secao.id", ondelete="CASCADE"), nullable=False, index=True)
+    cenario_secao_id = Column(UUID(as_uuid=True), ForeignKey("cenario_secao.id", ondelete="CASCADE"), nullable=True, index=True)
     
-    # Vínculo com função e faixa
-    funcao_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Vínculo com função e faixa (nullable para custos rateados sem função)
+    funcao_id = Column(UUID(as_uuid=True), ForeignKey("funcoes.id", ondelete="CASCADE"), nullable=True, index=True)
     faixa_id = Column(UUID(as_uuid=True), ForeignKey("faixas_salariais.id", ondelete="SET NULL"), nullable=True)
     
     # Tipo de custo (rubrica)
@@ -995,6 +1002,10 @@ class RateioGrupo(Base):
     
     nome = Column(String(200), nullable=False)
     descricao = Column(Text, nullable=True)
+    
+    # Tipo de rateio: MANUAL (percentuais definidos), HC (proporcional ao headcount folha),
+    # AREA (proporcional à área m²), PA (proporcional às posições de atendimento)
+    tipo_rateio = Column(String(20), nullable=False, default="MANUAL", comment="MANUAL, HC, AREA, PA")
     
     ativo = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)

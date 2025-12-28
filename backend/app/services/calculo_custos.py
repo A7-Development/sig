@@ -731,7 +731,13 @@ async def calcular_e_salvar_custos(
     
     await db.commit()
     
-    return len(custos)
+    # Aplicar rateio de custos de CCs POOL para CCs operacionais
+    resumo_rateio = await aplicar_rateio_custos(db, cenario_id)
+    
+    return {
+        "quantidade": len(custos),
+        "rateio": resumo_rateio
+    }
 
 
 class ResumoCustos:
@@ -962,6 +968,125 @@ async def calcular_overhead_ineficiencia(
 # RATEIO DE CUSTOS (POOL -> OPERACIONAL)
 # ============================================
 
+async def _calcular_percentuais_rateio(
+    db: AsyncSession,
+    grupo,  # RateioGrupo
+    cenario_id: UUID
+) -> Dict[UUID, float]:
+    """
+    Calcula os percentuais de rateio para cada CC destino baseado no tipo de rateio.
+    
+    Tipos suportados:
+    - MANUAL: usa percentuais definidos em RateioDestino
+    - HC: proporcional ao HC Folha de cada CC destino
+    - AREA: proporcional à área (m²) de cada CC destino
+    - PA: proporcional às Posições de Atendimento de cada CC destino
+    
+    Returns:
+        Dict[cc_destino_id, percentual]
+    """
+    from app.db.models.orcamento import QuadroPessoal, CentroCusto
+    
+    tipo = grupo.tipo_rateio or "MANUAL"
+    destinos_ids = [d.cc_destino_id for d in grupo.destinos]
+    
+    if tipo == "MANUAL":
+        # Usa percentuais definidos manualmente
+        return {d.cc_destino_id: float(d.percentual or 0) for d in grupo.destinos}
+    
+    elif tipo == "HC":
+        # Proporcional ao HC Folha de cada CC destino
+        MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
+        
+        # Buscar quadro de pessoal dos CCs destino
+        result = await db.execute(
+            select(QuadroPessoal).where(
+                QuadroPessoal.cenario_id == cenario_id,
+                QuadroPessoal.centro_custo_id.in_(destinos_ids),
+                QuadroPessoal.ativo == True
+            )
+        )
+        quadros = result.scalars().all()
+        
+        # Calcular HC médio por CC
+        hc_por_cc: Dict[UUID, float] = {cc_id: 0.0 for cc_id in destinos_ids}
+        for q in quadros:
+            cc_id = q.centro_custo_id
+            if cc_id:
+                hc_total = sum(float(getattr(q, f"qtd_{mes}", 0) or 0) for mes in MESES)
+                hc_medio = hc_total / 12  # Média mensal
+                hc_por_cc[cc_id] = hc_por_cc.get(cc_id, 0.0) + hc_medio
+        
+        # Calcular percentuais
+        total_hc = sum(hc_por_cc.values())
+        if total_hc > 0:
+            return {cc_id: (hc / total_hc) * 100 for cc_id, hc in hc_por_cc.items()}
+        else:
+            # Se não há HC, distribui igualmente
+            n = len(destinos_ids)
+            return {cc_id: 100 / n for cc_id in destinos_ids} if n > 0 else {}
+    
+    elif tipo == "AREA":
+        # Proporcional à área (m²) de cada CC destino
+        result = await db.execute(
+            select(CentroCusto).where(CentroCusto.id.in_(destinos_ids))
+        )
+        ccs = result.scalars().all()
+        
+        area_por_cc: Dict[UUID, float] = {}
+        for cc in ccs:
+            area_por_cc[cc.id] = float(cc.area_m2 or 0)
+        
+        # Calcular percentuais
+        total_area = sum(area_por_cc.values())
+        if total_area > 0:
+            return {cc_id: (area / total_area) * 100 for cc_id, area in area_por_cc.items()}
+        else:
+            # Se não há área cadastrada, distribui igualmente
+            n = len(destinos_ids)
+            return {cc_id: 100 / n for cc_id in destinos_ids} if n > 0 else {}
+    
+    elif tipo == "PA":
+        # Proporcional às Posições de Atendimento de cada CC destino
+        MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
+        
+        # Buscar quadro de pessoal dos CCs destino
+        result = await db.execute(
+            select(QuadroPessoal).where(
+                QuadroPessoal.cenario_id == cenario_id,
+                QuadroPessoal.centro_custo_id.in_(destinos_ids),
+                QuadroPessoal.ativo == True
+            )
+        )
+        quadros = result.scalars().all()
+        
+        # Calcular PAs por CC (HC / fator_pa)
+        pa_por_cc: Dict[UUID, float] = {cc_id: 0.0 for cc_id in destinos_ids}
+        for q in quadros:
+            cc_id = q.centro_custo_id
+            if cc_id:
+                fator_pa = float(q.fator_pa or 1.0)
+                if fator_pa <= 0:
+                    fator_pa = 1.0
+                hc_total = sum(float(getattr(q, f"qtd_{mes}", 0) or 0) for mes in MESES)
+                hc_medio = hc_total / 12
+                pa_medio = hc_medio / fator_pa
+                pa_por_cc[cc_id] = pa_por_cc.get(cc_id, 0.0) + pa_medio
+        
+        # Calcular percentuais
+        total_pa = sum(pa_por_cc.values())
+        if total_pa > 0:
+            return {cc_id: (pa / total_pa) * 100 for cc_id, pa in pa_por_cc.items()}
+        else:
+            # Se não há PAs, distribui igualmente
+            n = len(destinos_ids)
+            return {cc_id: 100 / n for cc_id in destinos_ids} if n > 0 else {}
+    
+    # Fallback: distribui igualmente
+    n = len(destinos_ids)
+    return {cc_id: 100 / n for cc_id in destinos_ids} if n > 0 else {}
+
+
 async def aplicar_rateio_custos(
     db: AsyncSession,
     cenario_id: UUID
@@ -969,11 +1094,18 @@ async def aplicar_rateio_custos(
     """
     Aplica os rateios configurados para distribuir custos de CCs POOL para CCs OPERACIONAIS.
     
+    Suporta 4 tipos de rateio:
+    - MANUAL: percentuais definidos pelo usuário
+    - HC: proporcional ao HC Folha de cada CC destino
+    - AREA: proporcional à área (m²) de cada CC destino
+    - PA: proporcional às Posições de Atendimento de cada CC destino
+    
     Esta função:
     1. Busca todos os grupos de rateio ativos do cenário
-    2. Para cada grupo, calcula o total de custos no CC POOL de origem
-    3. Distribui proporcionalmente para os CCs OPERACIONAIS de destino
-    4. Cria registros de CustoCalculado com os valores rateados
+    2. Para cada grupo, calcula os percentuais baseado no tipo de rateio
+    3. Busca custos do CC POOL de origem
+    4. Distribui proporcionalmente para os CCs OPERACIONAIS de destino
+    5. Cria registros de CustoCalculado com os valores rateados
     
     Returns:
         Dict com resumo do rateio aplicado
@@ -988,7 +1120,7 @@ async def aplicar_rateio_custos(
             RateioGrupo.ativo == True
         )
         .options(
-            selectinload(RateioGrupo.destinos),
+            selectinload(RateioGrupo.destinos).selectinload(RateioDestino.cc_destino),
             selectinload(RateioGrupo.cc_origem)
         )
     )
@@ -998,17 +1130,31 @@ async def aplicar_rateio_custos(
         "grupos_processados": 0,
         "custos_rateados": 0,
         "valor_total_rateado": Decimal("0"),
+        "detalhes_grupos": [],
         "erros": []
     }
     
     for grupo in grupos:
-        # Verificar se percentuais somam 100%
-        total_pct = sum(float(d.percentual) for d in grupo.destinos if d.percentual)
-        if abs(total_pct - 100.0) > 0.01:
-            resumo["erros"].append(f"Grupo '{grupo.nome}' tem percentual total de {total_pct}% (deve ser 100%)")
+        if not grupo.destinos:
+            resumo["erros"].append(f"Grupo '{grupo.nome}' não tem destinos configurados")
             continue
         
-        # Buscar custos do CC origem (POOL)
+        # Calcular percentuais baseado no tipo de rateio
+        tipo_rateio = grupo.tipo_rateio or "MANUAL"
+        percentuais = await _calcular_percentuais_rateio(db, grupo, cenario_id)
+        
+        # Verificar se percentuais somam 100%
+        total_pct = sum(percentuais.values())
+        if abs(total_pct - 100.0) > 0.01 and tipo_rateio == "MANUAL":
+            resumo["erros"].append(f"Grupo '{grupo.nome}' tem percentual total de {total_pct:.2f}% (deve ser 100%)")
+            continue
+        
+        # Normalizar percentuais para somar exatamente 100% (para tipos calculados)
+        if total_pct > 0 and tipo_rateio != "MANUAL":
+            fator = 100.0 / total_pct
+            percentuais = {cc_id: pct * fator for cc_id, pct in percentuais.items()}
+        
+        # Buscar custos calculados do CC origem (POOL)
         custos_origem = await db.execute(
             select(CustoCalculado).where(
                 CustoCalculado.cenario_id == cenario_id,
@@ -1017,13 +1163,45 @@ async def aplicar_rateio_custos(
         )
         custos_pool = custos_origem.scalars().all()
         
-        if not custos_pool:
+        # Buscar custos diretos do CC origem (POOL) - ex: Aluguel
+        from app.db.models.orcamento import CustoDireto, ProdutoTecnologia, TipoCusto
+        
+        custos_diretos_origem = await db.execute(
+            select(CustoDireto, ProdutoTecnologia).join(
+                ProdutoTecnologia, CustoDireto.item_custo_id == ProdutoTecnologia.id
+            ).where(
+                CustoDireto.cenario_id == cenario_id,
+                CustoDireto.centro_custo_id == grupo.cc_origem_pool_id,
+                CustoDireto.ativo == True
+            )
+        )
+        custos_diretos_pool = custos_diretos_origem.fetchall()
+        
+        # Buscar o cenário para obter o ano
+        cenario = await db.get(Cenario, cenario_id)
+        ano_cenario = cenario.ano_inicio if cenario else 2026
+        
+        if not custos_pool and not custos_diretos_pool:
             continue
         
-        # Para cada custo, criar rateios nos destinos
+        grupo_detalhe = {
+            "nome": grupo.nome,
+            "tipo_rateio": tipo_rateio,
+            "cc_origem": grupo.cc_origem.nome if grupo.cc_origem else str(grupo.cc_origem_pool_id),
+            "custos_origem": len(custos_pool) + len(custos_diretos_pool),
+            "destinos": []
+        }
+        
+        # Para cada custo calculado, criar rateios nos destinos
         for custo_original in custos_pool:
             for destino in grupo.destinos:
-                valor_rateado = custo_original.valor_calculado * (destino.percentual / 100)
+                cc_destino_id = destino.cc_destino_id
+                percentual = percentuais.get(cc_destino_id, 0)
+                
+                if percentual <= 0:
+                    continue
+                
+                valor_rateado = custo_original.valor_calculado * Decimal(str(percentual / 100))
                 
                 # Criar novo registro de custo rateado
                 custo_rateado = CustoCalculado(
@@ -1032,18 +1210,21 @@ async def aplicar_rateio_custos(
                     funcao_id=custo_original.funcao_id,
                     faixa_id=custo_original.faixa_id,
                     tipo_custo_id=custo_original.tipo_custo_id,
-                    centro_custo_id=destino.cc_destino_id,
+                    centro_custo_id=cc_destino_id,
                     mes=custo_original.mes,
                     ano=custo_original.ano,
-                    hc_base=custo_original.hc_base * (destino.percentual / 100),
+                    hc_base=custo_original.hc_base * Decimal(str(percentual / 100)),
                     valor_base=custo_original.valor_base,
                     indice_aplicado=custo_original.indice_aplicado,
                     valor_calculado=valor_rateado,
                     memoria_calculo={
                         "tipo": "rateio",
+                        "tipo_rateio": tipo_rateio,
                         "grupo_rateio": str(grupo.id),
+                        "grupo_nome": grupo.nome,
                         "cc_origem": str(grupo.cc_origem_pool_id),
-                        "percentual": float(destino.percentual),
+                        "cc_destino": str(cc_destino_id),
+                        "percentual": round(percentual, 2),
                         "custo_original_id": str(custo_original.id),
                     }
                 )
@@ -1051,6 +1232,86 @@ async def aplicar_rateio_custos(
                 resumo["custos_rateados"] += 1
                 resumo["valor_total_rateado"] += valor_rateado
         
+        # Para cada custo direto (ex: Aluguel), criar rateios nos destinos
+        for custo_direto, produto in custos_diretos_pool:
+            # Buscar ou criar TipoCusto correspondente ao produto
+            tipo_custo_result = await db.execute(
+                select(TipoCusto).where(
+                    TipoCusto.codigo == f"CD_{produto.codigo}"
+                )
+            )
+            tipo_custo = tipo_custo_result.scalar_one_or_none()
+            
+            if not tipo_custo:
+                # Criar TipoCusto para o custo direto
+                tipo_custo = TipoCusto(
+                    codigo=f"CD_{produto.codigo}",
+                    nome=produto.nome,
+                    categoria=produto.categoria or "CUSTO_DIRETO",
+                    tipo_calculo="HC_X_VALOR",
+                    conta_contabil_codigo=produto.conta_contabil_codigo,
+                    conta_contabil_descricao=produto.conta_contabil_descricao,
+                    ativo=True
+                )
+                db.add(tipo_custo)
+                await db.flush()
+            
+            # Calcular valor mensal
+            valor_mensal = Decimal(str(custo_direto.valor_fixo or 0))
+            if custo_direto.tipo_valor in ["VARIAVEL", "FIXO_VARIAVEL"] and custo_direto.valor_unitario_variavel:
+                # TODO: Calcular baseado no HC/PA real
+                valor_mensal += Decimal(str(custo_direto.valor_unitario_variavel or 0)) * 100
+            
+            # Criar custo rateado para cada mês e cada destino
+            for mes in range(1, 13):
+                for destino in grupo.destinos:
+                    cc_destino_id = destino.cc_destino_id
+                    percentual = percentuais.get(cc_destino_id, 0)
+                    
+                    if percentual <= 0:
+                        continue
+                    
+                    valor_rateado = valor_mensal * Decimal(str(percentual / 100))
+                    
+                    custo_rateado = CustoCalculado(
+                        cenario_id=cenario_id,
+                        cenario_secao_id=custo_direto.cenario_secao_id,
+                        funcao_id=None,
+                        faixa_id=None,
+                        tipo_custo_id=tipo_custo.id,
+                        centro_custo_id=cc_destino_id,
+                        mes=mes,
+                        ano=ano_cenario,
+                        hc_base=Decimal("0"),
+                        valor_base=valor_mensal,
+                        indice_aplicado=Decimal(str(percentual / 100)),
+                        valor_calculado=valor_rateado,
+                        memoria_calculo={
+                            "tipo": "rateio",
+                            "tipo_rateio": tipo_rateio,
+                            "grupo_rateio": str(grupo.id),
+                            "grupo_nome": grupo.nome,
+                            "cc_origem": str(grupo.cc_origem_pool_id),
+                            "cc_destino": str(cc_destino_id),
+                            "percentual": round(percentual, 2),
+                            "custo_direto_id": str(custo_direto.id),
+                            "produto_nome": produto.nome,
+                        }
+                    )
+                    db.add(custo_rateado)
+                    resumo["custos_rateados"] += 1
+                    resumo["valor_total_rateado"] += valor_rateado
+        
+        # Registrar detalhes do grupo
+        for destino in grupo.destinos:
+            cc_nome = destino.cc_destino.nome if destino.cc_destino else str(destino.cc_destino_id)
+            pct = percentuais.get(destino.cc_destino_id, 0)
+            grupo_detalhe["destinos"].append({
+                "cc_nome": cc_nome,
+                "percentual": round(pct, 2)
+            })
+        
+        resumo["detalhes_grupos"].append(grupo_detalhe)
         resumo["grupos_processados"] += 1
     
     await db.commit()

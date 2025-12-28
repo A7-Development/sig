@@ -25,3 +25,4 @@ COMMENT ON COLUMN secoes.trabalha_feriado_municipal IS 'Se a seção trabalha em
 COMMENT ON COLUMN secoes.uf IS 'UF da seção (para determinar feriados estaduais aplicáveis)';
 COMMENT ON COLUMN secoes.cidade IS 'Cidade da seção (para determinar feriados municipais aplicáveis)';
 
+

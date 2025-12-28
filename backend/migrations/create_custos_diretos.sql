@@ -50,3 +50,4 @@ SELECT 'Tabela custos_diretos criada com sucesso!' as resultado;
 
 
 
+

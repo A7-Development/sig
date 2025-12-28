@@ -50,6 +50,7 @@ import { PremissasFuncaoGridPanel } from "@/components/orcamento/PremissasFuncao
 import { DREPanel } from "@/components/orcamento/DREPanel";
 import CustoDiretoPanel from "@/components/orcamento/CustoDiretoPanel";
 import { ReceitasPanel } from "@/components/orcamento/ReceitasPanel";
+import { RateioConfigPanel } from "@/components/orcamento/RateioConfigPanel";
 import type { CenarioEmpresa, CenarioCliente, CenarioSecao } from "@/lib/api/orcamento";
 import { useAuthStore } from "@/stores/auth-store";
 import { 
@@ -84,7 +85,7 @@ export default function CenariosPage() {
   const [tabelaSalarial, setTabelaSalarial] = useState<TabelaSalarial[]>([]);
   
   // Abas
-  const [abaAtiva, setAbaAtiva] = useState<'estrutura' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custo-direto' | 'receitas' | 'dre'>('estrutura');
+  const [abaAtiva, setAbaAtiva] = useState<'estrutura' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custo-direto' | 'receitas' | 'rateio' | 'dre'>('estrutura');
   
   // Estado para seleção na árvore Master-Detail
   const [selectedNode, setSelectedNode] = useState<{
@@ -457,6 +458,17 @@ export default function CenariosPage() {
               Receitas
             </button>
             <button
+              onClick={() => setAbaAtiva('rateio')}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                abaAtiva === 'rateio'
+                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <GitCompare className="h-4 w-4" />
+              Rateio
+            </button>
+            <button
               onClick={() => setAbaAtiva('dre')}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
                 abaAtiva === 'dre'
@@ -794,6 +806,10 @@ export default function CenariosPage() {
                     </div>
                   )}
                 </div>
+              </div>
+            ) : abaAtiva === 'rateio' ? (
+              <div className="h-full overflow-auto p-4">
+                <RateioConfigPanel cenarioId={cenarioSelecionado.id} />
               </div>
             ) : abaAtiva === 'dre' ? (
               <div className="h-full overflow-auto">

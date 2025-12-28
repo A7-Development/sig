@@ -111,11 +111,12 @@ class CentroCustoBase(BaseModel):
     codigo: str = Field(..., min_length=1, max_length=50)
     nome: str = Field(..., min_length=1, max_length=200)
     codigo_totvs: Optional[str] = Field(None, max_length=50)
-    tipo: str = Field("OPERACIONAL", pattern="^(OPERACIONAL|ADMINISTRATIVO|OVERHEAD)$")
+    tipo: str = Field("OPERACIONAL", pattern="^(OPERACIONAL|ADMINISTRATIVO|OVERHEAD|POOL)$")
     cliente: Optional[str] = Field(None, max_length=200)
     contrato: Optional[str] = Field(None, max_length=100)
     uf: Optional[str] = Field(None, min_length=2, max_length=2)
     cidade: Optional[str] = Field(None, max_length=100)
+    area_m2: Optional[float] = Field(None, ge=0, description="Área em m² para rateio por área")
     ativo: bool = True
 
 
@@ -127,11 +128,12 @@ class CentroCustoUpdate(BaseModel):
     codigo: Optional[str] = Field(None, min_length=1, max_length=50)
     nome: Optional[str] = Field(None, min_length=1, max_length=200)
     codigo_totvs: Optional[str] = Field(None, max_length=50)
-    tipo: Optional[str] = Field(None, pattern="^(OPERACIONAL|ADMINISTRATIVO|OVERHEAD)$")
+    tipo: Optional[str] = Field(None, pattern="^(OPERACIONAL|ADMINISTRATIVO|OVERHEAD|POOL)$")
     cliente: Optional[str] = Field(None, max_length=200)
     contrato: Optional[str] = Field(None, max_length=100)
     uf: Optional[str] = Field(None, min_length=2, max_length=2)
     cidade: Optional[str] = Field(None, max_length=100)
+    area_m2: Optional[float] = Field(None, ge=0)
     ativo: Optional[bool] = None
 
 
@@ -360,6 +362,8 @@ class TributoBase(BaseModel):
     codigo: str = Field(..., min_length=1, max_length=50)  # PIS, COFINS, ISS, CPREV
     nome: str = Field(..., min_length=1, max_length=200)
     aliquota: float = Field(..., ge=0, le=100)
+    conta_contabil_codigo: Optional[str] = Field(None, max_length=50)
+    conta_contabil_descricao: Optional[str] = Field(None, max_length=255)
     ordem: int = 0
     ativo: bool = True
 
@@ -373,6 +377,8 @@ class TributoUpdate(BaseModel):
     codigo: Optional[str] = Field(None, min_length=1, max_length=50)
     nome: Optional[str] = Field(None, min_length=1, max_length=200)
     aliquota: Optional[float] = Field(None, ge=0, le=100)
+    conta_contabil_codigo: Optional[str] = Field(None, max_length=50)
+    conta_contabil_descricao: Optional[str] = Field(None, max_length=255)
     ordem: Optional[int] = None
     ativo: Optional[bool] = None
 
@@ -1449,6 +1455,43 @@ class DREResponse(BaseModel):
     total_geral: float
 
 
+class DRELinhaPorCC(BaseModel):
+    """Linha do DRE com separação de custos diretos e indiretos."""
+    conta_contabil_codigo: str
+    conta_contabil_descricao: str
+    conta_contabil_completa: str
+    tipo_custo_codigo: Optional[str] = None
+    tipo_custo_nome: Optional[str] = None
+    categoria: str
+    origem: str  # "DIRETO" ou "INDIRETO"
+    valores_mensais: List[float]
+    total: float
+
+
+class DRECentroCusto(BaseModel):
+    """DRE de um Centro de Custo específico."""
+    centro_custo_id: UUID
+    centro_custo_codigo: str
+    centro_custo_nome: str
+    linhas_diretas: List[DRELinhaPorCC]
+    linhas_indiretas: List[DRELinhaPorCC]
+    total_receitas: float
+    total_custos_diretos: float
+    total_custos_indiretos: float
+    total_custos: float
+    margem: float  # Receitas - Custos
+    margem_percentual: float  # Margem / Receitas * 100
+
+
+class DREPorCCResponse(BaseModel):
+    """Resposta do DRE agrupado por Centro de Custo."""
+    cenario_id: UUID
+    ano: int
+    visao: str  # "por_cc", "comparativo", "margem"
+    centros_custo: List[DRECentroCusto]
+    consolidado: Optional[DRECentroCusto] = None  # Totais gerais
+
+
 # ============================================
 # Rateio de Custos (POOL -> OPERACIONAL)
 # ============================================
@@ -1478,6 +1521,7 @@ class RateioGrupoBase(BaseModel):
     cc_origem_pool_id: UUID
     nome: str = Field(..., min_length=1, max_length=200)
     descricao: Optional[str] = None
+    tipo_rateio: str = Field("MANUAL", pattern="^(MANUAL|HC|AREA|PA)$", description="Tipo de rateio: MANUAL (percentuais definidos), HC (proporcional ao headcount), AREA (proporcional à área m²), PA (proporcional às PAs)")
     ativo: bool = True
 
 
@@ -1490,6 +1534,7 @@ class RateioGrupoUpdate(BaseModel):
     """Schema para atualizar grupo de rateio."""
     nome: Optional[str] = Field(None, min_length=1, max_length=200)
     descricao: Optional[str] = None
+    tipo_rateio: Optional[str] = Field(None, pattern="^(MANUAL|HC|AREA|PA)$")
     ativo: Optional[bool] = None
 
 

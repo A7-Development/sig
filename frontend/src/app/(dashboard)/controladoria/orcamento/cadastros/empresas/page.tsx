@@ -40,7 +40,9 @@ import {
   Receipt,
   CheckCircle2,
   XCircle,
-  Loader2
+  Loader2,
+  BookOpen,
+  X
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth-store";
 import { useToast } from "@/hooks/use-toast";
@@ -51,6 +53,7 @@ import {
   type Empresa,
   type Tributo,
   type EmpresaNW,
+  type ContaContabilNW,
 } from "@/lib/api/orcamento";
 
 export default function EmpresasPage() {
@@ -91,9 +94,17 @@ export default function EmpresasPage() {
     codigo: "",
     nome: "",
     aliquota: 0,
+    conta_contabil_codigo: "",
+    conta_contabil_descricao: "",
     ordem: 0,
     ativo: true,
   });
+  
+  // Busca de conta contábil
+  const [buscaContaContabil, setBuscaContaContabil] = useState("");
+  const [contasContabeis, setContasContabeis] = useState<ContaContabilNW[]>([]);
+  const [loadingContas, setLoadingContas] = useState(false);
+  const [showContasList, setShowContasList] = useState(false);
 
 
   useEffect(() => {
@@ -249,16 +260,25 @@ export default function EmpresasPage() {
     e.preventDefault();
     if (!token || !empresaSelecionada) return;
     setSalvandoTributo(true);
+    
+    // Preparar dados para envio (converter strings vazias em null)
+    const dadosTributo = {
+      ...formTributo,
+      conta_contabil_codigo: formTributo.conta_contabil_codigo || null,
+      conta_contabil_descricao: formTributo.conta_contabil_descricao || null,
+    };
+    
     try {
       if (editandoTributo) {
-        await tributosApi.atualizar(token, editandoTributo.id, formTributo);
+        await tributosApi.atualizar(token, editandoTributo.id, dadosTributo);
         toast({ title: "Tributo atualizado", description: "Tributo atualizado com sucesso." });
       } else {
-        await tributosApi.criar(token, { ...formTributo, empresa_id: empresaSelecionada.id });
+        await tributosApi.criar(token, { ...dadosTributo, empresa_id: empresaSelecionada.id });
         toast({ title: "Tributo criado", description: "Tributo criado com sucesso." });
       }
       setShowFormTributo(false);
       setEditandoTributo(null);
+      setBuscaContaContabil("");
       carregarDetalhes(empresaSelecionada.id);
     } catch (error) {
       toast({ title: "Erro ao salvar", description: "Não foi possível salvar o tributo.", variant: "destructive" });
@@ -285,6 +305,47 @@ export default function EmpresasPage() {
     }, 500);
     return () => clearTimeout(timer);
   }, [busca]);
+
+  // Busca de contas contábeis com debounce
+  useEffect(() => {
+    if (!token || buscaContaContabil.length < 2) {
+      setContasContabeis([]);
+      return;
+    }
+    
+    const timer = setTimeout(async () => {
+      setLoadingContas(true);
+      try {
+        const contas = await nwApi.getContasContabeis(token, buscaContaContabil, 50);
+        setContasContabeis(contas);
+      } catch (error) {
+        console.error("Erro ao buscar contas contábeis:", error);
+      } finally {
+        setLoadingContas(false);
+      }
+    }, 300);
+    
+    return () => clearTimeout(timer);
+  }, [buscaContaContabil, token]);
+
+  const handleSelectContaContabil = (conta: ContaContabilNW) => {
+    setFormTributo({
+      ...formTributo,
+      conta_contabil_codigo: conta.codigo,
+      conta_contabil_descricao: conta.descricao,
+    });
+    setBuscaContaContabil("");
+    setContasContabeis([]);
+    setShowContasList(false);
+  };
+
+  const handleClearContaContabil = () => {
+    setFormTributo({
+      ...formTributo,
+      conta_contabil_codigo: "",
+      conta_contabil_descricao: "",
+    });
+  };
 
   const totalTributos = tributos.filter(t => t.ativo).reduce((sum, t) => sum + t.aliquota, 0);
 
@@ -469,7 +530,8 @@ export default function EmpresasPage() {
                     )}
                     <Button onClick={() => {
                       setEditandoTributo(null);
-                      setFormTributo({ codigo: "", nome: "", aliquota: 0, ordem: tributos.length, ativo: true });
+                      setFormTributo({ codigo: "", nome: "", aliquota: 0, conta_contabil_codigo: "", conta_contabil_descricao: "", ordem: tributos.length, ativo: true });
+                      setBuscaContaContabil("");
                       setShowFormTributo(true);
                     }}>
                       <Plus className="size-4 mr-2" />
@@ -495,6 +557,7 @@ export default function EmpresasPage() {
                         <TableHead>Código</TableHead>
                         <TableHead>Nome</TableHead>
                         <TableHead className="text-right">Alíquota</TableHead>
+                        <TableHead>Conta Contábil</TableHead>
                         <TableHead className="text-center">Status</TableHead>
                         <TableHead className="text-right">Ações</TableHead>
                       </TableRow>
@@ -505,6 +568,18 @@ export default function EmpresasPage() {
                           <TableCell className="font-mono text-xs">{tributo.codigo}</TableCell>
                           <TableCell className="font-semibold">{tributo.nome}</TableCell>
                           <TableCell className="text-right font-mono font-semibold">{tributo.aliquota.toFixed(2)}%</TableCell>
+                          <TableCell>
+                            {tributo.conta_contabil_codigo ? (
+                              <div className="space-y-0.5">
+                                <span className="font-mono text-xs">{tributo.conta_contabil_codigo}</span>
+                                <p className="text-xs text-muted-foreground truncate max-w-[200px]" title={tributo.conta_contabil_descricao || ""}>
+                                  {tributo.conta_contabil_descricao}
+                                </p>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-center">
                             {tributo.ativo ? (
                               <Badge variant="success" className="gap-1"><CheckCircle2 className="size-3" />Ativo</Badge>
@@ -520,6 +595,8 @@ export default function EmpresasPage() {
                                   codigo: tributo.codigo,
                                   nome: tributo.nome,
                                   aliquota: tributo.aliquota,
+                                  conta_contabil_codigo: tributo.conta_contabil_codigo || "",
+                                  conta_contabil_descricao: tributo.conta_contabil_descricao || "",
                                   ordem: tributo.ordem,
                                   ativo: tributo.ativo,
                                 });
@@ -690,10 +767,10 @@ export default function EmpresasPage() {
 
       {/* Dialog Tributo */}
       <Dialog open={showFormTributo} onOpenChange={setShowFormTributo}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>{editandoTributo ? "Editar Tributo" : "Novo Tributo"}</DialogTitle>
-            <DialogDescription>Preencha os dados do tributo</DialogDescription>
+            <DialogDescription>Preencha os dados do tributo e defina a conta contábil para DRE</DialogDescription>
           </DialogHeader>
           
           <form onSubmit={handleSubmitTributo} className="space-y-4">
@@ -727,6 +804,74 @@ export default function EmpresasPage() {
                 placeholder="PIS - Programa de Integração Social"
                 required
               />
+            </div>
+
+            {/* Campo de Conta Contábil com autocomplete */}
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1">
+                <BookOpen className="size-3" />
+                Conta Contábil para DRE
+              </Label>
+              
+              {formTributo.conta_contabil_codigo ? (
+                <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border">
+                  <div className="space-y-0.5">
+                    <span className="font-mono text-sm font-medium">{formTributo.conta_contabil_codigo}</span>
+                    <p className="text-xs text-muted-foreground">{formTributo.conta_contabil_descricao}</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={handleClearContaContabil}
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                  <Input
+                    value={buscaContaContabil}
+                    onChange={(e) => {
+                      setBuscaContaContabil(e.target.value);
+                      setShowContasList(true);
+                    }}
+                    onFocus={() => setShowContasList(true)}
+                    placeholder="Buscar conta contábil (mín. 2 caracteres)..."
+                    className="pl-9"
+                  />
+                  {loadingContas && (
+                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 size-4 animate-spin text-muted-foreground" />
+                  )}
+                  
+                  {/* Lista de resultados */}
+                  {showContasList && contasContabeis.length > 0 && (
+                    <div className="absolute z-50 w-full mt-1 bg-background border rounded-md shadow-lg max-h-[200px] overflow-auto">
+                      {contasContabeis.map((conta) => (
+                        <button
+                          key={conta.codigo}
+                          type="button"
+                          className="w-full px-3 py-2 text-left hover:bg-muted/50 border-b last:border-b-0"
+                          onClick={() => handleSelectContaContabil(conta)}
+                        >
+                          <span className="font-mono text-xs font-medium">{conta.codigo}</span>
+                          <p className="text-xs text-muted-foreground truncate">{conta.descricao}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {showContasList && buscaContaContabil.length >= 2 && contasContabeis.length === 0 && !loadingContas && (
+                    <div className="absolute z-50 w-full mt-1 bg-background border rounded-md shadow-lg p-3 text-center">
+                      <p className="text-xs text-muted-foreground">Nenhuma conta encontrada</p>
+                    </div>
+                  )}
+                </div>
+              )}
+              <p className="text-[10px] text-muted-foreground">
+                A conta contábil define onde o valor calculado será lançado na DRE
+              </p>
             </div>
 
             <div className="flex items-center gap-2">

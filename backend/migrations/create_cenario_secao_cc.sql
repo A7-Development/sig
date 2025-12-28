@@ -19,3 +19,4 @@ CREATE INDEX IF NOT EXISTS ix_cenario_secao_cc_cc ON cenario_secao_cc(centro_cus
 
 
 
+

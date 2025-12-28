@@ -1,20 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -33,19 +26,22 @@ import {
 import {
   AlertCircle,
   CheckCircle2,
-  Plus,
-  Trash2,
+  Settings2,
   Loader2,
-  PieChart,
   Building2,
   ArrowRight,
+  Users,
+  Ruler,
+  Monitor,
+  Percent,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth-store";
 import {
   rateios,
+  centrosCustoApi,
   type RateioGrupoComValidacao,
-  type RateioGrupoCreate,
-  type RateioDestinoCreate,
+  type CentroCusto,
+  type TipoRateio,
 } from "@/lib/api/orcamento";
 import { cn } from "@/lib/utils";
 
@@ -57,11 +53,9 @@ interface RateioConfigPanelProps {
   cenarioId: string;
 }
 
-interface CCDisponivel {
-  id: string;
-  codigo: string;
-  nome: string;
-  tipo: string;
+interface PoolComConfig {
+  pool: CentroCusto;
+  config: RateioGrupoComValidacao | null;
 }
 
 // ============================================
@@ -72,30 +66,19 @@ export function RateioConfigPanel({ cenarioId }: RateioConfigPanelProps) {
   const { accessToken: token } = useAuthStore();
 
   // Estado principal
-  const [grupos, setGrupos] = useState<RateioGrupoComValidacao[]>([]);
+  const [pools, setPools] = useState<PoolComConfig[]>([]);
+  const [ccsOperacionais, setCcsOperacionais] = useState<CentroCusto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // CCs disponíveis
-  const [poolsDisponiveis, setPoolsDisponiveis] = useState<CCDisponivel[]>([]);
-  const [operacionaisDisponiveis, setOperacionaisDisponiveis] = useState<CCDisponivel[]>([]);
-
-  // Modal criar grupo
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [novoGrupo, setNovoGrupo] = useState<{
-    nome: string;
-    cc_origem_pool_id: string;
-    descricao: string;
-  }>({ nome: "", cc_origem_pool_id: "", descricao: "" });
+  // Modal de configuração
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [poolSelecionado, setPoolSelecionado] = useState<PoolComConfig | null>(null);
+  const [configForm, setConfigForm] = useState<{
+    tipo_rateio: TipoRateio;
+    destinos: { cc_id: string; percentual: number; selecionado: boolean }[];
+  }>({ tipo_rateio: "MANUAL", destinos: [] });
   const [saving, setSaving] = useState(false);
-
-  // Modal adicionar destino
-  const [showAddDestinoModal, setShowAddDestinoModal] = useState(false);
-  const [grupoSelecionado, setGrupoSelecionado] = useState<RateioGrupoComValidacao | null>(null);
-  const [novoDestino, setNovoDestino] = useState<{
-    cc_destino_id: string;
-    percentual: number;
-  }>({ cc_destino_id: "", percentual: 0 });
 
   // ============================================
   // Carregar dados
@@ -106,17 +89,24 @@ export function RateioConfigPanel({ cenarioId }: RateioConfigPanelProps) {
     setLoading(true);
     setError(null);
     try {
-      // Carregar grupos de rateio
-      const gruposData = await rateios.listar(token, cenarioId, false);
-      setGrupos(gruposData);
+      // Carregar todos os CCs
+      const todosCCs = await centrosCustoApi.listar(token, { ativo: true });
+      
+      // Separar POOLs e operacionais
+      const poolsCCs = todosCCs.filter(cc => cc.tipo === "POOL");
+      const operacionais = todosCCs.filter(cc => cc.tipo !== "POOL");
+      setCcsOperacionais(operacionais);
 
-      // Carregar CCs disponíveis
-      const [pools, operacionais] = await Promise.all([
-        rateios.listarPoolsDisponiveis(token, cenarioId),
-        rateios.listarOperacionaisDisponiveis(token, cenarioId),
-      ]);
-      setPoolsDisponiveis(pools);
-      setOperacionaisDisponiveis(operacionais);
+      // Carregar configurações de rateio existentes
+      const configsExistentes = await rateios.listar(token, cenarioId, false);
+
+      // Montar lista de pools com suas configs
+      const poolsComConfig: PoolComConfig[] = poolsCCs.map(pool => {
+        const config = configsExistentes.find(c => c.cc_origem_pool_id === pool.id) || null;
+        return { pool, config };
+      });
+
+      setPools(poolsComConfig);
     } catch (err: any) {
       setError(err.message || "Erro ao carregar dados");
     } finally {
@@ -132,85 +122,146 @@ export function RateioConfigPanel({ cenarioId }: RateioConfigPanelProps) {
   // Handlers
   // ============================================
 
-  const handleCreateGrupo = async () => {
-    if (!token || !novoGrupo.nome || !novoGrupo.cc_origem_pool_id) return;
+  const abrirConfiguracao = (poolItem: PoolComConfig) => {
+    setPoolSelecionado(poolItem);
+    
+    // Preparar formulário com dados existentes ou padrão
+    if (poolItem.config) {
+      setConfigForm({
+        tipo_rateio: poolItem.config.tipo_rateio || "MANUAL",
+        destinos: ccsOperacionais.map(cc => {
+          const destinoExistente = poolItem.config?.destinos.find(d => d.cc_destino_id === cc.id);
+          return {
+            cc_id: cc.id,
+            percentual: destinoExistente ? destinoExistente.percentual : 0,
+            selecionado: !!destinoExistente,
+          };
+        }),
+      });
+    } else {
+      setConfigForm({
+        tipo_rateio: "MANUAL",
+        destinos: ccsOperacionais.map(cc => ({
+          cc_id: cc.id,
+          percentual: 0,
+          selecionado: false,
+        })),
+      });
+    }
+    
+    setShowConfigModal(true);
+  };
+
+  const salvarConfiguracao = async () => {
+    if (!token || !poolSelecionado) return;
+
+    const destinosSelecionados = configForm.destinos.filter(d => d.selecionado);
+    if (destinosSelecionados.length === 0) {
+      alert("Selecione pelo menos um CC destino");
+      return;
+    }
+
+    // Para rateio manual, validar percentuais
+    if (configForm.tipo_rateio === "MANUAL") {
+      const totalPct = destinosSelecionados.reduce((sum, d) => sum + d.percentual, 0);
+      if (Math.abs(totalPct - 100) > 0.01) {
+        alert(`Os percentuais devem somar 100%. Atual: ${totalPct.toFixed(2)}%`);
+        return;
+      }
+    }
 
     setSaving(true);
     try {
-      await rateios.criar(token, cenarioId, {
-        nome: novoGrupo.nome,
-        cc_origem_pool_id: novoGrupo.cc_origem_pool_id,
-        descricao: novoGrupo.descricao || undefined,
-        ativo: true,
-        destinos: [],
-      });
+      if (poolSelecionado.config) {
+        // Atualizar configuração existente
+        await rateios.atualizar(token, poolSelecionado.config.id, {
+          tipo_rateio: configForm.tipo_rateio,
+        });
+        
+        // Remover destinos antigos e adicionar novos
+        for (const destino of poolSelecionado.config.destinos) {
+          await rateios.removerDestino(token, poolSelecionado.config.id, destino.id);
+        }
+        
+        for (const destino of destinosSelecionados) {
+          await rateios.adicionarDestino(token, poolSelecionado.config.id, {
+            cc_destino_id: destino.cc_id,
+            percentual: configForm.tipo_rateio === "MANUAL" ? destino.percentual : 0,
+          });
+        }
+      } else {
+        // Criar nova configuração
+        await rateios.criar(token, cenarioId, {
+          cc_origem_pool_id: poolSelecionado.pool.id,
+          nome: `Rateio ${poolSelecionado.pool.nome}`,
+          tipo_rateio: configForm.tipo_rateio,
+          ativo: true,
+          destinos: destinosSelecionados.map(d => ({
+            cc_destino_id: d.cc_id,
+            percentual: configForm.tipo_rateio === "MANUAL" ? d.percentual : 0,
+          })),
+        });
+      }
+
       await carregarDados();
-      setShowCreateModal(false);
-      setNovoGrupo({ nome: "", cc_origem_pool_id: "", descricao: "" });
+      setShowConfigModal(false);
     } catch (err: any) {
-      alert(err.message || "Erro ao criar grupo");
+      alert(err.message || "Erro ao salvar configuração");
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDeleteGrupo = async (grupo: RateioGrupoComValidacao) => {
-    if (!token) return;
-    if (!confirm(`Excluir grupo "${grupo.nome}" e todos os seus destinos?`)) return;
-
-    try {
-      await rateios.excluir(token, grupo.id);
-      await carregarDados();
-    } catch (err: any) {
-      alert(err.message || "Erro ao excluir grupo");
-    }
+  const toggleDestino = (ccId: string) => {
+    setConfigForm(prev => ({
+      ...prev,
+      destinos: prev.destinos.map(d =>
+        d.cc_id === ccId ? { ...d, selecionado: !d.selecionado } : d
+      ),
+    }));
   };
 
-  const openAddDestino = (grupo: RateioGrupoComValidacao) => {
-    setGrupoSelecionado(grupo);
-    setNovoDestino({ cc_destino_id: "", percentual: 0 });
-    setShowAddDestinoModal(true);
+  const setPercentual = (ccId: string, valor: number) => {
+    setConfigForm(prev => ({
+      ...prev,
+      destinos: prev.destinos.map(d =>
+        d.cc_id === ccId ? { ...d, percentual: valor } : d
+      ),
+    }));
   };
 
-  const handleAddDestino = async () => {
-    if (!token || !grupoSelecionado || !novoDestino.cc_destino_id) return;
-
-    setSaving(true);
-    try {
-      await rateios.adicionarDestino(token, grupoSelecionado.id, {
-        cc_destino_id: novoDestino.cc_destino_id,
-        percentual: novoDestino.percentual,
-      });
-      await carregarDados();
-      setShowAddDestinoModal(false);
-    } catch (err: any) {
-      alert(err.message || "Erro ao adicionar destino");
-    } finally {
-      setSaving(false);
-    }
+  const selecionarTodos = () => {
+    setConfigForm(prev => ({
+      ...prev,
+      destinos: prev.destinos.map(d => ({ ...d, selecionado: true })),
+    }));
   };
 
-  const handleUpdatePercentual = async (grupoId: string, destinoId: string, percentual: number) => {
-    if (!token) return;
-
-    try {
-      await rateios.atualizarDestino(token, grupoId, destinoId, percentual);
-      await carregarDados();
-    } catch (err: any) {
-      alert(err.message || "Erro ao atualizar percentual");
-    }
+  const distribuirIgualmente = () => {
+    const selecionados = configForm.destinos.filter(d => d.selecionado);
+    if (selecionados.length === 0) return;
+    const pctCada = 100 / selecionados.length;
+    setConfigForm(prev => ({
+      ...prev,
+      destinos: prev.destinos.map(d =>
+        d.selecionado ? { ...d, percentual: Math.round(pctCada * 100) / 100 } : d
+      ),
+    }));
   };
 
-  const handleDeleteDestino = async (grupoId: string, destinoId: string) => {
-    if (!token) return;
+  // ============================================
+  // Cálculos
+  // ============================================
 
-    try {
-      await rateios.removerDestino(token, grupoId, destinoId);
-      await carregarDados();
-    } catch (err: any) {
-      alert(err.message || "Erro ao remover destino");
-    }
-  };
+  const totalPercentual = useMemo(() => {
+    return configForm.destinos
+      .filter(d => d.selecionado)
+      .reduce((sum, d) => sum + d.percentual, 0);
+  }, [configForm.destinos]);
+
+  const destinosSelecionadosCount = useMemo(() => {
+    return configForm.destinos.filter(d => d.selecionado).length;
+  }, [configForm.destinos]);
 
   // ============================================
   // Render
@@ -221,13 +272,11 @@ export function RateioConfigPanel({ cenarioId }: RateioConfigPanelProps) {
       <Card>
         <CardHeader>
           <Skeleton className="h-6 w-48" />
-          <Skeleton className="h-4 w-72" />
+          <Skeleton className="h-4 w-72 mt-2" />
         </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-16 w-full" />
-          </div>
+        <CardContent className="space-y-4">
+          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-20 w-full" />
         </CardContent>
       </Card>
     );
@@ -235,9 +284,9 @@ export function RateioConfigPanel({ cenarioId }: RateioConfigPanelProps) {
 
   if (error) {
     return (
-      <Card>
-        <CardContent className="py-8">
-          <div className="flex items-center justify-center gap-2 text-red-600">
+      <Card className="border-red-200 bg-red-50/30">
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-2 text-red-600">
             <AlertCircle className="h-5 w-5" />
             <span>{error}</span>
           </div>
@@ -246,284 +295,271 @@ export function RateioConfigPanel({ cenarioId }: RateioConfigPanelProps) {
     );
   }
 
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="text-base flex items-center gap-2">
-              <PieChart className="h-4 w-4 text-orange-600" />
-              Configuração de Rateios
-            </CardTitle>
-            <CardDescription>
-              Distribua custos de CCs POOL para CCs OPERACIONAIS
-            </CardDescription>
-          </div>
-          <Button
-            size="xs"
-            onClick={() => setShowCreateModal(true)}
-            disabled={poolsDisponiveis.length === 0}
-          >
-            <Plus className="h-3 w-3 mr-1" />
-            Novo Grupo
-          </Button>
-        </div>
-      </CardHeader>
+  const getTipoRateioIcon = (tipo: TipoRateio | undefined) => {
+    switch (tipo) {
+      case "HC": return <Users className="h-4 w-4" />;
+      case "AREA": return <Ruler className="h-4 w-4" />;
+      case "PA": return <Monitor className="h-4 w-4" />;
+      default: return <Percent className="h-4 w-4" />;
+    }
+  };
 
-      <CardContent>
-        {grupos.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <PieChart className="h-12 w-12 mx-auto mb-3 opacity-30" />
-            <p className="text-sm font-medium">Nenhum grupo de rateio configurado</p>
-            <p className="text-xs mt-1">
-              Crie grupos para distribuir custos de CCs POOL para CCs OPERACIONAIS
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {grupos.map((grupo) => (
-              <div
-                key={grupo.id}
-                className={cn(
-                  "border rounded-lg p-4",
-                  grupo.is_valido ? "border-green-200 bg-green-50/30" : "border-orange-200 bg-orange-50/30"
-                )}
-              >
-                {/* Header do Grupo */}
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <Building2 className="h-4 w-4 text-purple-600" />
+  const getTipoRateioLabel = (tipo: TipoRateio | undefined) => {
+    switch (tipo) {
+      case "HC": return "Por HC";
+      case "AREA": return "Por Área";
+      case "PA": return "Por PA";
+      default: return "Manual";
+    }
+  };
+
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Building2 className="h-5 w-5 text-purple-600" />
+            Configuração de Rateio
+          </CardTitle>
+          <CardDescription>
+            Configure como os custos de cada Centro de Custo POOL serão distribuídos para os CCs operacionais
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {pools.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <Building2 className="h-12 w-12 mx-auto mb-4 opacity-30" />
+              <h3 className="text-lg font-medium mb-2">Nenhum CC POOL cadastrado</h3>
+              <p className="text-sm max-w-md mx-auto">
+                Crie um Centro de Custo do tipo POOL em Cadastros → Centros de Custo para configurar rateios
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {pools.map(({ pool, config }) => (
+                <div
+                  key={pool.id}
+                  className={cn(
+                    "flex items-center justify-between p-4 rounded-lg border",
+                    config
+                      ? config.is_valido
+                        ? "border-green-200 bg-green-50/30"
+                        : "border-orange-200 bg-orange-50/30"
+                      : "border-gray-200 bg-gray-50/30"
+                  )}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="p-2 rounded-lg bg-purple-100">
+                      <Building2 className="h-5 w-5 text-purple-600" />
+                    </div>
                     <div>
-                      <h4 className="font-medium text-sm">{grupo.nome}</h4>
-                      <p className="text-xs text-muted-foreground">
-                        Origem: {grupo.cc_origem?.codigo} - {grupo.cc_origem?.nome}
-                      </p>
+                      <h4 className="font-medium text-sm">{pool.nome}</h4>
+                      <p className="text-xs text-muted-foreground">{pool.codigo}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {grupo.is_valido ? (
-                      <Badge variant="success" className="text-[10px]">
-                        <CheckCircle2 className="h-3 w-3 mr-1" />
-                        100%
-                      </Badge>
+
+                  <div className="flex items-center gap-4">
+                    {config ? (
+                      <>
+                        <div className="flex items-center gap-2 text-sm">
+                          {getTipoRateioIcon(config.tipo_rateio)}
+                          <span className="text-muted-foreground">
+                            {getTipoRateioLabel(config.tipo_rateio)}
+                          </span>
+                        </div>
+                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                        <Badge variant="outline" className="text-xs">
+                          {config.destinos.length} destino{config.destinos.length !== 1 ? "s" : ""}
+                        </Badge>
+                        {config.tipo_rateio === "MANUAL" && (
+                          config.is_valido ? (
+                            <Badge variant="success" className="text-xs">
+                              <CheckCircle2 className="h-3 w-3 mr-1" />
+                              100%
+                            </Badge>
+                          ) : (
+                            <Badge variant="alert" className="text-xs">
+                              <AlertCircle className="h-3 w-3 mr-1" />
+                              {config.percentual_total.toFixed(1)}%
+                            </Badge>
+                          )
+                        )}
+                      </>
                     ) : (
-                      <Badge variant="alert" className="text-[10px]">
+                      <Badge variant="secondary" className="text-xs">
                         <AlertCircle className="h-3 w-3 mr-1" />
-                        {grupo.percentual_total.toFixed(1)}%
+                        Não configurado
                       </Badge>
                     )}
                     <Button
-                      size="icon-xs"
-                      variant="ghost"
-                      className="text-red-500 hover:text-red-600"
-                      onClick={() => handleDeleteGrupo(grupo)}
+                      size="sm"
+                      variant="outline"
+                      onClick={() => abrirConfiguracao({ pool, config })}
                     >
-                      <Trash2 className="h-3 w-3" />
+                      <Settings2 className="h-4 w-4 mr-1" />
+                      Configurar
                     </Button>
                   </div>
                 </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
-                {/* Destinos */}
-                <div className="ml-6 space-y-2">
-                  {grupo.destinos.length === 0 ? (
-                    <p className="text-xs text-muted-foreground italic">
-                      Nenhum destino configurado
-                    </p>
-                  ) : (
-                    grupo.destinos.map((destino) => (
-                      <div
-                        key={destino.id}
-                        className="flex items-center gap-2 text-xs bg-white/50 rounded px-2 py-1"
-                      >
-                        <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                        <span className="flex-1">
-                          {destino.cc_destino?.codigo} - {destino.cc_destino?.nome}
-                        </span>
-                        <Input
-                          type="number"
-                          min="0"
-                          max="100"
-                          step="0.1"
-                          value={destino.percentual}
-                          onChange={(e) =>
-                            handleUpdatePercentual(grupo.id, destino.id, parseFloat(e.target.value) || 0)
-                          }
-                          className="w-16 h-6 text-xs text-right"
-                        />
-                        <span className="text-muted-foreground">%</span>
-                        <Button
-                          size="icon-xs"
-                          variant="ghost"
-                          className="h-5 w-5 text-red-500 hover:text-red-600"
-                          onClick={() => handleDeleteDestino(grupo.id, destino.id)}
-                        >
-                          <Trash2 className="h-2.5 w-2.5" />
-                        </Button>
-                      </div>
-                    ))
-                  )}
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    className="text-xs mt-2"
-                    onClick={() => openAddDestino(grupo)}
-                  >
-                    <Plus className="h-3 w-3 mr-1" />
-                    Adicionar Destino
-                  </Button>
-                </div>
-
-                {/* Mensagem de validação */}
-                {!grupo.is_valido && grupo.mensagem_validacao && (
-                  <p className="mt-2 text-xs text-orange-600 flex items-center gap-1">
-                    <AlertCircle className="h-3 w-3" />
-                    {grupo.mensagem_validacao}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </CardContent>
-
-      {/* Modal: Criar Grupo */}
-      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
-        <DialogContent className="sm:max-w-md">
+      {/* Modal de Configuração */}
+      <Dialog open={showConfigModal} onOpenChange={setShowConfigModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
-            <DialogTitle>Novo Grupo de Rateio</DialogTitle>
+            <DialogTitle>Configurar Rateio</DialogTitle>
             <DialogDescription>
-              Crie um grupo para distribuir custos de um CC POOL para CCs OPERACIONAIS.
+              {poolSelecionado?.pool.nome} ({poolSelecionado?.pool.codigo})
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Nome do Grupo *
-              </Label>
-              <Input
-                value={novoGrupo.nome}
-                onChange={(e) => setNovoGrupo({ ...novoGrupo, nome: e.target.value })}
-                placeholder="Ex: Rateio Financeiro"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                CC Origem (POOL) *
-              </Label>
-              <Select
-                value={novoGrupo.cc_origem_pool_id}
-                onValueChange={(v) => setNovoGrupo({ ...novoGrupo, cc_origem_pool_id: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um CC POOL..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {poolsDisponiveis.map((cc) => (
-                    <SelectItem key={cc.id} value={cc.id}>
-                      {cc.codigo} - {cc.nome}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Descrição
-              </Label>
-              <Input
-                value={novoGrupo.descricao}
-                onChange={(e) => setNovoGrupo({ ...novoGrupo, descricao: e.target.value })}
-                placeholder="Descrição opcional..."
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateModal(false)}>
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleCreateGrupo}
-              disabled={!novoGrupo.nome || !novoGrupo.cc_origem_pool_id || saving}
-            >
-              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Criar Grupo
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
-      {/* Modal: Adicionar Destino */}
-      <Dialog open={showAddDestinoModal} onOpenChange={setShowAddDestinoModal}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Adicionar Destino</DialogTitle>
-            <DialogDescription>
-              Adicione um CC OPERACIONAL como destino do rateio "{grupoSelecionado?.nome}".
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="flex-1 overflow-auto space-y-6 py-4">
+            {/* Tipo de Rateio */}
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                CC Destino (OPERACIONAL) *
+                Critério de Distribuição
               </Label>
               <Select
-                value={novoDestino.cc_destino_id}
-                onValueChange={(v) => setNovoDestino({ ...novoDestino, cc_destino_id: v })}
+                value={configForm.tipo_rateio}
+                onValueChange={(v) => setConfigForm({ ...configForm, tipo_rateio: v as TipoRateio })}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Selecione um CC OPERACIONAL..." />
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {operacionaisDisponiveis
-                    .filter(
-                      (cc) =>
-                        !grupoSelecionado?.destinos.some((d) => d.cc_destino_id === cc.id)
-                    )
-                    .map((cc) => (
-                      <SelectItem key={cc.id} value={cc.id}>
-                        {cc.codigo} - {cc.nome}
-                      </SelectItem>
-                    ))}
+                  <SelectItem value="MANUAL">
+                    <div className="flex items-center gap-2">
+                      <Percent className="h-4 w-4" />
+                      <span>Manual (definir percentuais)</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="HC">
+                    <div className="flex items-center gap-2">
+                      <Users className="h-4 w-4" />
+                      <span>Proporcional ao Headcount</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="AREA">
+                    <div className="flex items-center gap-2">
+                      <Ruler className="h-4 w-4" />
+                      <span>Proporcional à Área (m²)</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="PA">
+                    <div className="flex items-center gap-2">
+                      <Monitor className="h-4 w-4" />
+                      <span>Proporcional às PAs</span>
+                    </div>
+                  </SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Percentual (%)
-              </Label>
-              <Input
-                type="number"
-                min="0"
-                max="100"
-                step="0.1"
-                value={novoDestino.percentual}
-                onChange={(e) =>
-                  setNovoDestino({ ...novoDestino, percentual: parseFloat(e.target.value) || 0 })
-                }
-              />
               <p className="text-xs text-muted-foreground">
-                Restante disponível:{" "}
-                {(100 - (grupoSelecionado?.percentual_total || 0)).toFixed(1)}%
+                {configForm.tipo_rateio === "MANUAL" && "Você definirá os percentuais manualmente para cada CC destino."}
+                {configForm.tipo_rateio === "HC" && "Distribuição automática baseada no headcount de cada CC."}
+                {configForm.tipo_rateio === "AREA" && "Distribuição automática baseada na área (m²) de cada CC."}
+                {configForm.tipo_rateio === "PA" && "Distribuição automática baseada nas posições de atendimento."}
               </p>
             </div>
+
+            {/* Destinos */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  CCs Destino ({destinosSelecionadosCount} selecionado{destinosSelecionadosCount !== 1 ? "s" : ""})
+                </Label>
+                <div className="flex gap-2">
+                  <Button size="xs" variant="outline" onClick={selecionarTodos}>
+                    Selecionar Todos
+                  </Button>
+                  {configForm.tipo_rateio === "MANUAL" && destinosSelecionadosCount > 0 && (
+                    <Button size="xs" variant="outline" onClick={distribuirIgualmente}>
+                      Distribuir Igual
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <div className="border rounded-lg max-h-64 overflow-auto">
+                {ccsOperacionais.length === 0 ? (
+                  <div className="p-4 text-center text-muted-foreground text-sm">
+                    Nenhum CC operacional disponível
+                  </div>
+                ) : (
+                  <div className="divide-y">
+                    {ccsOperacionais.map(cc => {
+                      const destino = configForm.destinos.find(d => d.cc_id === cc.id);
+                      const selecionado = destino?.selecionado || false;
+                      const percentual = destino?.percentual || 0;
+
+                      return (
+                        <div
+                          key={cc.id}
+                          className={cn(
+                            "flex items-center gap-3 p-3 hover:bg-muted/50",
+                            selecionado && "bg-orange-50/50"
+                          )}
+                        >
+                          <Checkbox
+                            checked={selecionado}
+                            onCheckedChange={() => toggleDestino(cc.id)}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{cc.nome}</p>
+                            <p className="text-xs text-muted-foreground">{cc.codigo}</p>
+                          </div>
+                          {configForm.tipo_rateio === "MANUAL" && selecionado && (
+                            <div className="flex items-center gap-1">
+                              <Input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.01"
+                                value={percentual}
+                                onChange={(e) => setPercentual(cc.id, parseFloat(e.target.value) || 0)}
+                                className="w-20 h-8 text-right"
+                              />
+                              <span className="text-sm text-muted-foreground">%</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {configForm.tipo_rateio === "MANUAL" && destinosSelecionadosCount > 0 && (
+                <div className={cn(
+                  "flex items-center justify-between p-2 rounded-lg text-sm",
+                  Math.abs(totalPercentual - 100) <= 0.01
+                    ? "bg-green-50 text-green-700"
+                    : "bg-orange-50 text-orange-700"
+                )}>
+                  <span>Total:</span>
+                  <span className="font-semibold">{totalPercentual.toFixed(2)}%</span>
+                </div>
+              )}
+            </div>
           </div>
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddDestinoModal(false)}>
+            <Button variant="outline" onClick={() => setShowConfigModal(false)}>
               Cancelar
             </Button>
             <Button
-              onClick={handleAddDestino}
-              disabled={!novoDestino.cc_destino_id || saving}
+              onClick={salvarConfiguracao}
+              disabled={saving || destinosSelecionadosCount === 0}
             >
               {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Adicionar
+              Salvar Configuração
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Card>
+    </>
   );
 }
-
-
-
