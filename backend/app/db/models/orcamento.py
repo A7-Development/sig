@@ -543,9 +543,41 @@ class QuadroPessoal(Base):
     secao = relationship("Secao", lazy="selectin")
     centro_custo = relationship("CentroCusto", lazy="selectin")
     tabela_salarial = relationship("TabelaSalarial", lazy="selectin")
+    quantidades_mes = relationship("QuadroPessoalMes", back_populates="quadro_pessoal", lazy="selectin", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<QuadroPessoal {self.funcao_id} cenario={self.cenario_id}>"
+
+
+class QuadroPessoalMes(Base):
+    """
+    Quantidades mensais do quadro de pessoal.
+    Permite armazenar qualquer período de tempo (multi-ano).
+    Esta tabela complementa as colunas qtd_xxx do QuadroPessoal,
+    oferecendo flexibilidade para cenários com mais de 12 meses.
+    """
+    __tablename__ = "quadro_pessoal_mes"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    quadro_pessoal_id = Column(UUID(as_uuid=True), ForeignKey("quadro_pessoal.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    ano = Column(Integer, nullable=False)
+    mes = Column(Integer, nullable=False)  # 1-12
+    quantidade = Column(Numeric(10, 2), default=0)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    quadro_pessoal = relationship("QuadroPessoal", back_populates="quantidades_mes")
+    
+    __table_args__ = (
+        UniqueConstraint('quadro_pessoal_id', 'ano', 'mes', name='uq_quadro_pessoal_mes'),
+        Index('ix_quadro_pessoal_mes_periodo', 'ano', 'mes'),
+    )
+    
+    def __repr__(self):
+        return f"<QuadroPessoalMes {self.ano}-{self.mes}: {self.quantidade}>"
 
 
 class AlocacaoTecnologia(Base):

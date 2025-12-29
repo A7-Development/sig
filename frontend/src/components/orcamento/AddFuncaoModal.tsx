@@ -120,7 +120,8 @@ export function AddFuncaoModal({
   const [centroCustoId, setCentroCustoId] = useState<string>("");
   const [quantidadeBase, setQuantidadeBase] = useState<number>(0);
   const [aplicarPeriodo, setAplicarPeriodo] = useState<boolean>(true);
-  const [mostrarAvancado, setMostrarAvancado] = useState(false);
+  // Sempre inicia no modo avançado para evitar confusão
+  const [mostrarAvancado, setMostrarAvancado] = useState(true);
   
   // Estado para SPAN
   const [spanRatio, setSpanRatio] = useState<number>(35);
@@ -144,7 +145,7 @@ export function AddFuncaoModal({
       setFatorPA(1);
       setQuantidadeBase(0);
       setAplicarPeriodo(true);
-      setMostrarAvancado(false);
+      setMostrarAvancado(true); // Sempre inicia no modo avançado
       // Usar CC pré-selecionado se disponível
       setCentroCustoId(centroCustoPreSelecionado?.id || "");
       setSpanRatio(35);
@@ -366,22 +367,28 @@ export function AddFuncaoModal({
 
   return (
     <Dialog open={open} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className={cn("max-w-lg w-full", tipoCalculo === "rateio" && "max-h-[90vh] overflow-y-auto")}>
         <DialogHeader>
-          <DialogTitle>Adicionar Função</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5 text-orange-600" />
+            Adicionar Função
+          </DialogTitle>
           <DialogDescription>
-            Adicione uma função à seção <strong>{secaoAtual.secao?.nome}</strong>
+            Adicione uma função à seção <strong>{secaoAtual.secao?.nome}</strong>.
+            <span className="block mt-1 text-orange-600 font-medium">
+              HC Produtivo - pessoas trabalhando efetivamente na operação.
+            </span>
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
-          {/* Seleção da Função */}
-          <div className="space-y-2">
+        <div className="space-y-4 py-2">
+          {/* Função */}
+          <div className="space-y-1.5">
             <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Função *
             </Label>
             <Select value={funcaoId} onValueChange={setFuncaoId}>
-              <SelectTrigger>
+              <SelectTrigger className="h-9">
                 <SelectValue placeholder="Selecione uma função..." />
               </SelectTrigger>
               <SelectContent>
@@ -401,177 +408,154 @@ export function AddFuncaoModal({
           </div>
 
           {/* Centro de Custo */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Centro de Custo *
             </Label>
             <Select value={centroCustoId} onValueChange={setCentroCustoId}>
-              <SelectTrigger>
+              <SelectTrigger className="h-9">
                 <SelectValue placeholder="Selecione um centro de custo..." />
               </SelectTrigger>
               <SelectContent>
                 {centrosCustoDisponiveis.length === 0 ? (
                   <div className="p-2 text-sm text-muted-foreground text-center">
-                    Nenhum centro de custo disponível
+                    Nenhum CC disponível
                   </div>
                 ) : (
                   centrosCustoDisponiveis.map((cc) => (
                     <SelectItem key={cc.id} value={cc.id}>
                       {cc.codigo} - {cc.nome}
-                      <span className="text-muted-foreground ml-2">({cc.tipo})</span>
                     </SelectItem>
                   ))
                 )}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">
-              Selecione o projeto/contrato para esta função
-            </p>
             {combinacaoJaExiste && (
               <p className="text-xs text-amber-600 font-medium flex items-center gap-1">
                 <AlertCircle className="h-3 w-3" />
-                Esta função já existe neste Centro de Custo. Escolha outro CC.
+                Esta função já existe neste Centro de Custo.
               </p>
             )}
           </div>
 
-          {/* Fator PA */}
+          {/* Fator PA + Capacidade Base */}
+          <div className="flex items-start gap-4">
+            {/* Fator PA */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Fator PA
+              </Label>
+              <Input
+                type="number"
+                step="0.1"
+                min="0.1"
+                value={fatorPA}
+                onChange={(e) => setFatorPA(parseFloat(e.target.value) || 1)}
+                className="h-9 w-20"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                HC ÷ fator = PAs
+              </p>
+            </div>
+
+            {/* Capacidade base (apenas para manual) */}
+            {tipoCalculo === "manual" && (
+              <div className="space-y-1.5 flex-1">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  HC Produtivo Base
+                </Label>
+                <div className="flex items-center gap-3">
+                  <Input
+                    type="number"
+                    step="1"
+                    min="0"
+                    value={quantidadeBase}
+                    onChange={(e) => setQuantidadeBase(parseInt(e.target.value, 10) || 0)}
+                    className="h-9 w-20 font-mono"
+                  />
+                  <div className="flex items-center gap-1.5">
+                    <Checkbox
+                      checked={aplicarPeriodo}
+                      onCheckedChange={(checked) => setAplicarPeriodo(Boolean(checked))}
+                      id="aplicar-periodo"
+                    />
+                    <Label htmlFor="aplicar-periodo" className="text-xs">
+                      Aplicar a todos os meses
+                    </Label>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Tipo de Cálculo - sempre visível */}
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Fator PA
+              Tipo de Cálculo
             </Label>
-            <Input
-              type="number"
-              step="0.1"
-              min="0.1"
-              value={fatorPA}
-              onChange={(e) => setFatorPA(parseFloat(e.target.value) || 1)}
-              className="w-32"
-            />
-            <p className="text-xs text-muted-foreground">
-              Fator para calcular Posições de Atendimento (HC / fator = PAs)
-            </p>
+            
+            <div className="grid grid-cols-3 gap-2">
+              {/* Manual */}
+              <button
+                type="button"
+                onClick={() => setTipoCalculo("manual")}
+                className={cn(
+                  "flex flex-col items-center gap-1.5 p-3 rounded-lg border-2 transition-all",
+                  tipoCalculo === "manual"
+                    ? "border-orange-500 bg-orange-50 text-orange-700"
+                    : "border-muted hover:border-orange-200 hover:bg-orange-50/50"
+                )}
+              >
+                <Pencil className="h-5 w-5" />
+                <span className="font-medium text-xs">Manual</span>
+                <span className="text-[10px] text-center text-muted-foreground leading-tight">
+                  Digitar HC
+                </span>
+              </button>
+
+              {/* Span */}
+              <button
+                type="button"
+                onClick={() => setTipoCalculo("span")}
+                disabled={funcoesBaseDisponiveis.length === 0}
+                className={cn(
+                  "flex flex-col items-center gap-1.5 p-3 rounded-lg border-2 transition-all",
+                  tipoCalculo === "span"
+                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                    : "border-muted hover:border-blue-200 hover:bg-blue-50/50",
+                  funcoesBaseDisponiveis.length === 0 && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                <Calculator className="h-5 w-5" />
+                <span className="font-medium text-xs">Span</span>
+                <span className="text-[10px] text-center text-muted-foreground leading-tight">
+                  Derivar de outra
+                </span>
+              </button>
+
+              {/* Rateio entre CCs */}
+              <button
+                type="button"
+                onClick={() => setTipoCalculo("rateio")}
+                disabled={todosCentrosCusto.length < 2}
+                className={cn(
+                  "flex flex-col items-center gap-1.5 p-3 rounded-lg border-2 transition-all",
+                  tipoCalculo === "rateio"
+                    ? "border-green-500 bg-green-50 text-green-700"
+                    : "border-muted hover:border-green-200 hover:bg-green-50/50",
+                  todosCentrosCusto.length < 2 && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                <PieChart className="h-5 w-5" />
+                <span className="font-medium text-xs">Rateio</span>
+                <span className="text-[10px] text-center text-muted-foreground leading-tight">
+                  Dividir entre CCs
+                </span>
+              </button>
+            </div>
           </div>
 
-          <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-4 py-3">
-            <div>
-              <p className="text-sm font-medium">Modo rápido</p>
-              <p className="text-xs text-muted-foreground">
-                Configure a função como Manual e preencha uma capacidade base.
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setMostrarAvancado((prev) => !prev)}
-            >
-              {mostrarAvancado ? "Ocultar avançado" : "Configurações avançadas"}
-            </Button>
-          </div>
-
-          {/* Capacidade base */}
-          {tipoCalculo === "manual" && (
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Capacidade base do período
-              </Label>
-              <div className="flex items-center gap-3">
-                <Input
-                  type="number"
-                  step="1"
-                  min="0"
-                  value={quantidadeBase}
-                  onChange={(e) => setQuantidadeBase(parseInt(e.target.value, 10) || 0)}
-                  className="w-28 font-mono"
-                />
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    checked={aplicarPeriodo}
-                    onCheckedChange={(checked) => setAplicarPeriodo(Boolean(checked))}
-                    id="aplicar-periodo"
-                  />
-                  <Label htmlFor="aplicar-periodo" className="text-xs">
-                    Aplicar a todos os meses
-                  </Label>
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                O sistema preenche o período inteiro; você pode ajustar a sazonalidade depois.
-              </p>
-            </div>
-          )}
-
-          {mostrarAvancado && (
-            <>
-              {/* Tipo de Cálculo */}
-              <div className="space-y-3">
-                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Tipo de Cálculo *
-                </Label>
-                
-                <div className="grid grid-cols-3 gap-3">
-                  {/* Manual */}
-                  <button
-                    type="button"
-                    onClick={() => setTipoCalculo("manual")}
-                    className={cn(
-                      "flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all",
-                      tipoCalculo === "manual"
-                        ? "border-orange-500 bg-orange-50 text-orange-700"
-                        : "border-muted hover:border-orange-200 hover:bg-orange-50/50"
-                    )}
-                  >
-                    <Pencil className="h-6 w-6" />
-                    <span className="font-medium text-sm">Manual</span>
-                    <span className="text-xs text-center text-muted-foreground">
-                      Digitar quantidades
-                    </span>
-                  </button>
-
-                  {/* Span */}
-                  <button
-                    type="button"
-                    onClick={() => setTipoCalculo("span")}
-                    disabled={funcoesBaseDisponiveis.length === 0}
-                    className={cn(
-                      "flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all",
-                      tipoCalculo === "span"
-                        ? "border-blue-500 bg-blue-50 text-blue-700"
-                        : "border-muted hover:border-blue-200 hover:bg-blue-50/50",
-                      funcoesBaseDisponiveis.length === 0 && "opacity-50 cursor-not-allowed"
-                    )}
-                  >
-                    <Calculator className="h-6 w-6" />
-                    <span className="font-medium text-sm">Span</span>
-                    <span className="text-xs text-center text-muted-foreground">
-                      Calcular por outras funções
-                    </span>
-                  </button>
-
-                  {/* Rateio entre CCs */}
-                  <button
-                    type="button"
-                    onClick={() => setTipoCalculo("rateio")}
-                    disabled={todosCentrosCusto.length < 2}
-                    className={cn(
-                      "flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all",
-                      tipoCalculo === "rateio"
-                        ? "border-green-500 bg-green-50 text-green-700"
-                        : "border-muted hover:border-green-200 hover:bg-green-50/50",
-                      todosCentrosCusto.length < 2 && "opacity-50 cursor-not-allowed"
-                    )}
-                  >
-                    <PieChart className="h-6 w-6" />
-                    <span className="font-medium text-sm">Rateio</span>
-                    <span className="text-xs text-center text-muted-foreground">
-                      Compartilhar entre CCs
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Configuração SPAN */}
+          {/* Configuração SPAN - aparece apenas quando tipo é span */}
               {tipoCalculo === "span" && (
                 <div className="space-y-4 p-4 bg-blue-50/50 rounded-lg border border-blue-200">
                   <div className="flex items-center gap-2 text-blue-700">
@@ -772,24 +756,30 @@ export function AddFuncaoModal({
                   </div>
                 </div>
               )}
-            </>
-          )}
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={saving}>
-            Cancelar
-          </Button>
-          <Button onClick={handleSubmit} disabled={
-            saving || 
-            !funcaoId || 
-            (tipoCalculo !== "rateio" && !centroCustoId) ||
-            (tipoCalculo !== "rateio" && combinacaoJaExiste) ||
-            (tipoCalculo === "rateio" && (rateioCCs.length < 2 || !rateioCCsValido))
-          }>
-            {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            Adicionar
-          </Button>
+        <DialogFooter className="flex items-center justify-between sm:justify-between">
+          <div className="text-xs text-muted-foreground">
+            {!funcaoId && <span className="text-amber-600">Selecione uma função</span>}
+            {funcaoId && tipoCalculo !== "rateio" && !centroCustoId && <span className="text-amber-600">Selecione um CC</span>}
+            {funcaoId && tipoCalculo === "rateio" && rateioCCs.length < 2 && <span className="text-amber-600">Adicione pelo menos 2 CCs para rateio</span>}
+            {funcaoId && tipoCalculo === "rateio" && rateioCCs.length >= 2 && !rateioCCsValido && <span className="text-amber-600">Soma dos percentuais deve ser 100%</span>}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose} disabled={saving}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSubmit} disabled={
+              saving || 
+              !funcaoId || 
+              (tipoCalculo !== "rateio" && !centroCustoId) ||
+              (tipoCalculo !== "rateio" && combinacaoJaExiste) ||
+              (tipoCalculo === "rateio" && (rateioCCs.length < 2 || !rateioCCsValido))
+            }>
+              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Adicionar
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

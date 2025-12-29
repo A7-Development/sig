@@ -10,7 +10,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import selectinload, noload
 
 from app.db.session import get_db
-from app.db.models.orcamento import Cenario, QuadroPessoal, CenarioEmpresa, FuncaoSpan, PremissaFuncaoMes, CenarioCliente, CenarioSecao, Secao, CentroCusto
+from app.db.models.orcamento import Cenario, QuadroPessoal, QuadroPessoalMes, CenarioEmpresa, FuncaoSpan, PremissaFuncaoMes, CenarioCliente, CenarioSecao, Secao, CentroCusto
 from app.schemas.orcamento import (
     CenarioCreate, CenarioUpdate, CenarioResponse, CenarioComRelacionamentos,
     QuadroPessoalCreate, QuadroPessoalUpdate, QuadroPessoalResponse, QuadroPessoalComRelacionamentos,
@@ -677,7 +677,8 @@ async def list_quadro_pessoal(
         noload(QuadroPessoal.cenario),  # Não carregar cenario para evitar erro com campos novos
         selectinload(QuadroPessoal.funcao),
         selectinload(QuadroPessoal.secao),
-        selectinload(QuadroPessoal.centro_custo)
+        selectinload(QuadroPessoal.centro_custo),
+        selectinload(QuadroPessoal.quantidades_mes)  # Carregar dados multi-ano
     ).where(QuadroPessoal.cenario_id == cenario_id)
     
     if funcao_id:
@@ -788,6 +789,9 @@ async def update_posicao(
     db: AsyncSession = Depends(get_db)
 ):
     """Atualiza uma posição do quadro de pessoal."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
         result = await db.execute(
             select(QuadroPessoal).options(noload(QuadroPessoal.cenario)).where(
@@ -802,6 +806,9 @@ async def update_posicao(
         
         update_data = data.model_dump(exclude_unset=True)
         
+        # Extrair quantidades_mes se presente (novo formato multi-ano)
+        quantidades_mes = update_data.pop('quantidades_mes', None)
+        
         # Converter span_funcoes_base_ids de List[UUID] para List[str] para o JSONB
         if 'span_funcoes_base_ids' in update_data and update_data['span_funcoes_base_ids']:
             update_data['span_funcoes_base_ids'] = [str(uid) for uid in update_data['span_funcoes_base_ids']]
@@ -809,16 +816,59 @@ async def update_posicao(
         # Verificar se quantidades foram alteradas (para recalcular SPANs)
         qtd_fields = [f'qtd_{m}' for m in ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']]
         qtd_changed = any(field in update_data for field in qtd_fields)
+        
+        # Se temos quantidades_mes, também consideramos como mudança
+        if quantidades_mes:
+            qtd_changed = True
+        
         funcao_id = posicao.funcao_id
         cenario_secao_id = posicao.cenario_secao_id
         
+        # Atualizar campos simples
         for key, value in update_data.items():
             setattr(posicao, key, value)
         
+        # Processar quantidades_mes (nova estrutura multi-ano)
+        if quantidades_mes:
+            logger.info(f"[UPDATE QUADRO] Processando {len(quantidades_mes)} registros de quantidades_mes")
+            
+            # Remover registros existentes
+            from sqlalchemy import delete
+            await db.execute(
+                delete(QuadroPessoalMes).where(QuadroPessoalMes.quadro_pessoal_id == posicao_id)
+            )
+            
+            # Inserir novos registros
+            for item in quantidades_mes:
+                novo_mes = QuadroPessoalMes(
+                    quadro_pessoal_id=posicao_id,
+                    ano=item['ano'],
+                    mes=item['mes'],
+                    quantidade=item['quantidade']
+                )
+                db.add(novo_mes)
+            
+            # Também atualizar as colunas qtd_xxx para compatibilidade (primeiro ano)
+            meses_keys = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
+            primeiro_ano = min(item['ano'] for item in quantidades_mes)
+            for item in quantidades_mes:
+                if item['ano'] == primeiro_ano:
+                    mes_key = meses_keys[item['mes'] - 1]
+                    setattr(posicao, f'qtd_{mes_key}', item['quantidade'])
+            
+            # IMPORTANTE: Flush para que os dados estejam visíveis para o cálculo de SPAN
+            await db.flush()
+            logger.info(f"[UPDATE QUADRO] Flush realizado - dados de quantidades_mes disponíveis para SPAN")
+        
         # Se quantidades foram alteradas e não é uma posição SPAN, recalcular SPANs afetados
-        # Fazer tudo numa única transação
+        # Recalcula em TODAS as seções (não apenas na seção atual) pois um SPAN pode depender
+        # de funções base de outras seções
+        logger.info(f"[UPDATE QUADRO] qtd_changed={qtd_changed}, tipo_calculo={posicao.tipo_calculo}, funcao_id={funcao_id}")
+        
         if qtd_changed and posicao.tipo_calculo != 'span':
-            await recalcular_spans_afetados_sem_commit(db, cenario_id, funcao_id, cenario_secao_id)
+            logger.info(f"[UPDATE QUADRO] Disparando recálculo de SPANs para funcao_id={funcao_id}")
+            recalculadas = await recalcular_spans_afetados_sem_commit(db, cenario_id, funcao_id, None)
+            logger.info(f"[UPDATE QUADRO] SPANs recalculadas: {recalculadas}")
         
         await db.commit()
         

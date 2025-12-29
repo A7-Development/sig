@@ -446,14 +446,14 @@ export default function CenariosPage() {
             </div>
           </div>
         ) : (
-        <div className="flex-1 flex min-h-0">
-          {/* Abas */}
-          <div className="shrink-0 flex gap-1 border-b bg-muted/30 rounded-t-lg px-2 overflow-x-auto">
+        <div className="flex-1 flex flex-col min-h-0">
+          {/* Abas - fora do container principal */}
+          <div className="shrink-0 flex gap-1 border-b px-1">
             <button
               onClick={() => setAbaAtiva('estrutura')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors whitespace-nowrap border-b-2 -mb-px ${
                 abaAtiva === 'estrutura'
-                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
+                  ? "border-orange-500 text-orange-600"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -462,9 +462,9 @@ export default function CenariosPage() {
             </button>
             <button
               onClick={() => setAbaAtiva('premissas')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors whitespace-nowrap border-b-2 -mb-px ${
                 abaAtiva === 'premissas'
-                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
+                  ? "border-orange-500 text-orange-600"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -473,21 +473,21 @@ export default function CenariosPage() {
             </button>
             <button
               onClick={() => setAbaAtiva('quadro')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors whitespace-nowrap border-b-2 -mb-px ${
                 abaAtiva === 'quadro'
-                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
+                  ? "border-orange-500 text-orange-600"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
               <Users className="h-4 w-4" />
               Quadro
-              <Badge variant="secondary" className="text-[10px] ml-1">{quadro.length}</Badge>
+              <Badge variant="secondary" className="text-[10px] ml-0.5">{quadro.length}</Badge>
             </button>
             <button
               onClick={() => setAbaAtiva('custo-direto')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors whitespace-nowrap border-b-2 -mb-px ${
                 abaAtiva === 'custo-direto'
-                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
+                  ? "border-orange-500 text-orange-600"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -496,9 +496,9 @@ export default function CenariosPage() {
             </button>
             <button
               onClick={() => setAbaAtiva('receitas')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors whitespace-nowrap border-b-2 -mb-px ${
                 abaAtiva === 'receitas'
-                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
+                  ? "border-orange-500 text-orange-600"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -507,9 +507,9 @@ export default function CenariosPage() {
             </button>
             <button
               onClick={() => setAbaAtiva('distribuicao')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors whitespace-nowrap border-b-2 -mb-px ${
                 abaAtiva === 'distribuicao'
-                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
+                  ? "border-orange-500 text-orange-600"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -518,9 +518,9 @@ export default function CenariosPage() {
             </button>
             <button
               onClick={() => setAbaAtiva('dre')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors whitespace-nowrap border-b-2 -mb-px ${
                 abaAtiva === 'dre'
-                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
+                  ? "border-orange-500 text-orange-600"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -530,7 +530,7 @@ export default function CenariosPage() {
           </div>
 
           {/* Conteúdo da Aba - ocupa todo o espaço disponível */}
-          <div className="flex-1 flex overflow-hidden bg-background border border-t-0 rounded-b-lg">
+          <div className="flex-1 flex overflow-hidden">
             <div className="flex-1 overflow-hidden">
             {loadingDetalhes ? (
               <div className="p-8 space-y-4">
@@ -541,7 +541,7 @@ export default function CenariosPage() {
               /* Layout Master-Detail: Árvore à esquerda, Painel de detalhes à direita */
               <div className="h-full flex">
                 {/* Painel Esquerdo: Árvore de Navegação */}
-                <div className="w-80 border-r bg-muted/10 flex-shrink-0">
+                <div className="w-[380px] border-r flex-shrink-0 overflow-hidden bg-muted/30">
                   <MasterDetailTree
                     cenarioId={cenarioSelecionado.id}
                     onNodeSelect={setSelectedNode}
@@ -551,8 +551,8 @@ export default function CenariosPage() {
                   />
                 </div>
                 
-                {/* Painel Direito: Detalhes / Capacity Planning */}
-                <div className="flex-1 overflow-auto">
+                {/* Painel Central: Detalhes / Capacity Planning */}
+                <div className="flex-1 overflow-auto bg-background">
                   {(selectedNode?.type === 'centro_custo' || selectedNode?.type === 'secao') && selectedNode.secao ? (
                     <CapacityPlanningPanel
                       cenarioId={cenarioSelecionado.id}
@@ -588,7 +588,7 @@ export default function CenariosPage() {
               />
             ) : abaAtiva === 'premissas' ? (
               <div className="h-full flex">
-                <div className="w-80 border-r bg-muted/10 flex-shrink-0">
+                <div className="w-[380px] border-r flex-shrink-0 overflow-hidden bg-muted/30">
                   <MasterDetailTree
                     cenarioId={cenarioSelecionado.id}
                     onNodeSelect={(node) => {
@@ -832,7 +832,7 @@ export default function CenariosPage() {
               /* Layout Master-Detail para Custo Direto: Árvore à esquerda, Painel à direita */
               <div className="h-full flex">
                 {/* Painel Esquerdo: Árvore de Navegação */}
-                <div className="w-80 border-r bg-muted/10 flex-shrink-0">
+                <div className="w-[380px] border-r flex-shrink-0 overflow-hidden bg-muted/30">
                   <MasterDetailTree
                     cenarioId={cenarioSelecionado.id}
                     onNodeSelect={setSelectedNode}
@@ -877,7 +877,7 @@ export default function CenariosPage() {
               /* Layout Master-Detail para Receitas: Árvore à esquerda, Painel à direita */
               <div className="h-full flex">
                 {/* Painel Esquerdo: Árvore de Navegação */}
-                <div className="w-80 border-r bg-muted/10 flex-shrink-0">
+                <div className="w-[380px] border-r flex-shrink-0 overflow-hidden bg-muted/30">
                   <MasterDetailTree
                     cenarioId={cenarioSelecionado.id}
                     onNodeSelect={setSelectedNode}

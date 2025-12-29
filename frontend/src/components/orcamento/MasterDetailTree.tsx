@@ -84,7 +84,7 @@ interface MasterDetailTreeProps {
 // Helpers
 // ============================================
 
-const truncateText = (text: string | undefined | null, maxLength: number = 20): string => {
+const truncateText = (text: string | undefined | null, maxLength: number = 28): string => {
   if (!text) return "";
   return text.length > maxLength ? text.substring(0, maxLength) + "…" : text;
 };
@@ -455,25 +455,24 @@ export function MasterDetailTree({
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header com botão adicionar empresa */}
-      <div className="p-3 border-b bg-muted/30">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Estrutura do Cenário</h3>
-          <Button 
-            size="xs" 
-            variant="outline"
-            onClick={() => setShowAddEmpresa(true)}
-            disabled={empresasNaoAssociadas.length === 0}
-          >
-            <Plus className="h-3 w-3 mr-1" />
-            Empresa
-          </Button>
-        </div>
+      {/* Header */}
+      <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-3 border-b">
+        <h3 className="text-sm font-semibold">Estrutura do Cenário</h3>
+        <Button 
+          size="xs" 
+          variant="outline"
+          onClick={() => setShowAddEmpresa(true)}
+          disabled={empresasNaoAssociadas.length === 0}
+          className="shrink-0"
+        >
+          <Plus className="h-3 w-3 mr-1" />
+          Empresa
+        </Button>
       </div>
 
       {/* Árvore */}
       <ScrollArea className="flex-1">
-        <div className="p-2">
+        <div className="p-2 pr-3">
           {empresas.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Building2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -509,15 +508,15 @@ export function MasterDetailTree({
                       </button>
                       <Building2 className="h-3 w-3 text-orange-600" />
                       <span 
-                        className="flex-1 text-xs font-medium"
+                        className="flex-1 text-xs font-medium truncate"
                         title={empresa.empresa?.nome_fantasia || empresa.empresa?.razao_social || "Empresa"}
                       >
-                        {truncateText(empresa.empresa?.nome_fantasia || empresa.empresa?.razao_social || "Empresa")}
+                        {empresa.empresa?.nome_fantasia || empresa.empresa?.razao_social || "Empresa"}
                       </span>
-                      <Badge variant="secondary" className="text-[9px] h-4 px-1">
-                        {totais.totalSecoes} seções
-                      </Badge>
-                      <div className="flex items-center gap-0.5">
+                      <span className="text-[9px] text-muted-foreground shrink-0">
+                        {totais.totalSecoes}s
+                      </span>
+                      <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                         <Button 
                           size="icon-xs" 
                           variant="ghost"
@@ -598,23 +597,18 @@ export function MasterDetailTree({
                                     <FolderTree className="h-3 w-3 text-green-600" />
                                   )}
                                   <span 
-                                    className="flex-1 text-xs font-medium"
-                                    title={secao.secao?.nome || "Seção"}
+                                    className="flex-1 text-xs font-medium truncate"
+                                    title={`${secao.secao?.codigo} - ${secao.secao?.nome}`}
                                   >
-                                    {truncateText(secao.secao?.nome || "Seção", 18)}
+                                    {secao.secao?.nome || "Seção"}
                                   </span>
-                                  {isCorp && (
-                                    <Badge variant="outline" className="text-[8px] h-3.5 px-1 bg-purple-50 text-purple-700 border-purple-200">
-                                      CORP
-                                    </Badge>
-                                  )}
-                                  <Badge variant="outline" className="text-[9px] h-4 px-1 font-mono">
+                                  <span className="text-[9px] font-mono text-muted-foreground shrink-0">
                                     {secao.secao?.codigo}
-                                  </Badge>
+                                  </span>
                                   <Button 
                                     size="icon-xs" 
                                     variant="ghost"
-                                    className="h-5 w-5 text-red-500 hover:text-red-600 opacity-0 group-hover:opacity-100"
+                                    className="h-5 w-5 text-red-500 hover:text-red-600 opacity-0 group-hover:opacity-100 shrink-0"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleDeleteSecao(empresa, secao);
@@ -644,7 +638,7 @@ export function MasterDetailTree({
                                             <div 
                                               key={cc.id}
                                               className={cn(
-                                                "flex items-center gap-1 px-1.5 py-1 rounded-md cursor-pointer group",
+                                                "flex items-center gap-1.5 px-1.5 py-1 rounded-md cursor-pointer group",
                                                 "hover:bg-blue-50 hover:text-blue-700",
                                                 selectedCCId === cc.id && "bg-blue-100 text-blue-800",
                                                 "transition-colors"
@@ -664,26 +658,28 @@ export function MasterDetailTree({
                                                   contrato: null,
                                                   uf: null,
                                                   cidade: null,
+                                                  area_m2: null,
                                                   ativo: true,
                                                   created_at: '',
                                                   updated_at: ''
                                                 }
                                               })}
                                             >
-                                              <div className="w-3" />
-                                              <Briefcase className="h-3 w-3 text-blue-600" />
+                                              <Briefcase className="h-3 w-3 text-blue-600 shrink-0" />
                                               <span 
-                                                className="flex-1 text-xs"
-                                                title={cc.nome}
+                                                className="flex-1 text-xs truncate"
+                                                title={`${cc.codigo} - ${cc.nome}`}
                                               >
-                                                {truncateText(cc.nome, 16)}
+                                                {cc.nome}
                                               </span>
-                                              <Badge variant="outline" className="text-[8px] h-3.5 px-1 bg-blue-50 text-blue-700 border-blue-200">
-                                                {cc.qtdFuncoes} {cc.qtdFuncoes === 1 ? 'função' : 'funções'}
-                                              </Badge>
-                                              <Badge variant="outline" className="text-[9px] h-4 px-1 font-mono">
+                                              <span className="text-[9px] font-mono text-muted-foreground shrink-0">
                                                 {cc.codigo}
-                                              </Badge>
+                                              </span>
+                                              {cc.qtdFuncoes > 0 && (
+                                                <span className="text-[9px] text-blue-600 shrink-0">
+                                                  {cc.qtdFuncoes}f
+                                                </span>
+                                              )}
                                             </div>
                                           ))
                                         )}

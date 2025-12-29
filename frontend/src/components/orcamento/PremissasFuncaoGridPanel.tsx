@@ -22,7 +22,7 @@ interface PremissasFuncaoGridPanelProps {
   cliente?: CenarioCliente; // Opcional - mantido para compatibilidade
   secao: CenarioSecao;
   centroCusto?: CentroCusto; // Centro de Custo (nova hierarquia)
-  funcao: Funcao;
+  funcao: { id: string; codigo: string; nome: string }; // Tipo resumido do QuadroPessoal.funcao
   quadroItem: QuadroPessoal;
   anoInicio: number;
   mesInicio: number;

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import noload
 
-from app.db.models.orcamento import FuncaoSpan, QuadroPessoal, Cenario
+from app.db.models.orcamento import FuncaoSpan, QuadroPessoal, QuadroPessoalMes, Cenario
 
 
 def to_float(value) -> float:
@@ -29,9 +29,10 @@ async def calcular_span_para_posicao(
     db: AsyncSession,
     posicao: QuadroPessoal,
     cenario_secao_id: Optional[UUID] = None
-) -> Dict[str, int]:
+) -> Dict[str, any]:
     """
     Calcula as quantidades mensais para uma posição do tipo SPAN.
+    Suporta cenários multi-ano usando a tabela QuadroPessoalMes.
     
     Args:
         db: Sessão do banco de dados
@@ -39,9 +40,15 @@ async def calcular_span_para_posicao(
         cenario_secao_id: Se fornecido, filtra funções base apenas desta seção
     
     Returns:
-        Dict com quantidades mensais {qtd_jan: X, qtd_fev: Y, ...}
+        Dict com:
+        - 'qtd_xxx': quantidades para as 12 colunas (primeiro ano)
+        - 'multi_ano': lista de {ano, mes, quantidade} para todos os anos
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     if posicao.tipo_calculo != 'span' or not posicao.span_funcoes_base_ids or not posicao.span_ratio:
+        logger.info(f"[CALC SPAN] Posição {posicao.id}: tipo={posicao.tipo_calculo}, base_ids={posicao.span_funcoes_base_ids}, ratio={posicao.span_ratio}")
         return {}
     
     # IDs das funções base (podem ser strings UUID vindas do JSON)
@@ -49,6 +56,8 @@ async def calcular_span_para_posicao(
         UUID(fid) if isinstance(fid, str) else fid 
         for fid in posicao.span_funcoes_base_ids
     ]
+    
+    logger.info(f"[CALC SPAN] Buscando posições com funcao_id in {funcoes_base_ids}")
     
     span_ratio = float(posicao.span_ratio)
     if span_ratio <= 0:
@@ -70,12 +79,67 @@ async def calcular_span_para_posicao(
     result = await db.execute(query)
     posicoes_base = result.scalars().all()
     
-    # Somar quantidades por mês
+    logger.info(f"[CALC SPAN] Encontradas {len(posicoes_base)} posições base")
+    
+    # Buscar dados da nova tabela QuadroPessoalMes para cenários multi-ano
+    posicoes_base_ids = [p.id for p in posicoes_base]
+    quantidades_mes_result = await db.execute(
+        select(QuadroPessoalMes).where(
+            QuadroPessoalMes.quadro_pessoal_id.in_(posicoes_base_ids)
+        )
+    )
+    quantidades_mes_records = quantidades_mes_result.scalars().all()
+    
+    # Resultado
     quantidades = {}
-    for mes in MESES:
-        soma_base = sum(to_float(getattr(p, f'qtd_{mes}', 0)) for p in posicoes_base)
-        quantidade_span = ceil(soma_base / span_ratio) if soma_base > 0 else 0
-        quantidades[f'qtd_{mes}'] = quantidade_span
+    multi_ano_list = []
+    
+    if quantidades_mes_records:
+        # CENÁRIO MULTI-ANO: usar dados da tabela QuadroPessoalMes
+        logger.info(f"[CALC SPAN] *** MULTI-ANO ATIVO *** Encontrados {len(quantidades_mes_records)} registros")
+        
+        # Log detalhado dos registros encontrados
+        for record in quantidades_mes_records:
+            logger.info(f"[CALC SPAN] Registro: quadro_id={record.quadro_pessoal_id}, ano={record.ano}, mes={record.mes}, qtd={record.quantidade}")
+        
+        # Agrupar quantidades por ano/mês
+        quantidades_por_ano_mes: Dict[tuple, float] = {}
+        for record in quantidades_mes_records:
+            key = (record.ano, record.mes)
+            quantidades_por_ano_mes[key] = quantidades_por_ano_mes.get(key, 0) + to_float(record.quantidade)
+        
+        logger.info(f"[CALC SPAN] Quantidades agrupadas: {dict(quantidades_por_ano_mes)}")
+        
+        # Calcular SPAN para cada ano/mês
+        primeiro_ano = None
+        for (ano, mes), soma_base in sorted(quantidades_por_ano_mes.items()):
+            quantidade_span = ceil(soma_base / span_ratio) if soma_base > 0 else 0
+            multi_ano_list.append({'ano': ano, 'mes': mes, 'quantidade': quantidade_span})
+            logger.info(f"[CALC SPAN] Calculado: {ano}-{mes} = {soma_base} / {span_ratio} = {quantidade_span}")
+            
+            # Guardar primeiro ano para compatibilidade com colunas qtd_xxx
+            if primeiro_ano is None:
+                primeiro_ano = ano
+            
+            # Preencher colunas qtd_xxx apenas com o primeiro ano
+            if ano == primeiro_ano:
+                mes_key = MESES[mes - 1]
+                quantidades[f'qtd_{mes_key}'] = quantidade_span
+        
+        logger.info(f"[CALC SPAN] Resultado multi-ano: {len(multi_ano_list)} registros")
+    else:
+        # FALLBACK: usar colunas qtd_xxx do QuadroPessoal (apenas 12 meses)
+        logger.info("[CALC SPAN] Fallback para colunas qtd_xxx do QuadroPessoal")
+        for pb in posicoes_base:
+            logger.info(f"[CALC SPAN] Base: funcao_id={pb.funcao_id}, qtd_jan={pb.qtd_jan}")
+        
+        for mes in MESES:
+            soma_base = sum(to_float(getattr(p, f'qtd_{mes}', 0)) for p in posicoes_base)
+            quantidade_span = ceil(soma_base / span_ratio) if soma_base > 0 else 0
+            quantidades[f'qtd_{mes}'] = quantidade_span
+    
+    quantidades['multi_ano'] = multi_ano_list
+    logger.info(f"[CALC SPAN] Resultado colunas: {[k for k in quantidades.keys() if k.startswith('qtd_')]}")
     
     return quantidades
 
@@ -86,6 +150,7 @@ async def aplicar_calculo_span(
 ) -> QuadroPessoal:
     """
     Calcula e aplica as quantidades SPAN a uma posição.
+    Suporta cenários multi-ano salvando na tabela QuadroPessoalMes.
     
     Args:
         db: Sessão do banco de dados
@@ -94,10 +159,42 @@ async def aplicar_calculo_span(
     Returns:
         Posição atualizada com as quantidades calculadas
     """
-    quantidades = await calcular_span_para_posicao(db, posicao)
+    import logging
+    from sqlalchemy import delete
+    logger = logging.getLogger(__name__)
     
-    for campo, valor in quantidades.items():
-        setattr(posicao, campo, valor)
+    resultado = await calcular_span_para_posicao(db, posicao)
+    
+    if not resultado:
+        return posicao
+    
+    # Extrair dados multi-ano (se existirem)
+    multi_ano_list = resultado.pop('multi_ano', [])
+    
+    # Aplicar quantidades às colunas qtd_xxx (primeiro ano / compatibilidade)
+    logger.info(f"[APLICAR SPAN] Posição {posicao.id}: aplicando {len(resultado)} colunas qtd_xxx")
+    for campo, valor in resultado.items():
+        if campo.startswith('qtd_'):
+            setattr(posicao, campo, valor)
+    
+    # Salvar dados multi-ano na tabela QuadroPessoalMes
+    if multi_ano_list:
+        logger.info(f"[APLICAR SPAN] Salvando {len(multi_ano_list)} registros multi-ano para posição {posicao.id}")
+        
+        # Remover registros existentes
+        await db.execute(
+            delete(QuadroPessoalMes).where(QuadroPessoalMes.quadro_pessoal_id == posicao.id)
+        )
+        
+        # Inserir novos registros
+        for item in multi_ano_list:
+            novo_mes = QuadroPessoalMes(
+                quadro_pessoal_id=posicao.id,
+                ano=item['ano'],
+                mes=item['mes'],
+                quantidade=item['quantidade']
+            )
+            db.add(novo_mes)
     
     return posicao
 
@@ -121,34 +218,54 @@ async def recalcular_spans_afetados_sem_commit(
     Returns:
         Número de posições recalculadas
     """
-    # Buscar todas as posições SPAN que referenciam esta função
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Buscar todas as posições SPAN (sem filtro de seção para pegar todos)
     query = select(QuadroPessoal).options(noload(QuadroPessoal.cenario)).where(
         QuadroPessoal.cenario_id == cenario_id,
         QuadroPessoal.tipo_calculo == 'span',
         QuadroPessoal.ativo == True
     )
     
-    if cenario_secao_id:
-        query = query.where(QuadroPessoal.cenario_secao_id == cenario_secao_id)
+    # NÃO filtrar por seção - recalcular todos os SPANs do cenário
+    # if cenario_secao_id:
+    #     query = query.where(QuadroPessoal.cenario_secao_id == cenario_secao_id)
     
     result = await db.execute(query)
     posicoes_span = result.scalars().all()
     
+    logger.info(f"[SPAN] Buscando SPANs para recalcular. funcao_id={funcao_id}, cenario_id={cenario_id}")
+    logger.info(f"[SPAN] Encontradas {len(posicoes_span)} posições SPAN no cenário")
+    
     recalculadas = 0
-    funcao_id_str = str(funcao_id)
+    # Normalizar para lowercase sem hífens para comparação robusta
+    funcao_id_str = str(funcao_id).lower().replace('-', '')
     
     for posicao in posicoes_span:
         # Verificar se esta função está nas funções base
         if posicao.span_funcoes_base_ids:
+            # Normalizar IDs para comparação
+            funcoes_base_raw = posicao.span_funcoes_base_ids
             funcoes_base = [
-                str(fid) if not isinstance(fid, str) else fid 
-                for fid in posicao.span_funcoes_base_ids
+                str(fid).lower().replace('-', '') if not isinstance(fid, str) else fid.lower().replace('-', '')
+                for fid in funcoes_base_raw
             ]
             
+            logger.info(f"[SPAN] Posição {posicao.id}: span_funcoes_base_ids (raw)={funcoes_base_raw}")
+            logger.info(f"[SPAN] Posição {posicao.id}: span_funcoes_base_ids (normalized)={funcoes_base}")
+            logger.info(f"[SPAN] Comparando com funcao_id (normalized)={funcao_id_str}")
+            
             if funcao_id_str in funcoes_base:
+                logger.info(f"[SPAN] MATCH! Recalculando posição {posicao.id}")
                 await aplicar_calculo_span(db, posicao)
                 recalculadas += 1
+            else:
+                logger.info(f"[SPAN] Sem match para posição {posicao.id}")
+        else:
+            logger.info(f"[SPAN] Posição {posicao.id} não tem span_funcoes_base_ids")
     
+    logger.info(f"[SPAN] Total recalculadas: {recalculadas}")
     return recalculadas
 
 

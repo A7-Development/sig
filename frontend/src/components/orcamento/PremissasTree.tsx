@@ -205,6 +205,7 @@ export function PremissasTree({
           contrato: null,
           uf: null,
           cidade: null,
+          area_m2: null,
           ativo: true,
           created_at: '',
           updated_at: ''
@@ -240,6 +241,7 @@ export function PremissasTree({
             contrato: null,
             uf: null,
             cidade: null,
+            area_m2: null,
             ativo: true,
             created_at: '',
             updated_at: ''

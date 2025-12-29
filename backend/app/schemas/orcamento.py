@@ -968,6 +968,16 @@ class QuadroPessoalUpdate(BaseModel):
     
     observacao: Optional[str] = None
     ativo: Optional[bool] = None
+    
+    # Nova estrutura para quantidades mensais multi-ano
+    quantidades_mes: Optional[List["QuadroPessoalMesItem"]] = None
+
+
+class QuadroPessoalMesItem(BaseModel):
+    """Item de quantidade mensal para cenários multi-ano."""
+    ano: int
+    mes: int = Field(..., ge=1, le=12)
+    quantidade: float = Field(..., ge=0)
 
 
 class FuncaoSimples(BaseModel):
@@ -1006,10 +1016,21 @@ class QuadroPessoalResponse(QuadroPessoalBase):
         from_attributes = True
 
 
+class QuadroPessoalMesResponse(BaseModel):
+    """Resposta para quantidade mensal multi-ano."""
+    ano: int
+    mes: int
+    quantidade: float
+    
+    class Config:
+        from_attributes = True
+
+
 class QuadroPessoalComRelacionamentos(QuadroPessoalResponse):
     funcao: Optional[FuncaoSimples] = None
     secao: Optional[SecaoSimples] = None
     centro_custo: Optional[CentroCustoSimples] = None
+    quantidades_mes: Optional[List[QuadroPessoalMesResponse]] = None
 
 
 # ============================================
@@ -1738,4 +1759,5 @@ RateioDestinoResponse.model_rebuild()
 RateioGrupoResponse.model_rebuild()
 CenarioEmpresaComSecoes.model_rebuild()
 ReceitaCenarioResponse.model_rebuild()
+QuadroPessoalUpdate.model_rebuild()
 

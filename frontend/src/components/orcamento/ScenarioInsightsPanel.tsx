@@ -30,8 +30,10 @@ export function ScenarioInsightsPanel({ cenarioId, anoReferencia, refreshKey }: 
     if (!dre?.linhas?.length) {
       return { receitas: 0, custos: 0, resultado: dre?.total_geral || 0 };
     }
-    const receitas = dre.linhas.reduce((acc, linha) => (linha.total > 0 ? acc + linha.total : acc), 0);
-    const custos = dre.linhas.reduce((acc, linha) => (linha.total < 0 ? acc + Math.abs(linha.total) : acc), 0);
+    // Receitas são identificadas pela categoria "RECEITA", não pelo sinal do valor
+    const receitas = dre.linhas.reduce((acc, linha) => (linha.categoria === "RECEITA" ? acc + linha.total : acc), 0);
+    // Custos são todas as outras categorias (valores negativos no DRE)
+    const custos = dre.linhas.reduce((acc, linha) => (linha.categoria !== "RECEITA" ? acc + Math.abs(linha.total) : acc), 0);
     return {
       receitas,
       custos,
