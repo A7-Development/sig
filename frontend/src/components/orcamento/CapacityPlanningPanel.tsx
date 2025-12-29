@@ -79,6 +79,7 @@ interface CapacityPlanningPanelProps {
   mesInicio: number;
   anoFim: number;
   mesFim: number;
+  onScenarioChange?: () => void;
 }
 
 const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
@@ -98,6 +99,7 @@ export function CapacityPlanningPanel({
   mesInicio,
   anoFim,
   mesFim,
+  onScenarioChange,
 }: CapacityPlanningPanelProps) {
   const { accessToken: token } = useAuthStore();
   
@@ -260,6 +262,9 @@ export function CapacityPlanningPanel({
           });
         }
       } else {
+        const quantidadeBase = data.tipo_calculo === "manual" && data.aplicar_periodo
+          ? (data.quantidade_base || 0)
+          : 0;
         // MANUAL ou SPAN: Criar uma única entrada
         await cenariosApi.addQuadro(token, cenarioId, {
           cenario_id: cenarioId,
@@ -280,13 +285,14 @@ export function CapacityPlanningPanel({
           salario_override: null,
           observacao: null,
           ativo: true,
-          qtd_jan: 0, qtd_fev: 0, qtd_mar: 0, qtd_abr: 0,
-          qtd_mai: 0, qtd_jun: 0, qtd_jul: 0, qtd_ago: 0,
-          qtd_set: 0, qtd_out: 0, qtd_nov: 0, qtd_dez: 0,
+          qtd_jan: quantidadeBase, qtd_fev: quantidadeBase, qtd_mar: quantidadeBase, qtd_abr: quantidadeBase,
+          qtd_mai: quantidadeBase, qtd_jun: quantidadeBase, qtd_jul: quantidadeBase, qtd_ago: quantidadeBase,
+          qtd_set: quantidadeBase, qtd_out: quantidadeBase, qtd_nov: quantidadeBase, qtd_dez: quantidadeBase,
         });
       }
       
       await carregarDados();
+      onScenarioChange?.();
       setShowAddFuncao(false);
     } catch (err: any) {
       throw err; // Re-throw para o modal tratar
@@ -301,6 +307,7 @@ export function CapacityPlanningPanel({
     try {
       await cenariosApi.deleteQuadro(token, cenarioId, quadroItem.id);
       await carregarDados();
+      onScenarioChange?.();
     } catch (err: any) {
       alert(err.message || "Erro ao remover função");
     }
@@ -328,6 +335,7 @@ export function CapacityPlanningPanel({
       await cenariosApi.updateQuadro(token, cenarioId, quadroItem.id, updateData);
       // Recarregar dados para atualizar SPANs recalculados
       await carregarDados();
+      onScenarioChange?.();
     } catch (err: any) {
       alert(err.message || "Erro ao atualizar");
       setPendingNextCell(null);
@@ -342,6 +350,7 @@ export function CapacityPlanningPanel({
       setQuadroCompleto(prev => prev.map(q => 
         q.id === quadroItem.id ? { ...q, fator_pa: novoFator } : q
       ));
+      onScenarioChange?.();
     } catch (err: any) {
       alert(err.message || "Erro ao atualizar fator PA");
     }
@@ -481,7 +490,11 @@ export function CapacityPlanningPanel({
             <p className="text-xs mt-1">Clique em "+ Função" para adicionar</p>
           </div>
         ) : (
-          <Table className="corporate-table">
+          <div className="space-y-2">
+            <div className="px-4 py-2 border-b bg-muted/20 text-xs text-muted-foreground">
+              Defina a capacidade base e ajuste a sazonalidade clicando nas células mensais.
+            </div>
+            <Table className="corporate-table">
             <TableHeader>
               <TableRow>
                 <TableHead className="sticky left-0 bg-muted/50 z-10 min-w-[140px] text-[10px]">Função</TableHead>
@@ -683,7 +696,8 @@ export function CapacityPlanningPanel({
                 <TableCell></TableCell>
               </TableRow>
             </TableBody>
-          </Table>
+            </Table>
+          </div>
         )}
       </CardContent>
 
@@ -710,5 +724,3 @@ export function CapacityPlanningPanel({
     </Card>
   );
 }
-
-

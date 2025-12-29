@@ -51,6 +51,7 @@ import { cn } from "@/lib/utils";
 
 interface RateioConfigPanelProps {
   cenarioId: string;
+  onScenarioChange?: () => void;
 }
 
 interface PoolComConfig {
@@ -62,7 +63,7 @@ interface PoolComConfig {
 // Componente Principal
 // ============================================
 
-export function RateioConfigPanel({ cenarioId }: RateioConfigPanelProps) {
+export function RateioConfigPanel({ cenarioId, onScenarioChange }: RateioConfigPanelProps) {
   const { accessToken: token } = useAuthStore();
 
   // Estado principal
@@ -205,6 +206,7 @@ export function RateioConfigPanel({ cenarioId }: RateioConfigPanelProps) {
 
       await carregarDados();
       setShowConfigModal(false);
+      onScenarioChange?.();
     } catch (err: any) {
       alert(err.message || "Erro ao salvar configuração");
     } finally {

@@ -574,7 +574,10 @@ export function MasterDetailTree({
                                     selectedSecaoId === secao.id && !selectedCCId && (isCorp ? "bg-purple-100 text-purple-800" : "bg-green-100 text-green-800"),
                                     "transition-colors"
                                   )}
-                                  onClick={() => toggleSecao(secao.id)}
+                                  onClick={() => {
+                                    onNodeSelect?.({ type: 'secao', empresa, secao });
+                                    toggleSecao(secao.id);
+                                  }}
                                 >
                                   <button 
                                     className="p-0.5 hover:bg-muted rounded"

@@ -66,6 +66,7 @@ interface CustoDiretoPanelProps {
   centroCustoId?: string;
   centroCustoNome?: string;
   centrosCustoDisponiveis?: CentroCusto[];
+  onScenarioChange?: () => void;
 }
 
 const TIPOS_VALOR = [
@@ -94,6 +95,7 @@ export default function CustoDiretoPanel({
   centroCustoId,
   centroCustoNome,
   centrosCustoDisponiveis = [],
+  onScenarioChange,
 }: CustoDiretoPanelProps) {
   const { accessToken: token } = useAuthStore();
   const { toast } = useToast();
@@ -263,6 +265,7 @@ export default function CustoDiretoPanel({
       setShowForm(false);
       resetForm();
       carregarCustos();
+      onScenarioChange?.();
     } catch (error: any) {
       console.error("Erro:", error);
       toast({
@@ -318,6 +321,7 @@ export default function CustoDiretoPanel({
       await custosDiretos.excluir(token, id, true);
       toast({ title: "Custo removido", description: "Custo direto removido com sucesso." });
       carregarCustos();
+      onScenarioChange?.();
     } catch (error) {
       console.error("Erro:", error);
       toast({
@@ -760,4 +764,3 @@ export default function CustoDiretoPanel({
     </div>
   );
 }
-

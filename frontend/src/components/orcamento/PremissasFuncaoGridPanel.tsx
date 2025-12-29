@@ -28,6 +28,7 @@ interface PremissasFuncaoGridPanelProps {
   mesInicio: number;
   anoFim: number;
   mesFim: number;
+  onScenarioChange?: () => void;
 }
 
 interface PremissaMes {
@@ -67,6 +68,7 @@ export function PremissasFuncaoGridPanel({
   mesInicio,
   anoFim,
   mesFim,
+  onScenarioChange,
 }: PremissasFuncaoGridPanelProps) {
   const { accessToken: token } = useAuthStore();
   const [loading, setLoading] = useState(true);
@@ -228,6 +230,7 @@ export function PremissasFuncaoGridPanel({
       toast.success("Premissas salvas com sucesso!");
       setHasChanges(false);
       carregarPremissas();
+      onScenarioChange?.();
     } catch (error) {
       console.error("Erro ao salvar premissas:", error);
       toast.error("Erro ao salvar premissas");
@@ -525,4 +528,3 @@ export function PremissasFuncaoGridPanel({
     </div>
   );
 }
-
