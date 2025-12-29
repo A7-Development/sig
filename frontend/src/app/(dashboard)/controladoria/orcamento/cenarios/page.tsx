@@ -105,6 +105,14 @@ export default function CenariosPage() {
   const [premissasFuncoes, setPremissasFuncoes] = useState<QuadroPessoal[]>([]);
   const [premissasFuncaoSelecionada, setPremissasFuncaoSelecionada] = useState<QuadroPessoal | null>(null);
   
+  // Estado para seleção de receitas
+  const [selectedReceitasNode, setSelectedReceitasNode] = useState<{
+    empresa: CenarioEmpresa;
+    secao: CenarioSecao;
+    centroCusto?: CentroCusto;
+  } | null>(null);
+  const [selectedReceitaId, setSelectedReceitaId] = useState<string | null>(null);
+  
   // Estado para todas as seções do cenário (para rateio)
   const [todasSecoescentario, setTodasSecoesCenario] = useState<CenarioSecao[]>([]);
   const [scenarioVersion, setScenarioVersion] = useState(0);
@@ -874,41 +882,88 @@ export default function CenariosPage() {
                 </div>
               </div>
             ) : abaAtiva === 'receitas' ? (
-              /* Layout Master-Detail para Receitas: Árvore à esquerda, Painel à direita */
+              /* Layout Master-Detail para Receitas: Árvore à esquerda, Sidebar no meio, Painel à direita */
               <div className="h-full flex">
                 {/* Painel Esquerdo: Árvore de Navegação */}
                 <div className="w-[380px] border-r flex-shrink-0 overflow-hidden bg-muted/30">
                   <MasterDetailTree
                     cenarioId={cenarioSelecionado.id}
-                    onNodeSelect={setSelectedNode}
+                    onNodeSelect={(node) => {
+                      if (node?.type === 'secao' || node?.type === 'centro_custo') {
+                        if (node.secao) {
+                          setSelectedReceitasNode({
+                            empresa: node.empresa,
+                            secao: node.secao,
+                            centroCusto: node.centroCusto,
+                          });
+                          setSelectedReceitaId(null); // Reset seleção ao mudar CC
+                        }
+                      }
+                    }}
                     onSecoesLoaded={setTodasSecoesCenario}
-                    selectedSecaoId={selectedNode?.secao?.id}
-                    selectedCCId={selectedNode?.centroCusto?.id}
+                    selectedSecaoId={selectedReceitasNode?.secao?.id}
+                    selectedCCId={selectedReceitasNode?.centroCusto?.id}
                   />
                 </div>
+
+                {/* Sidebar: Lista de Receitas */}
+                <div className="w-64 border-r bg-muted/5 flex flex-col">
+                  <div className="p-3 border-b bg-muted/10">
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      Receitas do CC
+                    </h3>
+                  </div>
+                  <div className="flex-1 overflow-auto">
+                    {!selectedReceitasNode || !selectedReceitasNode.centroCusto ? (
+                      <div className="p-4 text-xs text-muted-foreground">
+                        Selecione um Centro de Custo na árvore.
+                      </div>
+                    ) : (
+                      <ReceitasPanel
+                        cenarioId={cenarioSelecionado.id}
+                        centroCustoId={selectedReceitasNode.centroCusto.id}
+                        centroCustoNome={selectedReceitasNode.centroCusto.nome}
+                        centroCustoCodigo={selectedReceitasNode.centroCusto.codigo}
+                        secaoNome={selectedReceitasNode.secao.secao?.nome || 'Seção'}
+                        empresaNome={selectedReceitasNode.empresa?.empresa?.nome_fantasia || selectedReceitasNode.empresa?.empresa?.razao_social}
+                        mesInicio={cenarioSelecionado.mes_inicio}
+                        anoInicio={cenarioSelecionado.ano_inicio}
+                        mesFim={cenarioSelecionado.mes_fim}
+                        anoFim={cenarioSelecionado.ano_fim}
+                        onScenarioChange={notifyScenarioChange}
+                        selectedReceitaId={selectedReceitaId}
+                        onReceitaSelect={setSelectedReceitaId}
+                        sidebarMode={true}
+                      />
+                    )}
+                  </div>
+                </div>
                 
-                {/* Painel Direito: Receitas */}
+                {/* Painel Central: Visão Sintética */}
                 <div className="flex-1 overflow-auto">
-                  {selectedNode?.type === 'centro_custo' && selectedNode.centroCusto && selectedNode.secao ? (
+                  {selectedReceitasNode?.centroCusto && selectedReceitaId ? (
                     <ReceitasPanel
                       cenarioId={cenarioSelecionado.id}
-                      centroCustoId={selectedNode.centroCusto.id}
-                      centroCustoNome={selectedNode.centroCusto.nome}
-                      centroCustoCodigo={selectedNode.centroCusto.codigo}
-                      secaoNome={selectedNode.secao.secao?.nome || 'Seção'}
-                      empresaNome={selectedNode.empresa?.empresa?.nome_fantasia || selectedNode.empresa?.empresa?.razao_social}
+                      centroCustoId={selectedReceitasNode.centroCusto.id}
+                      centroCustoNome={selectedReceitasNode.centroCusto.nome}
+                      centroCustoCodigo={selectedReceitasNode.centroCusto.codigo}
+                      secaoNome={selectedReceitasNode.secao.secao?.nome || 'Seção'}
+                      empresaNome={selectedReceitasNode.empresa?.empresa?.nome_fantasia || selectedReceitasNode.empresa?.empresa?.razao_social}
                       mesInicio={cenarioSelecionado.mes_inicio}
                       anoInicio={cenarioSelecionado.ano_inicio}
                       mesFim={cenarioSelecionado.mes_fim}
                       anoFim={cenarioSelecionado.ano_fim}
                       onScenarioChange={notifyScenarioChange}
+                      selectedReceitaId={selectedReceitaId}
+                      onReceitaSelect={setSelectedReceitaId}
+                      sidebarMode={false}
                     />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
                       <TrendingUp className="h-12 w-12 mb-4 opacity-30" />
-                      <h3 className="text-lg font-medium mb-2">Selecione um Centro de Custo</h3>
+                      <h3 className="text-lg font-medium mb-2">Selecione uma receita</h3>
                       <p className="text-sm max-w-md text-center">
-                        Expanda uma seção na árvore à esquerda e clique em um Centro de Custo para gerenciar receitas
+                        Escolha um Centro de Custo e selecione uma receita para ver a visão sintética.
                       </p>
                     </div>
                   )}

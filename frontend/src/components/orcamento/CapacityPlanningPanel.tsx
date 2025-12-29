@@ -466,7 +466,6 @@ export function CapacityPlanningPanel({
                   <TableHead className="text-center w-16 text-[10px]">Tipo</TableHead>
                   <TableHead className="text-center w-16 text-[10px]">Fator PA</TableHead>
                   <TableHead className="text-center w-16 text-[10px]">HC Médio</TableHead>
-                  <TableHead className="text-center w-20 text-[10px]">HC Total</TableHead>
                   <TableHead className="text-center w-14 text-[10px]">Min</TableHead>
                   <TableHead className="text-center w-14 text-[10px]">Max</TableHead>
                   <TableHead className="text-center w-24 text-[10px]">Tendência</TableHead>
@@ -521,11 +520,6 @@ export function CapacityPlanningPanel({
                         <span className="text-[10px] font-mono">{stats.media.toFixed(1)}</span>
                       </TableCell>
                       <TableCell className="text-center">
-                        <span className="text-[10px] font-mono font-medium">
-                          {Number.isInteger(stats.total) ? stats.total.toLocaleString() : stats.total.toFixed(1)}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-center">
                         <span className="text-[10px] font-mono text-muted-foreground">{stats.min}</span>
                       </TableCell>
                       <TableCell className="text-center">
@@ -570,11 +564,6 @@ export function CapacityPlanningPanel({
                   <TableCell className="text-center">
                     <span className="text-[10px] font-mono">
                       {(quadro.reduce((sum, q) => sum + calcularStats(q).media, 0)).toFixed(1)}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-center">
-                    <span className="text-[10px] font-mono font-semibold">
-                      {quadro.reduce((sum, q) => sum + calcularTotalFuncao(q), 0).toLocaleString()}
                     </span>
                   </TableCell>
                   <TableCell></TableCell>

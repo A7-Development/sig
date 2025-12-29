@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api/client';
 import { Button } from '@/components/ui/button';
@@ -35,11 +35,14 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { 
   Plus, Pencil, Trash2, DollarSign, TrendingUp, 
-  Briefcase, Loader2, Save, Building2, FolderTree, Copy, User
+  Briefcase, Loader2, Save, Building2, FolderTree, Copy, User, Eye
 } from 'lucide-react';
+import { EditReceitasModal } from './EditReceitasModal';
+import { ViewReceitasModal } from './ViewReceitasModal';
+import { Sparkline } from './Sparkline';
 import { 
   ReceitaCenario, ReceitaCenarioCreate, ReceitaPremissaMes, 
-  TipoReceita, cenariosApi 
+  TipoReceita, ReceitaCalculada, cenariosApi, receitasCenario
 } from '@/lib/api/orcamento';
 import { useAuthStore } from '@/stores/auth-store';
 
@@ -55,6 +58,9 @@ interface ReceitasPanelProps {
   mesFim: number;
   anoFim: number;
   onScenarioChange?: () => void;
+  selectedReceitaId?: string | null;
+  onReceitaSelect?: (receitaId: string | null) => void;
+  sidebarMode?: boolean; // true = mostra lista na sidebar, false = mostra visão sintética
 }
 
 const TIPOS_CALCULO = [
@@ -79,6 +85,10 @@ const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 };
 
+const formatCurrencyNoCents = (value: number) => {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value);
+};
+
 export function ReceitasPanel({ 
   cenarioId, 
   centroCustoId,
@@ -91,6 +101,9 @@ export function ReceitasPanel({
   mesFim,
   anoFim,
   onScenarioChange,
+  selectedReceitaId,
+  onReceitaSelect,
+  sidebarMode = false,
 }: ReceitasPanelProps) {
   const { accessToken: token } = useAuthStore();
   
@@ -103,12 +116,8 @@ export function ReceitasPanel({
   
   // Estado da receita selecionada para editar premissas
   const [selectedReceita, setSelectedReceita] = useState<ReceitaCenario | null>(null);
-  const [savingPremissas, setSavingPremissas] = useState(false);
-  const [hasChanges, setHasChanges] = useState(false);
-  
-  // Estado para edição inline (igual às premissas)
-  const [editingCell, setEditingCell] = useState<{ indicador: string; mesIndex: number } | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [editingPremissas, setEditingPremissas] = useState(false);
+  const [viewingReceita, setViewingReceita] = useState(false);
   
   // Formulário de cadastro
   const [formData, setFormData] = useState({
@@ -165,6 +174,16 @@ export function ReceitasPanel({
     enabled: !!centroCustoId && !!token,
   });
 
+  // Sincronizar selectedReceita com selectedReceitaId (prop)
+  useEffect(() => {
+    if (selectedReceitaId) {
+      const receita = receitas.find(r => r.id === selectedReceitaId);
+      setSelectedReceita(receita || null);
+    } else {
+      setSelectedReceita(null);
+    }
+  }, [selectedReceitaId, receitas]);
+
   // Buscar tipos de receita
   const { data: tiposReceita = [] } = useQuery<TipoReceita[]>({
     queryKey: ['tipos-receita-ativos'],
@@ -212,6 +231,16 @@ export function ReceitasPanel({
     });
   }, [mesesPeriodo, diasUteisData]);
 
+  // Buscar valores calculados da receita (apenas para receitas variáveis)
+  const { data: receitasCalculadas = [] } = useQuery<ReceitaCalculada[]>({
+    queryKey: ['receita-calculada', selectedReceita?.id],
+    queryFn: async () => {
+      if (!selectedReceita?.id || !token) return [];
+      return await receitasCenario.calcular(token, selectedReceita.id);
+    },
+    enabled: !!selectedReceita?.id && selectedReceita?.tipo_calculo === 'VARIAVEL' && !!token,
+  });
+
   // Carregar premissas quando selecionar uma receita variável
   useEffect(() => {
     if (selectedReceita?.tipo_calculo === 'VARIAVEL') {
@@ -234,17 +263,8 @@ export function ReceitasPanel({
       });
       
       setPremissas(premissasIniciais);
-      setHasChanges(false);
     }
   }, [selectedReceita, mesesPeriodo]);
-
-  // Focus no input quando editando
-  useEffect(() => {
-    if (editingCell && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.select();
-    }
-  }, [editingCell]);
 
   // Reset form
   const resetForm = () => {
@@ -335,60 +355,105 @@ export function ReceitasPanel({
     }
   };
 
-  // Atualizar valor da premissa
-  const handleUpdateValue = (mesIndex: number, indicador: string, value: number) => {
-    setPremissas(prev => {
-      const newPremissas = [...prev];
-      (newPremissas[mesIndex] as any)[indicador] = value;
-      return newPremissas;
-    });
-    setHasChanges(true);
-  };
-
-  // Copiar primeiro mês para todos
-  const handleCopiarPrimeiroMes = () => {
-    if (premissas.length === 0) return;
+  // Salvar premissas via modal
+  const handleSaveFromModal = async (premissasSalvas: PremissaMes[]) => {
+    if (!selectedReceita || !token) return;
     
-    const primeiro = premissas[0];
-    setPremissas(prev => prev.map(p => ({
-      ...p,
-      vopdu: primeiro.vopdu,
-      indice_conversao: primeiro.indice_conversao,
-      ticket_medio: primeiro.ticket_medio,
-      fator: primeiro.fator,
-      indice_estorno: primeiro.indice_estorno,
-    })));
-    setHasChanges(true);
-    toast.info("Valores do primeiro mês copiados para todos");
-  };
-
-  // Salvar premissas da receita variável
-  const handleSavePremissas = async () => {
-    if (!selectedReceita) return;
-    
-    setSavingPremissas(true);
     try {
-      const premissasData = premissas.map(p => ({
+      const premissasData = premissasSalvas.map(p => ({
         mes: p.mes,
         ano: p.ano,
         vopdu: Number(p.vopdu) || 0,
         indice_conversao: Number(p.indice_conversao) || 0,
         ticket_medio: Number(p.ticket_medio) || 0,
         fator: Number(p.fator) || 1,
-        indice_estorno: Number(p.indice_estorno) || 0, // Garantir que seja sempre um número válido
+        indice_estorno: Number(p.indice_estorno) || 0,
       }));
       
-      // PUT com objeto { premissas: [...] }
-      await api.put(`/api/v1/orcamento/receitas/${selectedReceita.id}/premissas`, { premissas: premissasData }, token || undefined);
+      await api.put(`/api/v1/orcamento/receitas/${selectedReceita.id}/premissas`, { premissas: premissasData }, token);
       toast.success('Premissas salvas!');
-      setHasChanges(false);
       await refetchReceitas();
       onScenarioChange?.();
     } catch (error: any) {
       toast.error(error.message || 'Erro ao salvar premissas');
-    } finally {
-      setSavingPremissas(false);
+      throw error;
     }
+  };
+
+  // Calcular estatísticas para um indicador
+  const calcularStats = (indicadorKey: string) => {
+    const valores = premissas.map(p => {
+      const valor = (p as any)[indicadorKey] || 0;
+      // indice_estorno é armazenado como decimal (0-1), mas exibimos como percentual (0-100)
+      return indicadorKey === 'indice_estorno' ? valor * 100 : valor;
+    });
+    if (valores.length === 0) return { media: 0, min: 0, max: 0, valores: [] };
+    
+    const total = valores.reduce((sum, v) => sum + v, 0);
+    const media = total / valores.length;
+    const min = Math.min(...valores);
+    const max = Math.max(...valores);
+    return { media, min, max, valores };
+  };
+
+  // Calcular tendência
+  const calcularTendencia = (valores: number[]) => {
+    if (valores.length < 2) return "stable";
+    const first = valores[0];
+    const last = valores[valores.length - 1];
+    if (first === 0) return "stable";
+    const variation = ((last - first) / first) * 100;
+    if (variation > 1) return "up";
+    if (variation < -1) return "down";
+    return "stable";
+  };
+
+  // Calcular estatísticas da receita
+  const calcularStatsReceita = () => {
+    if (!selectedReceita || receitasCalculadas.length === 0) {
+      return { media: 0, min: 0, max: 0, valores: [], mesesMin: 0, mesesMax: 0 };
+    }
+    
+    const valores = receitasCalculadas.map(r => r.valor_calculado || 0);
+    if (valores.length === 0) return { media: 0, min: 0, max: 0, valores: [], mesesMin: 0, mesesMax: 0 };
+    
+    const total = valores.reduce((sum, v) => sum + v, 0);
+    const media = total / valores.length;
+    const min = Math.min(...valores);
+    const max = Math.max(...valores);
+    
+    // Contar meses no mínimo e máximo
+    // Se valor_bruto existe e é diferente de valor_calculado, foi limitado
+    let mesesMin = 0;
+    let mesesMax = 0;
+    
+    receitasCalculadas.forEach(r => {
+      if (r.qtd_pa !== null && r.qtd_pa > 0) {
+        const limiteMin = selectedReceita.valor_minimo_pa ? selectedReceita.valor_minimo_pa * r.qtd_pa : null;
+        const limiteMax = selectedReceita.valor_maximo_pa ? selectedReceita.valor_maximo_pa * r.qtd_pa : null;
+        
+        if (r.valor_bruto !== null && r.valor_bruto !== undefined) {
+          // Se valor_bruto foi limitado pelo mínimo
+          if (limiteMin !== null && limiteMin > 0 && r.valor_bruto < limiteMin) {
+            mesesMin++;
+          }
+          // Se valor_bruto foi limitado pelo máximo
+          else if (limiteMax !== null && limiteMax > 0 && r.valor_bruto > limiteMax) {
+            mesesMax++;
+          }
+        }
+        // Fallback: verificar se valor_calculado é igual ao limite
+        else if (r.valor_calculado > 0) {
+          if (limiteMin !== null && limiteMin > 0 && Math.abs(r.valor_calculado - limiteMin) < 1) {
+            mesesMin++;
+          } else if (limiteMax !== null && limiteMax > 0 && Math.abs(r.valor_calculado - limiteMax) < 1) {
+            mesesMax++;
+          }
+        }
+      }
+    });
+    
+    return { media, min, max, valores, mesesMin, mesesMax };
   };
 
   // Excluir receita
@@ -404,352 +469,18 @@ export function ReceitasPanel({
       if (selectedReceita?.id === selectedForDelete.id) {
         setSelectedReceita(null);
       }
+      if (onReceitaSelect && selectedReceita?.id === selectedForDelete.id) {
+        onReceitaSelect(null);
+      }
       onScenarioChange?.();
     } catch (error: any) {
       toast.error(error.message || 'Erro ao excluir receita');
     }
   };
 
-  return (
-    <Card className="h-full flex flex-col">
-      {/* Header igual ao Capacity */}
-      <CardHeader className="py-4 px-6 border-b bg-muted/10 flex-shrink-0">
-        <div className="flex items-start justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Briefcase className="h-5 w-5 text-blue-600" />
-              {centroCustoNome}
-              {centroCustoCodigo && (
-                <Badge variant="outline" className="font-mono text-xs">
-                  {centroCustoCodigo}
-                </Badge>
-              )}
-              <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 border-green-200">
-                RECEITAS
-              </Badge>
-            </CardTitle>
-            <CardDescription className="flex items-center gap-4 flex-wrap mt-1">
-              {empresaNome && (
-                <span className="flex items-center gap-1">
-                  <Building2 className="h-3 w-3" />
-                  {empresaNome}
-                </span>
-              )}
-              <span className="flex items-center gap-1 text-green-600">
-                <FolderTree className="h-3 w-3" />
-                {secaoNome}
-              </span>
-            </CardDescription>
-          </div>
-          <Button 
-            size="sm" 
-            onClick={() => { resetForm(); setShowAddReceita(true); }}
-          >
-            <Plus className="h-4 w-4 mr-1" />
-            Receita
-          </Button>
-        </div>
-      </CardHeader>
-
-      {/* Conteúdo */}
-      <CardContent className="flex-1 overflow-auto p-0">
-        {loadingReceitas ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="size-6 animate-spin text-muted-foreground" />
-          </div>
-        ) : receitas.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-            <TrendingUp className="h-12 w-12 mb-3 opacity-30" />
-            <p className="text-sm font-medium">Nenhuma receita cadastrada</p>
-            <p className="text-xs mt-1">Clique em "+ Receita" para adicionar</p>
-          </div>
-        ) : (
-          <div className="divide-y">
-            {/* Lista de Receitas */}
-            <Table className="corporate-table">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-[10px]">Tipo de Receita</TableHead>
-                  <TableHead className="text-[10px]">Cálculo</TableHead>
-                  <TableHead className="text-[10px]">Função</TableHead>
-                  <TableHead className="text-right text-[10px]">Valor</TableHead>
-                  <TableHead className="text-center w-[100px] text-[10px]">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {receitas.map(receita => {
-                  const isVariavel = receita.tipo_calculo === 'VARIAVEL';
-                  const isSelected = selectedReceita?.id === receita.id;
-                  
-                  return (
-                    <TableRow 
-                      key={receita.id}
-                      className={cn(
-                        "cursor-pointer",
-                        isSelected && "bg-green-50"
-                      )}
-                      onClick={() => isVariavel && setSelectedReceita(isSelected ? null : receita)}
-                    >
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <DollarSign className="size-4 text-green-600" />
-                          <span className="font-medium text-sm">{receita.tipo_receita?.nome || '-'}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={cn(
-                          "text-xs",
-                          isVariavel && "bg-purple-50 text-purple-700 border-purple-200"
-                        )}>
-                          {TIPOS_CALCULO.find(t => t.value === receita.tipo_calculo)?.label}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {receita.funcao_pa?.nome || '-'}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-sm">
-                        {receita.valor_fixo ? formatCurrency(receita.valor_fixo) : '-'}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center justify-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-7"
-                            onClick={(e) => { e.stopPropagation(); handleEdit(receita); }}
-                          >
-                            <Pencil className="size-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-7 text-destructive hover:text-destructive"
-                            onClick={(e) => { e.stopPropagation(); setSelectedForDelete(receita); setDeleteConfirmOpen(true); }}
-                          >
-                            <Trash2 className="size-3.5" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-
-            {/* Grid de Premissas igual ao PremissasFuncaoGridPanel */}
-            {selectedReceita?.tipo_calculo === 'VARIAVEL' && (
-              <div className="h-full flex flex-col">
-                {/* Header do grid */}
-                <div className="shrink-0 p-4 border-b bg-muted/10">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap">
-                        <TrendingUp className="h-3 w-3 text-green-500" />
-                        <span className="font-medium text-foreground">{selectedReceita.tipo_receita?.nome}</span>
-                        <span>/</span>
-                        <User className="h-3 w-3 text-purple-500" />
-                        <span className="font-medium text-foreground">{selectedReceita.funcao_pa?.nome || '-'}</span>
-                        <span className="text-muted-foreground ml-2">
-                          (Mín: {formatCurrency(selectedReceita.valor_minimo_pa || 0)} / Máx: {formatCurrency(selectedReceita.valor_maximo_pa || 0)} por PA)
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {hasChanges && (
-                        <Badge variant="outline" className="text-orange-600 border-orange-300">
-                          Não salvo
-                        </Badge>
-                      )}
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={handleCopiarPrimeiroMes}
-                        disabled={savingPremissas}
-                        title="Copia os valores do primeiro mês para todos os outros"
-                      >
-                        <Copy className="h-3 w-3 mr-1" />
-                        Replicar
-                      </Button>
-                      <Button 
-                        size="sm"
-                        onClick={handleSavePremissas}
-                        disabled={!hasChanges || savingPremissas}
-                      >
-                        {savingPremissas ? (
-                          <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                        ) : (
-                          <Save className="h-4 w-4 mr-1" />
-                        )}
-                        Salvar
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Grid igual às premissas */}
-                <div className="flex-1 overflow-auto p-4">
-                  <Card>
-                    <CardHeader className="py-3">
-                      <CardTitle className="text-sm">Premissas de Receita por Mês</CardTitle>
-                      <CardDescription className="text-xs">
-                        Defina os indicadores de produtividade para cada mês do período
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="p-0">
-                      <div className="overflow-x-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="bg-muted/30">
-                              <TableHead className="sticky left-0 bg-muted/30 z-10 w-32 text-[10px]">
-                                Indicador
-                              </TableHead>
-                              {mesesPeriodo.map((m, idx) => (
-                                <TableHead key={idx} className="text-center text-[10px] w-16 px-1">
-                                  {m.label}
-                                </TableHead>
-                              ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {/* Linha de Dias Úteis - Calculado pelo sistema (não editável) */}
-                            <TableRow className="bg-blue-50/50">
-                              <TableCell className="sticky left-0 bg-blue-50/50 z-10 text-[10px] font-medium text-blue-700">
-                                Dias Úteis (DU)
-                              </TableCell>
-                              {diasUteisMapeados.map((du, idx) => (
-                                <TableCell key={idx} className="text-center p-0.5">
-                                  <span className="w-full h-6 text-[10px] font-mono text-blue-700 flex items-center justify-center">
-                                    {du}
-                                  </span>
-                                </TableCell>
-                              ))}
-                            </TableRow>
-                            
-                            {/* Indicadores editáveis */}
-                            {INDICADORES_RECEITA.map((indicador) => (
-                              <TableRow key={indicador.key}>
-                                <TableCell className="sticky left-0 bg-background z-10 text-[10px] font-medium">
-                                  {indicador.label}
-                                </TableCell>
-                                {premissas.map((p, idx) => (
-                                  <TableCell 
-                                    key={idx} 
-                                    className="text-center p-0.5"
-                                  >
-                                    {editingCell?.indicador === indicador.key && editingCell?.mesIndex === idx ? (
-                                      <Input
-                                        ref={inputRef}
-                                        type="number"
-                                        step={indicador.step}
-                                        min={0}
-                                        max={indicador.key === 'indice_estorno' ? 100 : undefined}
-                                        value={indicador.key === 'indice_estorno' 
-                                          ? ((p as any)[indicador.key] * 100) // Exibir como percentual (0-100)
-                                          : (p as any)[indicador.key]
-                                        }
-                                        onChange={(e) => {
-                                          const rawValue = parseFloat(e.target.value) || 0;
-                                          // Converter de percentual (0-100) para decimal (0-1) para indice_estorno
-                                          const finalValue = indicador.key === 'indice_estorno' 
-                                            ? Math.max(0, Math.min(100, rawValue)) / 100
-                                            : rawValue;
-                                          handleUpdateValue(idx, indicador.key, finalValue);
-                                        }}
-                                        onBlur={() => setEditingCell(null)}
-                                        onKeyDown={(e) => {
-                                          if (e.key === 'Enter') {
-                                            e.preventDefault();
-                                            setEditingCell(null);
-                                          }
-                                          if (e.key === 'Tab') {
-                                            e.preventDefault();
-                                            if (e.shiftKey) {
-                                              // Shift+Tab: voltar para célula anterior
-                                              const prevIdx = idx - 1;
-                                              if (prevIdx >= 0) {
-                                                setEditingCell({ indicador: indicador.key, mesIndex: prevIdx });
-                                              } else {
-                                                // Ir para última célula da linha anterior
-                                                const indicadorIdx = INDICADORES_RECEITA.findIndex(i => i.key === indicador.key);
-                                                if (indicadorIdx > 0) {
-                                                  setEditingCell({ 
-                                                    indicador: INDICADORES_RECEITA[indicadorIdx - 1].key, 
-                                                    mesIndex: premissas.length - 1 
-                                                  });
-                                                } else {
-                                                  setEditingCell(null);
-                                                }
-                                              }
-                                            } else {
-                                              // Tab: avançar para próxima célula
-                                              const nextIdx = idx + 1;
-                                              if (nextIdx < premissas.length) {
-                                                setEditingCell({ indicador: indicador.key, mesIndex: nextIdx });
-                                              } else {
-                                                // Ir para primeira célula da próxima linha
-                                                const indicadorIdx = INDICADORES_RECEITA.findIndex(i => i.key === indicador.key);
-                                                if (indicadorIdx < INDICADORES_RECEITA.length - 1) {
-                                                  setEditingCell({ 
-                                                    indicador: INDICADORES_RECEITA[indicadorIdx + 1].key, 
-                                                    mesIndex: 0 
-                                                  });
-                                                } else {
-                                                  setEditingCell(null);
-                                                }
-                                              }
-                                            }
-                                          }
-                                          if (e.key === 'Escape') {
-                                            setEditingCell(null);
-                                          }
-                                        }}
-                                        className="h-6 w-14 text-[10px] text-center p-0 mx-auto"
-                                      />
-                                    ) : (
-                                      <button
-                                        className="w-full h-6 text-[10px] font-mono hover:bg-muted/50 rounded"
-                                        onClick={() => setEditingCell({ indicador: indicador.key, mesIndex: idx })}
-                                      >
-                                        {indicador.key === 'ticket_medio' 
-                                          ? (p as any)[indicador.key].toFixed(2)
-                                          : indicador.key === 'indice_conversao'
-                                            ? (p as any)[indicador.key].toFixed(4)
-                                            : indicador.key === 'indice_estorno'
-                                              ? ((p as any)[indicador.key] * 100).toFixed(2) // Exibir como percentual
-                                              : (p as any)[indicador.key].toFixed(2)
-                                        }
-                                      </button>
-                                    )}
-                                  </TableCell>
-                                ))}
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  {/* Legenda */}
-                  <Card className="mt-4 bg-muted/20">
-                    <CardContent className="py-3">
-                      <div className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-4">
-                          <span className="text-muted-foreground">Fórmula:</span>
-                          <code className="bg-background px-2 py-1 rounded text-[10px]">
-                            Receita = HC Capacity × VOPDU × Índice × Ticket × Fator × Dias Úteis × (1 - Estorno%)
-                          </code>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </CardContent>
-
+  // Função para renderizar modais (reutilizada em ambos os modos)
+  const renderModals = () => (
+    <>
       {/* Modal: Adicionar/Editar Receita */}
       <Dialog open={showAddReceita} onOpenChange={(open) => { if (!open) { setShowAddReceita(false); resetForm(); } }}>
         <DialogContent className="max-w-lg">
@@ -897,7 +628,7 @@ export function ReceitasPanel({
             {/* Info para variável */}
             {formData.tipo_calculo === 'VARIAVEL' && (
               <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-xs text-purple-800">
-                <strong>Receita Variável:</strong> Após salvar, clique na linha da receita para preencher as premissas mensais
+                <strong>Receita Variável:</strong> Após salvar, selecione a receita na sidebar para preencher as premissas mensais
               </div>
             )}
           </div>
@@ -938,6 +669,370 @@ export function ReceitasPanel({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </>
+  );
+
+  // Modo Sidebar: mostra apenas lista de receitas
+  if (sidebarMode) {
+    return (
+      <>
+        <div className="flex flex-col h-full">
+          {/* Botão adicionar no header da sidebar */}
+          <div className="p-2 border-b">
+            <Button 
+              size="sm" 
+              variant="outline"
+              className="w-full"
+              onClick={() => { resetForm(); setShowAddReceita(true); }}
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Receita
+            </Button>
+          </div>
+          
+          {/* Lista de receitas */}
+          <div className="flex-1 overflow-auto">
+            {loadingReceitas ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="size-4 animate-spin text-muted-foreground" />
+              </div>
+            ) : receitas.length === 0 ? (
+              <div className="p-4 text-xs text-muted-foreground text-center">
+                Nenhuma receita cadastrada.
+              </div>
+            ) : (
+              <div className="p-2 space-y-1">
+                {receitas.map(receita => {
+                  const isSelected = selectedReceitaId === receita.id;
+                  const isVariavel = receita.tipo_calculo === 'VARIAVEL';
+                  
+                  return (
+                    <div
+                      key={receita.id}
+                      className={cn(
+                        "w-full px-2 py-2 rounded-md text-xs transition-colors",
+                        isSelected
+                          ? "bg-orange-100 text-orange-700"
+                          : "hover:bg-muted/50"
+                      )}
+                    >
+                      <button
+                        onClick={() => {
+                          if (onReceitaSelect) {
+                            onReceitaSelect(isSelected ? null : receita.id);
+                          }
+                        }}
+                        className="w-full text-left"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate font-medium">{receita.tipo_receita?.nome || 'Receita'}</span>
+                          {isVariavel && (
+                            <Badge variant="outline" className="text-[9px] bg-purple-50 text-purple-700 border-purple-200">
+                              Var
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground mt-0.5">
+                          {TIPOS_CALCULO.find(t => t.value === receita.tipo_calculo)?.label}
+                        </div>
+                        {receita.funcao_pa && (
+                          <div className="text-[10px] text-muted-foreground">
+                            {receita.funcao_pa.nome}
+                          </div>
+                        )}
+                      </button>
+                      <div className="flex items-center justify-end gap-1 mt-1 pt-1 border-t border-border/50">
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          className="h-6 w-6"
+                          onClick={(e) => { e.stopPropagation(); handleEdit(receita); }}
+                          title="Editar"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          className="h-6 w-6 text-destructive hover:text-destructive"
+                          onClick={(e) => { e.stopPropagation(); setSelectedForDelete(receita); setDeleteConfirmOpen(true); }}
+                          title="Excluir"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+        
+        {/* Modais - renderizados também no modo sidebar */}
+        {renderModals()}
+      </>
+    );
+  }
+
+  // Modo Painel Central: mostra apenas visão sintética
+  return (
+    <Card className="h-full flex flex-col">
+      {/* Header igual ao Capacity */}
+      <CardHeader className="py-4 px-6 border-b bg-muted/10 flex-shrink-0">
+        <div className="flex items-start justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Briefcase className="h-5 w-5 text-blue-600" />
+              {centroCustoNome}
+              {centroCustoCodigo && (
+                <Badge variant="outline" className="font-mono text-xs">
+                  {centroCustoCodigo}
+                </Badge>
+              )}
+              <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 border-green-200">
+                RECEITAS
+              </Badge>
+            </CardTitle>
+            <CardDescription className="flex items-center gap-4 flex-wrap mt-1">
+              {empresaNome && (
+                <span className="flex items-center gap-1">
+                  <Building2 className="h-3 w-3" />
+                  {empresaNome}
+                </span>
+              )}
+              <span className="flex items-center gap-1 text-green-600">
+                <FolderTree className="h-3 w-3" />
+                {secaoNome}
+              </span>
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+
+      {/* Conteúdo: Visão Sintética */}
+      <CardContent className="flex-1 overflow-auto p-0">
+        {!selectedReceita ? (
+          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+            <TrendingUp className="h-12 w-12 mb-3 opacity-30" />
+            <p className="text-sm font-medium">Nenhuma receita selecionada</p>
+            <p className="text-xs mt-1">Selecione uma receita na sidebar para ver a visão sintética</p>
+          </div>
+        ) : selectedReceita.tipo_calculo !== 'VARIAVEL' ? (
+          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+            <DollarSign className="h-12 w-12 mb-3 opacity-30" />
+            <p className="text-sm font-medium">{selectedReceita.tipo_receita?.nome}</p>
+            <p className="text-xs mt-1">
+              Tipo: {TIPOS_CALCULO.find(t => t.value === selectedReceita.tipo_calculo)?.label}
+            </p>
+            {selectedReceita.valor_fixo && (
+              <p className="text-sm font-mono mt-2 text-foreground">
+                {formatCurrency(selectedReceita.valor_fixo)}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="h-full flex flex-col bg-background">
+            {/* Header */}
+            <div className="shrink-0 border-b border-border/50 bg-muted/10 py-3 px-4">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap">
+                <TrendingUp className="h-3 w-3 text-green-500" />
+                <span className="font-medium text-foreground">{selectedReceita.tipo_receita?.nome}</span>
+                <span>/</span>
+                <User className="h-3 w-3 text-purple-500" />
+                <span className="font-medium text-foreground">{selectedReceita.funcao_pa?.nome || '-'}</span>
+                <span className="text-muted-foreground ml-2">
+                  (Mín: {formatCurrency(selectedReceita.valor_minimo_pa || 0)} / Máx: {formatCurrency(selectedReceita.valor_maximo_pa || 0)} por PA)
+                </span>
+              </div>
+            </div>
+
+            {/* Visão Sintética - Tabela Resumida */}
+            <div className="flex-1 overflow-hidden p-4">
+              <Table className="corporate-table">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[140px] text-[10px]">Indicador</TableHead>
+                        <TableHead className="text-center w-[90px] text-[10px]">Média</TableHead>
+                        <TableHead className="text-center w-[90px] text-[10px]">Min</TableHead>
+                        <TableHead className="text-center w-[90px] text-[10px]">Max</TableHead>
+                        <TableHead className="text-center w-[60px] text-[10px]">Tendência</TableHead>
+                        <TableHead className="w-[50px] text-[10px]">Ações</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {/* Linha de Dias Úteis (somente leitura) */}
+                      <TableRow className="bg-blue-50/50">
+                        <TableCell className="font-medium text-[10px] text-blue-700">
+                          Dias Úteis (DU)
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="text-[10px] font-mono text-blue-700">
+                            {(diasUteisMapeados.reduce((sum, du) => sum + du, 0) / diasUteisMapeados.length).toFixed(0)}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="text-[10px] font-mono text-muted-foreground">
+                            {Math.min(...diasUteisMapeados)}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="text-[10px] font-mono text-muted-foreground">
+                            {Math.max(...diasUteisMapeados)}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Sparkline values={diasUteisMapeados} width={40} height={14} />
+                        </TableCell>
+                        <TableCell></TableCell>
+                      </TableRow>
+                      
+                      {/* Linha de Receita Calculada */}
+                      {(() => {
+                        const statsReceita = calcularStatsReceita();
+                        const tendenciaReceita = calcularTendencia(statsReceita.valores);
+                        return (
+                          <TableRow className="bg-green-50/50">
+                            <TableCell className="font-medium text-[10px] text-green-700">
+                              <div className="flex flex-col gap-0.5">
+                                <span>Receita</span>
+                                {(statsReceita.mesesMin > 0 || statsReceita.mesesMax > 0) && (
+                                  <span className="text-[9px] text-muted-foreground font-normal leading-tight">
+                                    {statsReceita.mesesMin > 0 && `Min: ${statsReceita.mesesMin}`}
+                                    {statsReceita.mesesMin > 0 && statsReceita.mesesMax > 0 && ' • '}
+                                    {statsReceita.mesesMax > 0 && `Max: ${statsReceita.mesesMax}`}
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <span className="text-[10px] font-mono text-green-700 font-semibold">
+                                {formatCurrencyNoCents(statsReceita.media)}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <span className="text-[10px] font-mono text-muted-foreground">
+                                {formatCurrencyNoCents(statsReceita.min)}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <span className="text-[10px] font-mono text-muted-foreground">
+                                {formatCurrencyNoCents(statsReceita.max)}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <Sparkline values={statsReceita.valores} width={40} height={14} />
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                size="icon-xs"
+                                variant="outline"
+                                className="text-green-600 hover:bg-green-50 hover:text-green-700"
+                                onClick={() => setViewingReceita(true)}
+                                title="Visualizar detalhes da receita"
+                              >
+                                <Eye className="h-3 w-3" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })()}
+                      
+                      {/* Indicadores editáveis */}
+                      {INDICADORES_RECEITA.map((indicador) => {
+                        const stats = calcularStats(indicador.key);
+                        const tendencia = calcularTendencia(stats.valores);
+                        const decimal = indicador.key === 'indice_conversao' ? 4 : 
+                                       indicador.key === 'ticket_medio' ? 2 : 2;
+                        
+                        return (
+                          <TableRow key={indicador.key}>
+                            <TableCell className="font-medium text-[10px]">
+                              {indicador.label}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <span className="text-[10px] font-mono">
+                                {stats.media.toFixed(decimal)}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <span className="text-[10px] font-mono text-muted-foreground">
+                                {stats.min.toFixed(decimal)}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <span className="text-[10px] font-mono text-muted-foreground">
+                                {stats.max.toFixed(decimal)}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <Sparkline values={stats.valores} width={40} height={14} />
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                size="icon-xs"
+                                variant="outline"
+                                className="text-orange-600 hover:bg-orange-50 hover:text-orange-700"
+                                onClick={() => setEditingPremissas(true)}
+                                title="Editar premissas"
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {/* Modal de Edição */}
+                {editingPremissas && selectedReceita && (
+                  <EditReceitasModal
+                    open={editingPremissas}
+                    onClose={() => setEditingPremissas(false)}
+                    onSave={handleSaveFromModal}
+                    receitaNome={selectedReceita.tipo_receita?.nome || ''}
+                    funcaoNome={selectedReceita.funcao_pa?.nome || ''}
+                    ccCodigo={centroCustoCodigo || ''}
+                    ccNome={centroCustoNome}
+                    mesesPeriodo={mesesPeriodo.map(m => ({
+                      ano: m.ano,
+                      mes: m.mes,
+                      key: `${m.ano}-${m.mes}`,
+                      label: m.label
+                    }))}
+                    premissasIniciais={premissas}
+                    diasUteis={diasUteisMapeados}
+                  />
+                )}
+
+                {/* Modal de Visualização */}
+                {viewingReceita && selectedReceita && (
+                  <ViewReceitasModal
+                    open={viewingReceita}
+                    onClose={() => setViewingReceita(false)}
+                    receitaNome={selectedReceita.tipo_receita?.nome || ''}
+                    funcaoNome={selectedReceita.funcao_pa?.nome || ''}
+                    ccCodigo={centroCustoCodigo || ''}
+                    ccNome={centroCustoNome}
+                    mesesPeriodo={mesesPeriodo.map(m => ({
+                      ano: m.ano,
+                      mes: m.mes,
+                      key: `${m.ano}-${m.mes}`,
+                      label: m.label
+                    }))}
+                    receitasCalculadas={receitasCalculadas}
+                    valorMinimoPa={selectedReceita.valor_minimo_pa}
+                    valorMaximoPa={selectedReceita.valor_maximo_pa}
+                  />
+                )}
+              </div>
+            )}
+          </CardContent>
+
+      {/* Modais - renderizados também no modo painel central */}
+      {renderModals()}
     </Card>
   );
 }
