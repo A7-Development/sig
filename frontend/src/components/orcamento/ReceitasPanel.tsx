@@ -54,6 +54,7 @@ interface ReceitasPanelProps {
   anoInicio: number;
   mesFim: number;
   anoFim: number;
+  onScenarioChange?: () => void;
 }
 
 const TIPOS_CALCULO = [
@@ -88,7 +89,8 @@ export function ReceitasPanel({
   mesInicio,
   anoInicio,
   mesFim,
-  anoFim
+  anoFim,
+  onScenarioChange,
 }: ReceitasPanelProps) {
   const { accessToken: token } = useAuthStore();
   
@@ -325,6 +327,7 @@ export function ReceitasPanel({
       await refetchReceitas();
       setShowAddReceita(false);
       resetForm();
+      onScenarioChange?.();
     } catch (error: any) {
       toast.error(error.message || 'Erro ao salvar receita');
     } finally {
@@ -380,6 +383,7 @@ export function ReceitasPanel({
       toast.success('Premissas salvas!');
       setHasChanges(false);
       await refetchReceitas();
+      onScenarioChange?.();
     } catch (error: any) {
       toast.error(error.message || 'Erro ao salvar premissas');
     } finally {
@@ -400,6 +404,7 @@ export function ReceitasPanel({
       if (selectedReceita?.id === selectedForDelete.id) {
         setSelectedReceita(null);
       }
+      onScenarioChange?.();
     } catch (error: any) {
       toast.error(error.message || 'Erro ao excluir receita');
     }

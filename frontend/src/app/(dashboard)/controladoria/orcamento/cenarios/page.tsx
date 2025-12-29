@@ -39,18 +39,18 @@ import {
   Loader2,
   FileX,
   User,
-  Server,
   TrendingUp
 } from "lucide-react";
 import { MasterDetailTree } from "@/components/orcamento/MasterDetailTree";
 import { CapacityPlanningPanel } from "@/components/orcamento/CapacityPlanningPanel";
 import { PremissasFuncaoMesGrid } from "@/components/orcamento/PremissasFuncaoMesGrid";
-import { PremissasTree, type SelectedNodePremissas } from "@/components/orcamento/PremissasTree";
 import { PremissasFuncaoGridPanel } from "@/components/orcamento/PremissasFuncaoGridPanel";
 import { DREPanel } from "@/components/orcamento/DREPanel";
 import CustoDiretoPanel from "@/components/orcamento/CustoDiretoPanel";
 import { ReceitasPanel } from "@/components/orcamento/ReceitasPanel";
 import { RateioConfigPanel } from "@/components/orcamento/RateioConfigPanel";
+import { RateioFuncoesPanel } from "@/components/orcamento/RateioFuncoesPanel";
+import { ScenarioInsightsPanel } from "@/components/orcamento/ScenarioInsightsPanel";
 import type { CenarioEmpresa, CenarioCliente, CenarioSecao } from "@/lib/api/orcamento";
 import { useAuthStore } from "@/stores/auth-store";
 import { 
@@ -85,7 +85,7 @@ export default function CenariosPage() {
   const [tabelaSalarial, setTabelaSalarial] = useState<TabelaSalarial[]>([]);
   
   // Abas
-  const [abaAtiva, setAbaAtiva] = useState<'estrutura' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custo-direto' | 'receitas' | 'rateio' | 'dre'>('estrutura');
+  const [abaAtiva, setAbaAtiva] = useState<'estrutura' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custo-direto' | 'receitas' | 'distribuicao' | 'dre'>('estrutura');
   
   // Estado para seleção na árvore Master-Detail
   const [selectedNode, setSelectedNode] = useState<{
@@ -96,11 +96,18 @@ export default function CenariosPage() {
     centroCusto?: CentroCusto;
   } | null>(null);
   
-  // Estado para seleção na árvore de Premissas (inclui funções)
-  const [selectedNodePremissas, setSelectedNodePremissas] = useState<SelectedNodePremissas | null>(null);
+  // Estado para seleção de premissas usando a árvore principal
+  const [selectedPremissasNode, setSelectedPremissasNode] = useState<{
+    empresa: CenarioEmpresa;
+    secao: CenarioSecao;
+    centroCusto?: CentroCusto;
+  } | null>(null);
+  const [premissasFuncoes, setPremissasFuncoes] = useState<QuadroPessoal[]>([]);
+  const [premissasFuncaoSelecionada, setPremissasFuncaoSelecionada] = useState<QuadroPessoal | null>(null);
   
   // Estado para todas as seções do cenário (para rateio)
   const [todasSecoescentario, setTodasSecoesCenario] = useState<CenarioSecao[]>([]);
+  const [scenarioVersion, setScenarioVersion] = useState(0);
   
   // Modal Cenário
   const [showFormCenario, setShowFormCenario] = useState(false);
@@ -304,6 +311,7 @@ export default function CenariosPage() {
       setShowFormPosicao(false);
       setEditandoPosicao(null);
       carregarDetalhes(cenarioSelecionado.id);
+      notifyScenarioChange();
     } catch (error: any) {
       alert(error.message || "Erro ao salvar posição");
     }
@@ -314,6 +322,7 @@ export default function CenariosPage() {
     try {
       await cenariosApi.deletePosicao(token, cenarioSelecionado.id, id);
       carregarDetalhes(cenarioSelecionado.id);
+      notifyScenarioChange();
     } catch (error) {
       console.error("Erro ao excluir:", error);
     }
@@ -345,6 +354,45 @@ export default function CenariosPage() {
   const handleEditarCenario = (cenario: Cenario) => {
     setCenarioSelecionado(cenario);
   };
+
+  const notifyScenarioChange = () => {
+    setScenarioVersion(prev => prev + 1);
+  };
+
+  useEffect(() => {
+    const carregarFuncoesPremissas = async () => {
+      if (!token || !cenarioSelecionado || !selectedPremissasNode) {
+        setPremissasFuncoes([]);
+        setPremissasFuncaoSelecionada(null);
+        return;
+      }
+      try {
+        const quadroData = await cenariosApi.getQuadro(token, cenarioSelecionado.id, {
+          cenario_secao_id: selectedPremissasNode.secao.id,
+        });
+        const filtrado = selectedPremissasNode.centroCusto
+          ? quadroData.filter(q => q.centro_custo_id === selectedPremissasNode.centroCusto?.id && q.ativo)
+          : quadroData.filter(q => q.ativo);
+
+        const gruposProcessados = new Set<string>();
+        const listaFinal = filtrado
+          .sort((a, b) => (b.rateio_percentual || 0) - (a.rateio_percentual || 0))
+          .filter(q => {
+            if (q.tipo_calculo !== 'rateio' || !q.rateio_grupo_id) return true;
+            if (gruposProcessados.has(q.rateio_grupo_id)) return false;
+            gruposProcessados.add(q.rateio_grupo_id);
+            return true;
+          });
+
+        setPremissasFuncoes(listaFinal);
+        setPremissasFuncaoSelecionada(null);
+      } catch (error) {
+        console.error("Erro ao carregar funções para premissas:", error);
+      }
+    };
+
+    carregarFuncoesPremissas();
+  }, [token, cenarioSelecionado, selectedPremissasNode]);
 
   // Se um cenário está selecionado, mostrar tela de parametrização
   if (cenarioSelecionado) {
@@ -398,7 +446,7 @@ export default function CenariosPage() {
             </div>
           </div>
         ) : (
-        <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 flex min-h-0">
           {/* Abas */}
           <div className="shrink-0 flex gap-1 border-b bg-muted/30 rounded-t-lg px-2 overflow-x-auto">
             <button
@@ -458,15 +506,15 @@ export default function CenariosPage() {
               Receitas
             </button>
             <button
-              onClick={() => setAbaAtiva('rateio')}
+              onClick={() => setAbaAtiva('distribuicao')}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                abaAtiva === 'rateio'
+                abaAtiva === 'distribuicao'
                   ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
               <GitCompare className="h-4 w-4" />
-              Rateio
+              Distribuição
             </button>
             <button
               onClick={() => setAbaAtiva('dre')}
@@ -482,7 +530,8 @@ export default function CenariosPage() {
           </div>
 
           {/* Conteúdo da Aba - ocupa todo o espaço disponível */}
-          <div className="flex-1 overflow-hidden bg-background border border-t-0 rounded-b-lg">
+          <div className="flex-1 flex overflow-hidden bg-background border border-t-0 rounded-b-lg">
+            <div className="flex-1 overflow-hidden">
             {loadingDetalhes ? (
               <div className="p-8 space-y-4">
                 <Skeleton className="h-8 w-64" />
@@ -515,6 +564,7 @@ export default function CenariosPage() {
                       mesInicio={cenarioSelecionado.mes_inicio}
                       anoFim={cenarioSelecionado.ano_fim}
                       mesFim={cenarioSelecionado.mes_fim}
+                      onScenarioChange={notifyScenarioChange}
                     />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
@@ -538,38 +588,92 @@ export default function CenariosPage() {
               />
             ) : abaAtiva === 'premissas' ? (
               <div className="h-full flex">
-                {/* Painel Esquerdo: Árvore de navegação com Funções */}
-                <div className="w-72 border-r bg-muted/5 flex flex-col">
-                  <div className="p-3 border-b bg-muted/10">
-                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Estrutura / Funções</h3>
-                  </div>
-                  <PremissasTree
+                <div className="w-80 border-r bg-muted/10 flex-shrink-0">
+                  <MasterDetailTree
                     cenarioId={cenarioSelecionado.id}
-                    onNodeSelect={setSelectedNodePremissas}
+                    onNodeSelect={(node) => {
+                      if (node?.type === 'secao' || node?.type === 'centro_custo') {
+                        if (node.secao) {
+                          setSelectedPremissasNode({
+                            empresa: node.empresa,
+                            secao: node.secao,
+                            centroCusto: node.centroCusto,
+                          });
+                        }
+                      }
+                    }}
+                    onSecoesLoaded={setTodasSecoesCenario}
+                    selectedSecaoId={selectedPremissasNode?.secao?.id}
+                    selectedCCId={selectedPremissasNode?.centroCusto?.id}
                   />
                 </div>
-                
-                {/* Painel Direito: Editor de Premissas por Função */}
+
+                <div className="w-64 border-r bg-muted/5 flex flex-col">
+                  <div className="p-3 border-b bg-muted/10">
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      Funções da seleção
+                    </h3>
+                  </div>
+                  <div className="flex-1 overflow-auto">
+                    {!selectedPremissasNode ? (
+                      <div className="p-4 text-xs text-muted-foreground">
+                        Selecione uma seção ou Centro de Custo na árvore.
+                      </div>
+                    ) : premissasFuncoes.length === 0 ? (
+                      <div className="p-4 text-xs text-muted-foreground">
+                        Nenhuma função ativa encontrada.
+                      </div>
+                    ) : (
+                      <div className="p-2 space-y-1">
+                        {premissasFuncoes.map((item) => (
+                          <button
+                            key={item.id}
+                            onClick={() => setPremissasFuncaoSelecionada(item)}
+                            className={`w-full text-left px-2 py-2 rounded-md text-xs transition-colors ${
+                              premissasFuncaoSelecionada?.id === item.id
+                                ? "bg-orange-100 text-orange-700"
+                                : "hover:bg-muted/50"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="truncate">{item.funcao?.nome || "Função"}</span>
+                              {item.tipo_calculo === "rateio" && (
+                                <Badge variant="outline" className="text-[9px]">
+                                  {item.rateio_percentual}% rateio
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground">
+                              {item.centro_custo?.nome || "Centro de Custo"}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 <div className="flex-1 overflow-auto">
-                  {selectedNodePremissas?.type === 'funcao' && selectedNodePremissas.funcao && selectedNodePremissas.quadroItem ? (
+                  {selectedPremissasNode && premissasFuncaoSelecionada && premissasFuncaoSelecionada.funcao ? (
                     <PremissasFuncaoGridPanel
                       cenarioId={cenarioSelecionado.id}
-                      empresa={selectedNodePremissas.empresa}
-                      secao={selectedNodePremissas.secao!}
-                      centroCusto={selectedNodePremissas.centroCusto}
-                      funcao={selectedNodePremissas.funcao}
-                      quadroItem={selectedNodePremissas.quadroItem}
+                      empresa={selectedPremissasNode.empresa}
+                      secao={selectedPremissasNode.secao}
+                      centroCusto={selectedPremissasNode.centroCusto}
+                      funcao={premissasFuncaoSelecionada.funcao}
+                      quadroItem={premissasFuncaoSelecionada}
                       anoInicio={cenarioSelecionado.ano_inicio}
                       mesInicio={cenarioSelecionado.mes_inicio}
                       anoFim={cenarioSelecionado.ano_fim}
                       mesFim={cenarioSelecionado.mes_fim}
+                      onScenarioChange={notifyScenarioChange}
                     />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
                       <User className="h-12 w-12 mb-4 opacity-30" />
                       <h3 className="text-lg font-medium mb-2">Selecione uma função</h3>
                       <p className="text-sm max-w-md text-center">
-                        Navegue pela estrutura à esquerda, expanda uma seção e clique em uma <strong>função</strong> para configurar as premissas por mês
+                        Escolha uma seção ou CC e selecione uma função para editar as premissas.
                       </p>
                     </div>
                   )}
@@ -748,6 +852,7 @@ export default function CenariosPage() {
                       centroCustoId={selectedNode.centroCusto.id}
                       centroCustoNome={selectedNode.centroCusto.nome}
                       centrosCustoDisponiveis={centrosCusto.filter(cc => cc.ativo)}
+                      onScenarioChange={notifyScenarioChange}
                     />
                   ) : selectedNode?.type === 'secao' && selectedNode.secao ? (
                     <CustoDiretoPanel
@@ -755,6 +860,7 @@ export default function CenariosPage() {
                       secaoId={selectedNode.secao.id}
                       secaoNome={selectedNode.secao.secao?.nome || 'Seção'}
                       centrosCustoDisponiveis={centrosCusto.filter(cc => cc.ativo)}
+                      onScenarioChange={notifyScenarioChange}
                     />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
@@ -795,6 +901,7 @@ export default function CenariosPage() {
                       anoInicio={cenarioSelecionado.ano_inicio}
                       mesFim={cenarioSelecionado.mes_fim}
                       anoFim={cenarioSelecionado.ano_fim}
+                      onScenarioChange={notifyScenarioChange}
                     />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
@@ -807,9 +914,16 @@ export default function CenariosPage() {
                   )}
                 </div>
               </div>
-            ) : abaAtiva === 'rateio' ? (
-              <div className="h-full overflow-auto p-4">
-                <RateioConfigPanel cenarioId={cenarioSelecionado.id} />
+            ) : abaAtiva === 'distribuicao' ? (
+              <div className="h-full overflow-auto p-4 space-y-4">
+                <RateioFuncoesPanel
+                  cenarioId={cenarioSelecionado.id}
+                  onGoToCapacity={() => setAbaAtiva("estrutura")}
+                />
+                <RateioConfigPanel
+                  cenarioId={cenarioSelecionado.id}
+                  onScenarioChange={notifyScenarioChange}
+                />
               </div>
             ) : abaAtiva === 'dre' ? (
               <div className="h-full overflow-auto">
@@ -820,6 +934,12 @@ export default function CenariosPage() {
                 />
               </div>
             ) : null}
+            </div>
+            <ScenarioInsightsPanel
+              cenarioId={cenarioSelecionado.id}
+              anoReferencia={cenarioSelecionado.ano_inicio}
+              refreshKey={scenarioVersion}
+            />
           </div>
         </div>
         )}
