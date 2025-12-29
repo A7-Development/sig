@@ -35,6 +35,7 @@ import {
   type Funcao,
   type QuadroPessoal,
   type CenarioSecao,
+  type CentroCusto,
 } from "@/lib/api/orcamento";
 
 // ============================================
@@ -49,6 +50,21 @@ interface RateioSecao {
   percentual: number;
 }
 
+// Rateio por Centro de Custo (nova estrutura)
+interface RateioCC {
+  ccId: string;
+  ccCodigo: string;
+  ccNome: string;
+  percentual: number;
+}
+
+interface CCDisponivel {
+  id: string;
+  codigo: string;
+  nome: string;
+  tipo: string;
+}
+
 interface AddFuncaoModalProps {
   open: boolean;
   onClose: () => void;
@@ -56,19 +72,24 @@ interface AddFuncaoModalProps {
   funcoes: Funcao[];
   funcoesJaAdicionadas: QuadroPessoal[];  // Funções já na seção atual
   secaoAtual: CenarioSecao;
-  todasSecoes: CenarioSecao[];  // Todas as seções do cenário (para rateio)
+  todasSecoes: CenarioSecao[];  // Todas as seções do cenário (para rateio legado)
   cenarioId: string;
+  centrosCustoDisponiveis: CCDisponivel[];  // CCs filtrados por tipo de seção
+  todosCentrosCusto: CCDisponivel[];  // Todos os CCs do cenário (para rateio)
+  isCorporativo?: boolean;  // Se a seção é CORPORATIVO
+  centroCustoPreSelecionado?: CCDisponivel;  // CC pré-selecionado da árvore
 }
 
 export interface AddFuncaoData {
   funcao_id: string;
   tipo_calculo: TipoCalculo;
   fator_pa: number;
+  centro_custo_id: string;  // CC principal (ou primeiro do rateio)
   // Para SPAN
   span_ratio?: number;
   span_funcoes_base_ids?: string[];
-  // Para RATEIO
-  rateio_secoes?: RateioSecao[];
+  // Para RATEIO (entre CCs)
+  rateio_ccs?: RateioCC[];
   rateio_qtd_total?: number;
 }
 
@@ -85,19 +106,27 @@ export function AddFuncaoModal({
   secaoAtual,
   todasSecoes,
   cenarioId,
+  centrosCustoDisponiveis,
+  todosCentrosCusto,
+  isCorporativo = false,
+  centroCustoPreSelecionado,
 }: AddFuncaoModalProps) {
   // Estado do formulário
   const [funcaoId, setFuncaoId] = useState<string>("");
   const [tipoCalculo, setTipoCalculo] = useState<TipoCalculo>("manual");
   const [fatorPA, setFatorPA] = useState<number>(1);
+  const [centroCustoId, setCentroCustoId] = useState<string>("");
   
   // Estado para SPAN
   const [spanRatio, setSpanRatio] = useState<number>(35);
   const [spanFuncoesBaseIds, setSpanFuncoesBaseIds] = useState<string[]>([]);
   
-  // Estado para RATEIO
+  // Estado para RATEIO (legado - seções)
   const [rateioQtdTotal, setRateioQtdTotal] = useState<number>(1);
   const [rateioSecoes, setRateioSecoes] = useState<RateioSecao[]>([]);
+  
+  // Estado para RATEIO entre CCs (novo)
+  const [rateioCCs, setRateioCCs] = useState<RateioCC[]>([]);
   
   // Estado de loading
   const [saving, setSaving] = useState(false);
@@ -108,34 +137,60 @@ export function AddFuncaoModal({
       setFuncaoId("");
       setTipoCalculo("manual");
       setFatorPA(1);
+      // Usar CC pré-selecionado se disponível
+      setCentroCustoId(centroCustoPreSelecionado?.id || "");
       setSpanRatio(35);
       setSpanFuncoesBaseIds([]);
       setRateioQtdTotal(1);
-      // Inicializa rateio com seção atual em 100%
+      // Inicializa rateio com seção atual em 100% (legado)
       setRateioSecoes([{
         secaoId: secaoAtual.id,
         secaoNome: secaoAtual.secao?.nome || "Seção atual",
         percentual: 100,
       }]);
+      // Inicializa rateio de CCs com CC pré-selecionado em 100%
+      if (centroCustoPreSelecionado) {
+        setRateioCCs([{
+          ccId: centroCustoPreSelecionado.id,
+          ccCodigo: centroCustoPreSelecionado.codigo,
+          ccNome: centroCustoPreSelecionado.nome,
+          percentual: 100,
+        }]);
+      } else {
+        setRateioCCs([]);
+      }
     }
-  }, [open, secaoAtual]);
+  }, [open, secaoAtual, centroCustoPreSelecionado]);
 
-  // Funções disponíveis (ainda não adicionadas)
-  const funcoesDisponiveis = funcoes.filter(
-    (f) => f.ativo !== false && !funcoesJaAdicionadas.some((q) => q.funcao_id === f.id)
-  );
+  // Funções disponíveis - agora permite a mesma função em CCs diferentes
+  // A unicidade é por (função_id + centro_custo_id)
+  const funcoesDisponiveis = funcoes.filter((f) => f.ativo !== false);
+  
+  // Verifica se a combinação função + CC já existe
+  const combinacaoJaExiste = funcaoId && centroCustoId 
+    ? funcoesJaAdicionadas.some(q => q.funcao_id === funcaoId && q.centro_custo_id === centroCustoId)
+    : false;
 
   // Funções base disponíveis para span (já adicionadas na seção, exceto a selecionada)
   const funcoesBaseDisponiveis = funcoesJaAdicionadas.filter(
     (q) => q.funcao_id !== funcaoId && q.ativo
   );
 
-  // Outras seções disponíveis para rateio
+  // Outras seções disponíveis para rateio (legado)
   const outrasSecoes = todasSecoes.filter((s) => s.id !== secaoAtual.id && s.ativo);
 
-  // Validação do rateio (soma deve ser 100%)
+  // Validação do rateio de seções (legado - soma deve ser 100%)
   const somaPercentuais = rateioSecoes.reduce((acc, s) => acc + (s.percentual || 0), 0);
   const rateioValido = Math.abs(somaPercentuais - 100) < 0.01;
+
+  // CCs disponíveis para rateio (todos os CCs exceto os já adicionados)
+  const ccsDisponiveisRateio = todosCentrosCusto.filter(
+    (cc) => !rateioCCs.some((r) => r.ccId === cc.id)
+  );
+
+  // Validação do rateio de CCs (soma deve ser 100%)
+  const somaPercentuaisCCs = rateioCCs.reduce((acc, cc) => acc + (cc.percentual || 0), 0);
+  const rateioCCsValido = Math.abs(somaPercentuaisCCs - 100) < 0.01;
 
   // ============================================
   // Handlers SPAN
@@ -184,12 +239,52 @@ export function AddFuncaoModal({
   };
 
   // ============================================
+  // Handlers RATEIO entre CCs (novo)
+  // ============================================
+
+  const handleAddCCRateio = (ccId: string) => {
+    const cc = todosCentrosCusto.find((c) => c.id === ccId);
+    if (cc && !rateioCCs.some((r) => r.ccId === ccId)) {
+      setRateioCCs([
+        ...rateioCCs,
+        {
+          ccId: cc.id,
+          ccCodigo: cc.codigo,
+          ccNome: cc.nome,
+          percentual: 0,
+        },
+      ]);
+    }
+  };
+
+  const handleRemoveCCRateio = (ccId: string) => {
+    // Não remover se for o único CC
+    if (rateioCCs.length > 1) {
+      setRateioCCs(rateioCCs.filter((cc) => cc.ccId !== ccId));
+    }
+  };
+
+  const handleChangePercentualCCRateio = (ccId: string, percentual: number) => {
+    setRateioCCs(
+      rateioCCs.map((cc) =>
+        cc.ccId === ccId ? { ...cc, percentual } : cc
+      )
+    );
+  };
+
+  // ============================================
   // Submit
   // ============================================
 
   const handleSubmit = async () => {
     if (!funcaoId) {
       alert("Selecione uma função");
+      return;
+    }
+
+    // Para rateio, o CC é definido pelos rateioCCs
+    if (tipoCalculo !== "rateio" && !centroCustoId) {
+      alert("Selecione um Centro de Custo");
       return;
     }
 
@@ -206,7 +301,11 @@ export function AddFuncaoModal({
     }
 
     if (tipoCalculo === "rateio") {
-      if (!rateioValido) {
+      if (rateioCCs.length < 2) {
+        alert("Selecione pelo menos 2 Centros de Custo para o rateio");
+        return;
+      }
+      if (!rateioCCsValido) {
         alert("A soma dos percentuais do rateio deve ser 100%");
         return;
       }
@@ -222,6 +321,8 @@ export function AddFuncaoModal({
         funcao_id: funcaoId,
         tipo_calculo: tipoCalculo,
         fator_pa: fatorPA,
+        // Para rateio, usa o primeiro CC; caso contrário, usa o selecionado
+        centro_custo_id: tipoCalculo === "rateio" ? rateioCCs[0]?.ccId : centroCustoId,
       };
 
       if (tipoCalculo === "span") {
@@ -230,7 +331,7 @@ export function AddFuncaoModal({
       }
 
       if (tipoCalculo === "rateio") {
-        data.rateio_secoes = rateioSecoes;
+        data.rateio_ccs = rateioCCs;
         data.rateio_qtd_total = rateioQtdTotal;
       }
 
@@ -281,6 +382,41 @@ export function AddFuncaoModal({
                 )}
               </SelectContent>
             </Select>
+          </div>
+
+          {/* Centro de Custo */}
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Centro de Custo *
+            </Label>
+            <Select value={centroCustoId} onValueChange={setCentroCustoId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione um centro de custo..." />
+              </SelectTrigger>
+              <SelectContent>
+                {centrosCustoDisponiveis.length === 0 ? (
+                  <div className="p-2 text-sm text-muted-foreground text-center">
+                    Nenhum centro de custo disponível
+                  </div>
+                ) : (
+                  centrosCustoDisponiveis.map((cc) => (
+                    <SelectItem key={cc.id} value={cc.id}>
+                      {cc.codigo} - {cc.nome}
+                      <span className="text-muted-foreground ml-2">({cc.tipo})</span>
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Selecione o projeto/contrato para esta função
+            </p>
+            {combinacaoJaExiste && (
+              <p className="text-xs text-amber-600 font-medium flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                Esta função já existe neste Centro de Custo. Escolha outro CC.
+              </p>
+            )}
           </div>
 
           {/* Fator PA */}
@@ -346,23 +482,23 @@ export function AddFuncaoModal({
                 </span>
               </button>
 
-              {/* Rateio */}
+              {/* Rateio entre CCs */}
               <button
                 type="button"
                 onClick={() => setTipoCalculo("rateio")}
-                disabled={outrasSecoes.length === 0}
+                disabled={todosCentrosCusto.length < 2}
                 className={cn(
                   "flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all",
                   tipoCalculo === "rateio"
                     ? "border-green-500 bg-green-50 text-green-700"
                     : "border-muted hover:border-green-200 hover:bg-green-50/50",
-                  outrasSecoes.length === 0 && "opacity-50 cursor-not-allowed"
+                  todosCentrosCusto.length < 2 && "opacity-50 cursor-not-allowed"
                 )}
               >
                 <PieChart className="h-6 w-6" />
                 <span className="font-medium text-sm">Rateio</span>
                 <span className="text-xs text-center text-muted-foreground">
-                  Compartilhar entre seções
+                  Compartilhar entre CCs
                 </span>
               </button>
             </div>
@@ -443,12 +579,12 @@ export function AddFuncaoModal({
             </div>
           )}
 
-          {/* Configuração RATEIO */}
+          {/* Configuração RATEIO entre Centros de Custo */}
           {tipoCalculo === "rateio" && (
             <div className="space-y-4 p-4 bg-green-50/50 rounded-lg border border-green-200">
               <div className="flex items-center gap-2 text-green-700">
                 <PieChart className="h-4 w-4" />
-                <span className="font-semibold text-sm">Configuração do Rateio</span>
+                <span className="font-semibold text-sm">Rateio entre Centros de Custo</span>
               </div>
 
               {/* Quantidade Total */}
@@ -463,77 +599,109 @@ export function AddFuncaoModal({
                     onChange={(e) => setRateioQtdTotal(parseInt(e.target.value) || 1)}
                     className="w-24 font-mono"
                   />
-                  <span className="text-sm text-muted-foreground">pessoas a distribuir</span>
+                  <span className="text-sm text-muted-foreground">pessoas a distribuir entre os CCs</span>
                 </div>
               </div>
 
-              {/* Seções e Percentuais */}
+              {/* Adicionar CCs */}
               <div className="space-y-2">
-                <Label className="text-xs font-medium">Distribuição por Seção *</Label>
-                
-                <div className="space-y-2 p-3 bg-white rounded border">
-                  {/* Seção Atual (sempre incluída) */}
-                  <div className="flex items-center gap-3 p-2 bg-green-50 rounded">
-                    <Checkbox checked disabled />
-                    <span className="flex-1 text-sm font-medium">
-                      {secaoAtual.secao?.nome} <Badge variant="outline" className="ml-2 text-[10px]">atual</Badge>
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <Input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        max="100"
-                        value={rateioSecoes.find((s) => s.secaoId === secaoAtual.id)?.percentual || 0}
-                        onChange={(e) => handleChangePercentualRateio(secaoAtual.id, parseFloat(e.target.value) || 0)}
-                        className="w-20 font-mono text-right"
-                      />
-                      <span className="text-sm">%</span>
-                    </div>
-                  </div>
+                <Label className="text-xs font-medium">Adicionar Centro de Custo</Label>
+                <Select
+                  value=""
+                  onValueChange={handleAddCCRateio}
+                  disabled={ccsDisponiveisRateio.length === 0}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um CC para adicionar ao rateio..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ccsDisponiveisRateio.map((cc) => (
+                      <SelectItem key={cc.id} value={cc.id}>
+                        {cc.codigo} - {cc.nome}
+                        <span className="text-muted-foreground ml-2">({cc.tipo})</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-                  {/* Outras Seções */}
-                  {outrasSecoes.map((secao) => {
-                    const isSelected = rateioSecoes.some((s) => s.secaoId === secao.id);
-                    return (
-                      <div key={secao.id} className="flex items-center gap-3 p-2 hover:bg-muted/30 rounded">
-                        <Checkbox
-                          checked={isSelected}
-                          onCheckedChange={(checked) => handleToggleSecaoRateio(secao, !!checked)}
-                        />
-                        <span className="flex-1 text-sm">
-                          {secao.secao?.nome}
-                        </span>
-                        {isSelected && (
-                          <div className="flex items-center gap-1">
-                            <Input
-                              type="number"
-                              step="0.1"
-                              min="0"
-                              max="100"
-                              value={rateioSecoes.find((s) => s.secaoId === secao.id)?.percentual || 0}
-                              onChange={(e) => handleChangePercentualRateio(secao.id, parseFloat(e.target.value) || 0)}
-                              className="w-20 font-mono text-right"
-                            />
-                            <span className="text-sm">%</span>
-                          </div>
+              {/* CCs selecionados e Percentuais */}
+              <div className="space-y-2">
+                <Label className="text-xs font-medium">Distribuição por Centro de Custo *</Label>
+                
+                {rateioCCs.length === 0 ? (
+                  <div className="p-4 text-center text-sm text-muted-foreground bg-white rounded border">
+                    Adicione pelo menos 2 Centros de Custo para configurar o rateio
+                  </div>
+                ) : (
+                  <div className="space-y-2 p-3 bg-white rounded border">
+                    {rateioCCs.map((cc, index) => (
+                      <div key={cc.ccId} className="flex items-center gap-3 p-2 hover:bg-muted/30 rounded">
+                        <div className="flex-1">
+                          <span className="text-sm font-medium">{cc.ccCodigo}</span>
+                          <span className="text-sm text-muted-foreground ml-2">{cc.ccNome}</span>
+                          {index === 0 && (
+                            <Badge variant="outline" className="ml-2 text-[10px] bg-blue-50 text-blue-700 border-blue-200">
+                              principal
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            max="100"
+                            value={cc.percentual}
+                            onChange={(e) => handleChangePercentualCCRateio(cc.ccId, parseFloat(e.target.value) || 0)}
+                            className="w-20 font-mono text-right"
+                          />
+                          <span className="text-sm">%</span>
+                        </div>
+                        {rateioCCs.length > 1 && (
+                          <Button
+                            size="icon-xs"
+                            variant="ghost"
+                            onClick={() => handleRemoveCCRateio(cc.ccId)}
+                            className="h-6 w-6 text-red-500 hover:text-red-600 hover:bg-red-50"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
                         )}
                       </div>
-                    );
-                  })}
-                </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* Soma dos percentuais */}
-                <div className={cn(
-                  "flex items-center justify-between p-2 rounded text-sm",
-                  rateioValido ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                )}>
-                  <span>Total:</span>
-                  <span className="font-mono font-bold">
-                    {somaPercentuais.toFixed(1)}%
-                    {rateioValido ? " ✓" : " (deve ser 100%)"}
-                  </span>
-                </div>
+                {rateioCCs.length > 0 && (
+                  <div className={cn(
+                    "flex items-center justify-between p-2 rounded text-sm",
+                    rateioCCsValido ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                  )}>
+                    <span>Total:</span>
+                    <span className="font-mono font-bold">
+                      {somaPercentuaisCCs.toFixed(1)}%
+                      {rateioCCsValido ? " ✓" : " (deve ser 100%)"}
+                    </span>
+                  </div>
+                )}
+
+                {/* Preview da distribuição */}
+                {rateioCCs.length >= 2 && rateioCCsValido && (
+                  <div className="p-3 bg-white rounded border text-xs">
+                    <span className="text-muted-foreground">Preview: </span>
+                    {rateioCCs.map((cc, i) => (
+                      <span key={cc.ccId}>
+                        {i > 0 && " + "}
+                        <span className="font-mono font-semibold">
+                          {((rateioQtdTotal * cc.percentual) / 100).toFixed(2)}
+                        </span>
+                        <span className="text-muted-foreground"> em {cc.ccCodigo}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -543,7 +711,13 @@ export function AddFuncaoModal({
           <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancelar
           </Button>
-          <Button onClick={handleSubmit} disabled={saving || !funcaoId}>
+          <Button onClick={handleSubmit} disabled={
+            saving || 
+            !funcaoId || 
+            (tipoCalculo !== "rateio" && !centroCustoId) ||
+            (tipoCalculo !== "rateio" && combinacaoJaExiste) ||
+            (tipoCalculo === "rateio" && (rateioCCs.length < 2 || !rateioCCsValido))
+          }>
             {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             Adicionar
           </Button>

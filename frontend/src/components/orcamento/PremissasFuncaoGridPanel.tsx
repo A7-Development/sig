@@ -6,11 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, Save, Building2, Users, Briefcase, User, Copy } from "lucide-react";
+import { Loader2, Save, Building2, Briefcase, User, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api/client";
 import { useAuthStore } from "@/stores/auth-store";
-import type { CenarioEmpresa, CenarioCliente, CenarioSecao, QuadroPessoal, Funcao, PremissaFuncaoMes } from "@/lib/api/orcamento";
+import type { CenarioEmpresa, CenarioCliente, CenarioSecao, QuadroPessoal, Funcao, PremissaFuncaoMes, CentroCusto } from "@/lib/api/orcamento";
 
 // ============================================
 // Tipos
@@ -19,8 +19,9 @@ import type { CenarioEmpresa, CenarioCliente, CenarioSecao, QuadroPessoal, Funca
 interface PremissasFuncaoGridPanelProps {
   cenarioId: string;
   empresa: CenarioEmpresa;
-  cliente: CenarioCliente;
+  cliente?: CenarioCliente; // Opcional - mantido para compatibilidade
   secao: CenarioSecao;
+  centroCusto?: CentroCusto; // Centro de Custo (nova hierarquia)
   funcao: Funcao;
   quadroItem: QuadroPessoal;
   anoInicio: number;
@@ -57,8 +58,9 @@ const INDICADORES = [
 export function PremissasFuncaoGridPanel({
   cenarioId,
   empresa,
-  cliente,
+  // cliente, // Removido - não usado na nova hierarquia
   secao,
+  centroCusto,
   funcao,
   quadroItem,
   anoInicio,
@@ -134,7 +136,7 @@ export function PremissasFuncaoGridPanel({
             abs_pct_justificado: existente.abs_pct_justificado ?? 0,
             turnover: existente.turnover ?? 0,
             ferias_indice: existente.ferias_indice ?? 0,
-            dias_treinamento: existente.dias_treinamento ?? 0,
+            dias_treinamento: Math.round(existente.dias_treinamento ?? 0), // Garantir que seja sempre um inteiro
             id: existente.id,
           };
         }
@@ -214,7 +216,7 @@ export function PremissasFuncaoGridPanel({
         abs_pct_justificado: p.abs_pct_justificado,
         turnover: p.turnover,
         ferias_indice: p.ferias_indice,
-        dias_treinamento: p.dias_treinamento,
+        dias_treinamento: Math.round(p.dias_treinamento), // Garantir que seja sempre um inteiro
       }));
 
       await api.post(
@@ -264,15 +266,19 @@ export function PremissasFuncaoGridPanel({
       <div className="shrink-0 p-4 border-b bg-muted/10">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap">
               <Building2 className="h-3 w-3" />
               <span>{empresa.empresa?.nome_fantasia?.slice(0, 10) || '...'}</span>
               <span>/</span>
-              <Users className="h-3 w-3" />
-              <span>{cliente.nome_cliente?.slice(0, 10) || '...'}</span>
-              <span>/</span>
-              <Briefcase className="h-3 w-3" />
+              <Briefcase className="h-3 w-3 text-green-500" />
               <span>{secao.secao?.nome?.slice(0, 10) || '...'}</span>
+              {centroCusto && (
+                <>
+                  <span>/</span>
+                  <Briefcase className="h-3 w-3 text-blue-500" />
+                  <span className="font-medium text-blue-700">{centroCusto.nome?.slice(0, 15) || centroCusto.codigo}</span>
+                </>
+              )}
               <span>/</span>
               <User className="h-3 w-3 text-purple-500" />
               <span className="font-medium text-foreground">{funcao.nome}</span>
@@ -353,7 +359,12 @@ export function PremissasFuncaoGridPanel({
                               min={0}
                               max={indicador.max}
                               value={(p as any)[indicador.key]}
-                              onChange={(e) => handleUpdateValue(idx, indicador.key, parseFloat(e.target.value) || 0)}
+                              onChange={(e) => {
+                                const value = indicador.key === 'dias_treinamento' 
+                                  ? parseInt(e.target.value) || 0
+                                  : parseFloat(e.target.value) || 0;
+                                handleUpdateValue(idx, indicador.key, value);
+                              }}
                               onBlur={() => setEditingCell(null)}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter' || e.key === 'Tab') {

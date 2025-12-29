@@ -45,7 +45,8 @@ import { centrosCustoApi, totvsApi, type CentroCusto, type CentroCustoTotvs } fr
 import { useToast } from "@/hooks/use-toast";
 
 const TIPOS_CC = [
-  { value: "OPERACIONAL", label: "Operacional" },
+  { value: "OPERACIONAL", label: "Operacional (Projeto/Contrato)" },
+  { value: "POOL", label: "Pool (Overhead/Rateio)" },
   { value: "ADMINISTRATIVO", label: "Administrativo" },
   { value: "OVERHEAD", label: "Overhead" },
 ];
@@ -68,11 +69,13 @@ export default function CentrosCustoPage() {
     codigo: "",
     nome: "",
     codigo_totvs: "",
-    tipo: "OPERACIONAL" as "OPERACIONAL" | "ADMINISTRATIVO" | "OVERHEAD",
+    tipo: "OPERACIONAL" as "OPERACIONAL" | "ADMINISTRATIVO" | "OVERHEAD" | "POOL",
+    secao_id: null as string | null,
     cliente: "",
     contrato: "",
     uf: "",
     cidade: "",
+    area_m2: "",
     ativo: true,
   });
   
@@ -120,14 +123,27 @@ export default function CentrosCustoPage() {
     if (!token) return;
     setSalvando(true);
     try {
+      // Remover secao_id pois não é um campo do schema do backend
+      // Converter strings vazias em null para campos opcionais
+      const { secao_id, ...rest } = formData;
+      const dataToSend = {
+        ...rest,
+        codigo_totvs: rest.codigo_totvs || null,
+        cliente: rest.cliente || null,
+        contrato: rest.contrato || null,
+        uf: rest.uf || null,
+        cidade: rest.cidade || null,
+        area_m2: rest.area_m2 ? parseFloat(rest.area_m2) : null,
+      };
+      
       if (editando) {
-        await centrosCustoApi.atualizar(token, editando.id, formData);
+        await centrosCustoApi.atualizar(token, editando.id, dataToSend);
         toast({
           title: "Centro de custo atualizado",
           description: "Centro de custo atualizado com sucesso.",
         });
       } else {
-        await centrosCustoApi.criar(token, formData);
+        await centrosCustoApi.criar(token, dataToSend as any);
         toast({
           title: "Centro de custo criado",
           description: "Centro de custo criado com sucesso.",
@@ -152,7 +168,7 @@ export default function CentrosCustoPage() {
     setEditando(null);
     setFormData({
       codigo: "", nome: "", codigo_totvs: "", tipo: "OPERACIONAL",
-      cliente: "", contrato: "", uf: "", cidade: "", ativo: true,
+      secao_id: null, cliente: "", contrato: "", uf: "", cidade: "", area_m2: "", ativo: true,
     });
   };
 
@@ -163,10 +179,12 @@ export default function CentrosCustoPage() {
       nome: cc.nome,
       codigo_totvs: cc.codigo_totvs || "",
       tipo: cc.tipo,
+      secao_id: cc.secao_id || null,
       cliente: cc.cliente || "",
       contrato: cc.contrato || "",
       uf: cc.uf || "",
       cidade: cc.cidade || "",
+      area_m2: cc.area_m2?.toString() || "",
       ativo: cc.ativo,
     });
     setShowForm(true);
@@ -474,6 +492,22 @@ export default function CentrosCustoPage() {
                   onChange={(e) => setFormData({ ...formData, cidade: e.target.value })}
                 />
               </div>
+            </div>
+
+            <div>
+              <Label htmlFor="area_m2">Área (m²)</Label>
+              <Input
+                id="area_m2"
+                type="number"
+                step="0.01"
+                min="0"
+                value={formData.area_m2}
+                onChange={(e) => setFormData({ ...formData, area_m2: e.target.value })}
+                placeholder="Ex: 150.50"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Usado para rateio proporcional à área ocupada
+              </p>
             </div>
 
             <div className="flex items-center gap-2">

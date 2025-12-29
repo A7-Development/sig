@@ -74,6 +74,14 @@ export default function SecoesPage() {
     nome: "",
     codigo_totvs: "",
     ativo: true,
+    // Política de trabalho
+    trabalha_sabado: 0 as number,  // 0=não, 0.5=meio período, 1=integral
+    trabalha_domingo: false,
+    trabalha_feriado_nacional: false,
+    trabalha_feriado_estadual: false,
+    trabalha_feriado_municipal: false,
+    uf: "",
+    cidade: "",
   });
   
   // Import state
@@ -165,7 +173,20 @@ export default function SecoesPage() {
   };
 
   const resetForm = () => {
-    setFormData({ departamento_id: "", codigo: "", nome: "", codigo_totvs: "", ativo: true });
+    setFormData({ 
+      departamento_id: "", 
+      codigo: "", 
+      nome: "", 
+      codigo_totvs: "", 
+      ativo: true,
+      trabalha_sabado: 0,
+      trabalha_domingo: false,
+      trabalha_feriado_nacional: false,
+      trabalha_feriado_estadual: false,
+      trabalha_feriado_municipal: false,
+      uf: "",
+      cidade: "",
+    });
   };
 
   const handleEdit = (secao: Secao) => {
@@ -176,6 +197,13 @@ export default function SecoesPage() {
       nome: secao.nome,
       codigo_totvs: secao.codigo_totvs || "",
       ativo: secao.ativo,
+      trabalha_sabado: secao.trabalha_sabado ?? 0,
+      trabalha_domingo: secao.trabalha_domingo ?? false,
+      trabalha_feriado_nacional: secao.trabalha_feriado_nacional ?? false,
+      trabalha_feriado_estadual: secao.trabalha_feriado_estadual ?? false,
+      trabalha_feriado_municipal: secao.trabalha_feriado_municipal ?? false,
+      uf: secao.uf || "",
+      cidade: secao.cidade || "",
     });
     setShowForm(true);
   };
@@ -334,7 +362,7 @@ export default function SecoesPage() {
                   <TableHead>Código</TableHead>
                   <TableHead>Nome</TableHead>
                   <TableHead>Departamento</TableHead>
-                  <TableHead>Código TOTVS</TableHead>
+                  <TableHead>Política de Trabalho</TableHead>
                   <TableHead className="text-center">Status</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
@@ -347,8 +375,31 @@ export default function SecoesPage() {
                     <TableCell className="text-sm">
                       {secao.departamento?.nome || "-"}
                     </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {secao.codigo_totvs || "-"}
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {secao.trabalha_sabado > 0 && (
+                          <Badge variant="outline" className="text-[10px]">
+                            Sáb {secao.trabalha_sabado === 1 ? "Int" : "½"}
+                          </Badge>
+                        )}
+                        {secao.trabalha_domingo && (
+                          <Badge variant="outline" className="text-[10px]">Dom</Badge>
+                        )}
+                        {secao.trabalha_feriado_nacional && (
+                          <Badge variant="alert" className="text-[10px]">Fer.Nac</Badge>
+                        )}
+                        {secao.trabalha_feriado_estadual && (
+                          <Badge variant="alert" className="text-[10px]">Fer.Est</Badge>
+                        )}
+                        {secao.trabalha_feriado_municipal && (
+                          <Badge variant="alert" className="text-[10px]">Fer.Mun</Badge>
+                        )}
+                        {!secao.trabalha_sabado && !secao.trabalha_domingo && 
+                         !secao.trabalha_feriado_nacional && !secao.trabalha_feriado_estadual && 
+                         !secao.trabalha_feriado_municipal && (
+                          <span className="text-xs text-muted-foreground">Padrão</span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="text-center">
                       {secao.ativo ? (
@@ -391,7 +442,7 @@ export default function SecoesPage() {
 
       {/* Diálogo de Formulário */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editando ? "Editar Seção" : "Nova Seção"}
@@ -448,6 +499,95 @@ export default function SecoesPage() {
                 onCheckedChange={(checked) => setFormData({ ...formData, ativo: checked === true })}
               />
               <Label htmlFor="ativo" className="cursor-pointer">Ativo</Label>
+            </div>
+
+            {/* Política de Trabalho */}
+            <div className="border-t pt-4 mt-4">
+              <h4 className="text-sm font-semibold mb-3">Política de Trabalho</h4>
+              
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="trabalha_sabado">Trabalha aos Sábados</Label>
+                  <Select
+                    value={String(formData.trabalha_sabado)}
+                    onValueChange={(value) => setFormData({ ...formData, trabalha_sabado: parseFloat(value) })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">Não trabalha</SelectItem>
+                      <SelectItem value="0.5">Meio período</SelectItem>
+                      <SelectItem value="1">Integral</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="trabalha_domingo"
+                    checked={formData.trabalha_domingo}
+                    onCheckedChange={(checked) => setFormData({ ...formData, trabalha_domingo: checked === true })}
+                  />
+                  <Label htmlFor="trabalha_domingo" className="cursor-pointer">Trabalha aos Domingos</Label>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="trabalha_feriado_nacional"
+                      checked={formData.trabalha_feriado_nacional}
+                      onCheckedChange={(checked) => setFormData({ ...formData, trabalha_feriado_nacional: checked === true })}
+                    />
+                    <Label htmlFor="trabalha_feriado_nacional" className="cursor-pointer text-xs">Feriado Nacional</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="trabalha_feriado_estadual"
+                      checked={formData.trabalha_feriado_estadual}
+                      onCheckedChange={(checked) => setFormData({ ...formData, trabalha_feriado_estadual: checked === true })}
+                    />
+                    <Label htmlFor="trabalha_feriado_estadual" className="cursor-pointer text-xs">Feriado Estadual</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="trabalha_feriado_municipal"
+                      checked={formData.trabalha_feriado_municipal}
+                      onCheckedChange={(checked) => setFormData({ ...formData, trabalha_feriado_municipal: checked === true })}
+                    />
+                    <Label htmlFor="trabalha_feriado_municipal" className="cursor-pointer text-xs">Feriado Municipal</Label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Localização (para feriados estaduais/municipais) */}
+            <div className="border-t pt-4 mt-4">
+              <h4 className="text-sm font-semibold mb-3">Localização</h4>
+              <p className="text-xs text-muted-foreground mb-3">
+                Usada para determinar quais feriados estaduais e municipais se aplicam
+              </p>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="uf">UF</Label>
+                  <Input
+                    id="uf"
+                    value={formData.uf}
+                    onChange={(e) => setFormData({ ...formData, uf: e.target.value.toUpperCase() })}
+                    maxLength={2}
+                    placeholder="SP"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="cidade">Cidade</Label>
+                  <Input
+                    id="cidade"
+                    value={formData.cidade}
+                    onChange={(e) => setFormData({ ...formData, cidade: e.target.value })}
+                    placeholder="São Paulo"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-4">

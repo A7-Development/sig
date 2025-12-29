@@ -39,7 +39,8 @@ import {
   Loader2,
   FileX,
   User,
-  Server
+  Server,
+  TrendingUp
 } from "lucide-react";
 import { MasterDetailTree } from "@/components/orcamento/MasterDetailTree";
 import { CapacityPlanningPanel } from "@/components/orcamento/CapacityPlanningPanel";
@@ -47,7 +48,9 @@ import { PremissasFuncaoMesGrid } from "@/components/orcamento/PremissasFuncaoMe
 import { PremissasTree, type SelectedNodePremissas } from "@/components/orcamento/PremissasTree";
 import { PremissasFuncaoGridPanel } from "@/components/orcamento/PremissasFuncaoGridPanel";
 import { DREPanel } from "@/components/orcamento/DREPanel";
-import TecnologiaPanel from "@/components/orcamento/TecnologiaPanel";
+import CustoDiretoPanel from "@/components/orcamento/CustoDiretoPanel";
+import { ReceitasPanel } from "@/components/orcamento/ReceitasPanel";
+import { RateioConfigPanel } from "@/components/orcamento/RateioConfigPanel";
 import type { CenarioEmpresa, CenarioCliente, CenarioSecao } from "@/lib/api/orcamento";
 import { useAuthStore } from "@/stores/auth-store";
 import { 
@@ -82,14 +85,15 @@ export default function CenariosPage() {
   const [tabelaSalarial, setTabelaSalarial] = useState<TabelaSalarial[]>([]);
   
   // Abas
-  const [abaAtiva, setAbaAtiva] = useState<'estrutura' | 'premissas-funcao' | 'premissas' | 'quadro' | 'tecnologia' | 'dre'>('estrutura');
+  const [abaAtiva, setAbaAtiva] = useState<'estrutura' | 'premissas-funcao' | 'premissas' | 'quadro' | 'custo-direto' | 'receitas' | 'rateio' | 'dre'>('estrutura');
   
   // Estado para seleção na árvore Master-Detail
   const [selectedNode, setSelectedNode] = useState<{
-    type: 'empresa' | 'cliente' | 'secao';
+    type: 'empresa' | 'cliente' | 'secao' | 'centro_custo';
     empresa: CenarioEmpresa;
     cliente?: CenarioCliente;
     secao?: CenarioSecao;
+    centroCusto?: CentroCusto;
   } | null>(null);
   
   // Estado para seleção na árvore de Premissas (inclui funções)
@@ -112,6 +116,10 @@ export default function CenariosPage() {
     mes_fim: 12,
     ativo: true,
   });
+  
+  // Estados locais para campos de data (digitação livre)
+  const [dataInicioTexto, setDataInicioTexto] = useState("");
+  const [dataFimTexto, setDataFimTexto] = useState("");
   
   // Modal Posição
   const [showFormPosicao, setShowFormPosicao] = useState(false);
@@ -428,15 +436,37 @@ export default function CenariosPage() {
               <Badge variant="secondary" className="text-[10px] ml-1">{quadro.length}</Badge>
             </button>
             <button
-              onClick={() => setAbaAtiva('tecnologia')}
+              onClick={() => setAbaAtiva('custo-direto')}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                abaAtiva === 'tecnologia'
+                abaAtiva === 'custo-direto'
                   ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              <Server className="h-4 w-4" />
-              Tecnologia
+              <DollarSign className="h-4 w-4" />
+              Custo Direto
+            </button>
+            <button
+              onClick={() => setAbaAtiva('receitas')}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                abaAtiva === 'receitas'
+                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <TrendingUp className="h-4 w-4" />
+              Receitas
+            </button>
+            <button
+              onClick={() => setAbaAtiva('rateio')}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                abaAtiva === 'rateio'
+                  ? "border-orange-500 text-orange-600 bg-background rounded-t-lg"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <GitCompare className="h-4 w-4" />
+              Rateio
             </button>
             <button
               onClick={() => setAbaAtiva('dre')}
@@ -468,18 +498,19 @@ export default function CenariosPage() {
                     onNodeSelect={setSelectedNode}
                     onSecoesLoaded={setTodasSecoesCenario}
                     selectedSecaoId={selectedNode?.secao?.id}
+                    selectedCCId={selectedNode?.centroCusto?.id}
                   />
                 </div>
                 
                 {/* Painel Direito: Detalhes / Capacity Planning */}
                 <div className="flex-1 overflow-auto">
-                  {selectedNode?.type === 'secao' && selectedNode.secao ? (
+                  {(selectedNode?.type === 'centro_custo' || selectedNode?.type === 'secao') && selectedNode.secao ? (
                     <CapacityPlanningPanel
                       cenarioId={cenarioSelecionado.id}
                       empresa={selectedNode.empresa}
-                      cliente={selectedNode.cliente!}
                       secao={selectedNode.secao}
                       todasSecoes={todasSecoescentario}
+                      centroCusto={selectedNode.centroCusto}
                       anoInicio={cenarioSelecionado.ano_inicio}
                       mesInicio={cenarioSelecionado.mes_inicio}
                       anoFim={cenarioSelecionado.ano_fim}
@@ -488,9 +519,9 @@ export default function CenariosPage() {
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
                       <Settings className="h-12 w-12 mb-4 opacity-30" />
-                      <h3 className="text-lg font-medium mb-2">Selecione uma seção</h3>
+                      <h3 className="text-lg font-medium mb-2">Selecione um Centro de Custo</h3>
                       <p className="text-sm max-w-md text-center">
-                        Navegue pela estrutura à esquerda e clique em uma seção para configurar o quadro de pessoal
+                        Expanda uma seção na árvore à esquerda e clique em um Centro de Custo para configurar o quadro de pessoal
                       </p>
                     </div>
                   )}
@@ -524,8 +555,8 @@ export default function CenariosPage() {
                     <PremissasFuncaoGridPanel
                       cenarioId={cenarioSelecionado.id}
                       empresa={selectedNodePremissas.empresa}
-                      cliente={selectedNodePremissas.cliente!}
                       secao={selectedNodePremissas.secao!}
+                      centroCusto={selectedNodePremissas.centroCusto}
                       funcao={selectedNodePremissas.funcao}
                       quadroItem={selectedNodePremissas.quadroItem}
                       anoInicio={cenarioSelecionado.ano_inicio}
@@ -693,8 +724,8 @@ export default function CenariosPage() {
                   )}
                 </div>
               </div>
-            ) : abaAtiva === 'tecnologia' ? (
-              /* Layout Master-Detail para Tecnologia: Árvore à esquerda, Painel à direita */
+            ) : abaAtiva === 'custo-direto' ? (
+              /* Layout Master-Detail para Custo Direto: Árvore à esquerda, Painel à direita */
               <div className="h-full flex">
                 {/* Painel Esquerdo: Árvore de Navegação */}
                 <div className="w-80 border-r bg-muted/10 flex-shrink-0">
@@ -703,27 +734,82 @@ export default function CenariosPage() {
                     onNodeSelect={setSelectedNode}
                     onSecoesLoaded={setTodasSecoesCenario}
                     selectedSecaoId={selectedNode?.secao?.id}
+                    selectedCCId={selectedNode?.centroCusto?.id}
                   />
                 </div>
                 
-                {/* Painel Direito: Alocações de Tecnologia */}
+                {/* Painel Direito: Custos Diretos */}
                 <div className="flex-1 overflow-auto">
-                  {selectedNode?.type === 'secao' && selectedNode.secao ? (
-                    <TecnologiaPanel
+                  {selectedNode?.type === 'centro_custo' && selectedNode.centroCusto && selectedNode.secao ? (
+                    <CustoDiretoPanel
                       cenarioId={cenarioSelecionado.id}
                       secaoId={selectedNode.secao.id}
                       secaoNome={selectedNode.secao.secao?.nome || 'Seção'}
+                      centroCustoId={selectedNode.centroCusto.id}
+                      centroCustoNome={selectedNode.centroCusto.nome}
+                      centrosCustoDisponiveis={centrosCusto.filter(cc => cc.ativo)}
+                    />
+                  ) : selectedNode?.type === 'secao' && selectedNode.secao ? (
+                    <CustoDiretoPanel
+                      cenarioId={cenarioSelecionado.id}
+                      secaoId={selectedNode.secao.id}
+                      secaoNome={selectedNode.secao.secao?.nome || 'Seção'}
+                      centrosCustoDisponiveis={centrosCusto.filter(cc => cc.ativo)}
                     />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
-                      <Server className="h-12 w-12 mb-4 opacity-30" />
-                      <h3 className="text-lg font-medium mb-2">Selecione uma seção</h3>
+                      <DollarSign className="h-12 w-12 mb-4 opacity-30" />
+                      <h3 className="text-lg font-medium mb-2">Selecione uma seção ou Centro de Custo</h3>
                       <p className="text-sm max-w-md text-center">
-                        Navegue pela estrutura à esquerda e clique em uma seção para gerenciar alocações de tecnologia
+                        Navegue pela estrutura à esquerda e clique em uma seção ou Centro de Custo para gerenciar custos diretos
                       </p>
                     </div>
                   )}
                 </div>
+              </div>
+            ) : abaAtiva === 'receitas' ? (
+              /* Layout Master-Detail para Receitas: Árvore à esquerda, Painel à direita */
+              <div className="h-full flex">
+                {/* Painel Esquerdo: Árvore de Navegação */}
+                <div className="w-80 border-r bg-muted/10 flex-shrink-0">
+                  <MasterDetailTree
+                    cenarioId={cenarioSelecionado.id}
+                    onNodeSelect={setSelectedNode}
+                    onSecoesLoaded={setTodasSecoesCenario}
+                    selectedSecaoId={selectedNode?.secao?.id}
+                    selectedCCId={selectedNode?.centroCusto?.id}
+                  />
+                </div>
+                
+                {/* Painel Direito: Receitas */}
+                <div className="flex-1 overflow-auto">
+                  {selectedNode?.type === 'centro_custo' && selectedNode.centroCusto && selectedNode.secao ? (
+                    <ReceitasPanel
+                      cenarioId={cenarioSelecionado.id}
+                      centroCustoId={selectedNode.centroCusto.id}
+                      centroCustoNome={selectedNode.centroCusto.nome}
+                      centroCustoCodigo={selectedNode.centroCusto.codigo}
+                      secaoNome={selectedNode.secao.secao?.nome || 'Seção'}
+                      empresaNome={selectedNode.empresa?.empresa?.nome_fantasia || selectedNode.empresa?.empresa?.razao_social}
+                      mesInicio={cenarioSelecionado.mes_inicio}
+                      anoInicio={cenarioSelecionado.ano_inicio}
+                      mesFim={cenarioSelecionado.mes_fim}
+                      anoFim={cenarioSelecionado.ano_fim}
+                    />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
+                      <TrendingUp className="h-12 w-12 mb-4 opacity-30" />
+                      <h3 className="text-lg font-medium mb-2">Selecione um Centro de Custo</h3>
+                      <p className="text-sm max-w-md text-center">
+                        Expanda uma seção na árvore à esquerda e clique em um Centro de Custo para gerenciar receitas
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : abaAtiva === 'rateio' ? (
+              <div className="h-full overflow-auto p-4">
+                <RateioConfigPanel cenarioId={cenarioSelecionado.id} />
               </div>
             ) : abaAtiva === 'dre' ? (
               <div className="h-full overflow-auto">
@@ -778,6 +864,8 @@ export default function CenariosPage() {
                 mes_fim: 12,
                 ativo: true,
               });
+              setDataInicioTexto(`01/${nextYear}`);
+              setDataFimTexto(`12/${nextYear}`);
               setShowFormCenario(true);
             }}
           >
@@ -809,7 +897,6 @@ export default function CenariosPage() {
                 <TableHead className="w-32">Código</TableHead>
                 <TableHead className="w-40">Período</TableHead>
                 <TableHead>Descrição</TableHead>
-                <TableHead className="w-28">Cliente</TableHead>
                 <TableHead className="w-28">Status</TableHead>
                 <TableHead className="w-32 text-right">Ações</TableHead>
               </TableRow>
@@ -824,15 +911,6 @@ export default function CenariosPage() {
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {cenario.descricao || '—'}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {cenario.cliente_nw_codigo ? (
-                      <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">
-                        {cenario.cliente_nw_codigo}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
                   </TableCell>
                   <TableCell>
                     {getStatusBadge(cenario.status)}
@@ -916,45 +994,26 @@ export default function CenariosPage() {
                   <label className="filter-label mb-3 block">Período do Cenário *</label>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="form-field">
-                      <label className="filter-label text-[10px]">Data Início (mm/aaaa)</label>
+                      <label className="filter-label text-[10px]">Data Início (MM/AAAA)</label>
                       <Input
                         type="text"
-                        value={`${formCenario.mes_inicio.toString().padStart(2, '0')}/${formCenario.ano_inicio}`}
+                        value={dataInicioTexto}
                         onChange={(e) => {
-                          let value = e.target.value.replace(/\D/g, '');
-                          
-                          // Limitar a 6 dígitos (2 para mês + 4 para ano)
-                          if (value.length > 6) {
-                            value = value.slice(0, 6);
+                          let valor = e.target.value.replace(/\D/g, ''); // só números
+                          if (valor.length > 6) valor = valor.slice(0, 6);
+                          // Insere / após 2 dígitos
+                          if (valor.length > 2) {
+                            valor = valor.slice(0, 2) + '/' + valor.slice(2);
                           }
-                          
-                          // Separar mês e ano
-                          let mes = formCenario.mes_inicio;
-                          let ano = formCenario.ano_inicio;
-                          
-                          if (value.length >= 2) {
-                            mes = parseInt(value.slice(0, 2));
-                            if (mes < 1) mes = 1;
-                            if (mes > 12) mes = 12;
+                          setDataInicioTexto(valor);
+                          // Atualiza formCenario se formato completo
+                          if (valor.length === 7) {
+                            const mes = parseInt(valor.slice(0, 2));
+                            const ano = parseInt(valor.slice(3));
+                            if (mes >= 1 && mes <= 12 && ano >= 2020 && ano <= 2100) {
+                              setFormCenario({ ...formCenario, mes_inicio: mes, ano_inicio: ano });
+                            }
                           }
-                          
-                          if (value.length > 2) {
-                            ano = parseInt(value.slice(2));
-                            if (ano < 2020) ano = 2020;
-                            if (ano > 2100) ano = 2100;
-                          }
-                          
-                          setFormCenario({
-                            ...formCenario,
-                            mes_inicio: mes,
-                            ano_inicio: ano
-                          });
-                        }}
-                        onBlur={(e) => {
-                          // Garantir formato correto ao sair do campo
-                          const mes = formCenario.mes_inicio.toString().padStart(2, '0');
-                          const ano = formCenario.ano_inicio.toString();
-                          e.target.value = `${mes}/${ano}`;
                         }}
                         placeholder="01/2026"
                         className="h-8 text-sm font-mono"
@@ -963,47 +1022,28 @@ export default function CenariosPage() {
                       />
                     </div>
                     <div className="form-field">
-                      <label className="filter-label text-[10px]">Data Fim (mm/aaaa)</label>
+                      <label className="filter-label text-[10px]">Data Fim (MM/AAAA)</label>
                       <Input
                         type="text"
-                        value={`${formCenario.mes_fim.toString().padStart(2, '0')}/${formCenario.ano_fim}`}
+                        value={dataFimTexto}
                         onChange={(e) => {
-                          let value = e.target.value.replace(/\D/g, '');
-                          
-                          // Limitar a 6 dígitos (2 para mês + 4 para ano)
-                          if (value.length > 6) {
-                            value = value.slice(0, 6);
+                          let valor = e.target.value.replace(/\D/g, ''); // só números
+                          if (valor.length > 6) valor = valor.slice(0, 6);
+                          // Insere / após 2 dígitos
+                          if (valor.length > 2) {
+                            valor = valor.slice(0, 2) + '/' + valor.slice(2);
                           }
-                          
-                          // Separar mês e ano
-                          let mes = formCenario.mes_fim;
-                          let ano = formCenario.ano_fim;
-                          
-                          if (value.length >= 2) {
-                            mes = parseInt(value.slice(0, 2));
-                            if (mes < 1) mes = 1;
-                            if (mes > 12) mes = 12;
+                          setDataFimTexto(valor);
+                          // Atualiza formCenario se formato completo
+                          if (valor.length === 7) {
+                            const mes = parseInt(valor.slice(0, 2));
+                            const ano = parseInt(valor.slice(3));
+                            if (mes >= 1 && mes <= 12 && ano >= 2020 && ano <= 2100) {
+                              setFormCenario({ ...formCenario, mes_fim: mes, ano_fim: ano });
+                            }
                           }
-                          
-                          if (value.length > 2) {
-                            ano = parseInt(value.slice(2));
-                            if (ano < 2020) ano = 2020;
-                            if (ano > 2100) ano = 2100;
-                          }
-                          
-                          setFormCenario({
-                            ...formCenario,
-                            mes_fim: mes,
-                            ano_fim: ano
-                          });
                         }}
-                        onBlur={(e) => {
-                          // Garantir formato correto ao sair do campo
-                          const mes = formCenario.mes_fim.toString().padStart(2, '0');
-                          const ano = formCenario.ano_fim.toString();
-                          e.target.value = `${mes}/${ano}`;
-                        }}
-                        placeholder="12/2027"
+                        placeholder="12/2026"
                         className="h-8 text-sm font-mono"
                         maxLength={7}
                         required

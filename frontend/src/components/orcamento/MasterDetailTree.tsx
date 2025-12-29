@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -25,26 +24,29 @@ import {
   ChevronRight,
   ChevronDown,
   Building2,
-  Users,
   FolderTree,
   Plus,
   Trash2,
-  Search,
-  Loader2,
   AlertCircle,
+  Loader2,
+  Building,
+  Briefcase,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth-store";
 import { 
   cenariosApi,
-  nwApi,
   empresasApi,
   secoesApi,
+  secoesEmpresa,
+  centrosCustoApi,
+  secaoCentrosCusto,
   type CenarioEmpresa,
-  type CenarioCliente,
   type CenarioSecao,
-  type ClienteNW,
+  type CenarioSecaoCC,
   type Empresa,
   type Secao,
+  type CentroCusto,
+  type QuadroPessoal,
 } from "@/lib/api/orcamento";
 import { cn } from "@/lib/utils";
 
@@ -52,29 +54,49 @@ import { cn } from "@/lib/utils";
 // Tipos
 // ============================================
 
-type NodeType = 'empresa' | 'cliente' | 'secao';
+type NodeType = 'empresa' | 'secao' | 'centro_custo';
 
 interface SelectedNode {
   type: NodeType;
   empresa: CenarioEmpresa;
-  cliente?: CenarioCliente;
   secao?: CenarioSecao;
+  centroCusto?: CentroCusto;
+}
+
+// Centro de Custo com contagem de funções
+interface CCComContagem {
+  id: string;
+  codigo: string;
+  nome: string;
+  tipo: string;
+  qtdFuncoes: number;
 }
 
 interface MasterDetailTreeProps {
   cenarioId: string;
   onNodeSelect?: (node: SelectedNode | null) => void;
-  onSecoesLoaded?: (secoes: CenarioSecao[]) => void;  // Callback com todas as seções
+  onSecoesLoaded?: (secoes: CenarioSecao[]) => void;
   selectedSecaoId?: string | null;
+  selectedCCId?: string | null;
 }
 
 // ============================================
 // Helpers
 // ============================================
 
-const truncateText = (text: string | undefined | null, maxLength: number = 15): string => {
+const truncateText = (text: string | undefined | null, maxLength: number = 20): string => {
   if (!text) return "";
   return text.length > maxLength ? text.substring(0, maxLength) + "…" : text;
+};
+
+/**
+ * Verifica se uma seção é CORPORATIVO com base no código ou nome.
+ */
+const isCorporativo = (secao?: Secao | null): boolean => {
+  if (!secao) return false;
+  const codigo = (secao.codigo || "").toUpperCase();
+  const nome = (secao.nome || "").toUpperCase();
+  return codigo.includes("CORPORATIVO") || nome.includes("CORPORATIVO");
 };
 
 // ============================================
@@ -85,7 +107,8 @@ export function MasterDetailTree({
   cenarioId, 
   onNodeSelect,
   onSecoesLoaded,
-  selectedSecaoId 
+  selectedSecaoId,
+  selectedCCId
 }: MasterDetailTreeProps) {
   const { accessToken: token } = useAuthStore();
   
@@ -96,28 +119,30 @@ export function MasterDetailTree({
   
   // Estado de expansão
   const [expandedEmpresas, setExpandedEmpresas] = useState<Set<string>>(new Set());
-  const [expandedClientes, setExpandedClientes] = useState<Set<string>>(new Set());
+  const [expandedSecoes, setExpandedSecoes] = useState<Set<string>>(new Set());
+  
+  // CCs por seção (derivados do QuadroPessoal)
+  const [ccsPorSecao, setCCsPorSecao] = useState<Record<string, CCComContagem[]>>({});
+  const [loadingCCs, setLoadingCCs] = useState<Set<string>>(new Set());
+  
+  // Todos os CCs disponíveis
+  const [todosCCs, setTodosCCs] = useState<CentroCusto[]>([]);
   
   // Modais
   const [showAddEmpresa, setShowAddEmpresa] = useState(false);
-  const [showAddCliente, setShowAddCliente] = useState(false);
   const [showAddSecao, setShowAddSecao] = useState(false);
+  const [showAddCC, setShowAddCC] = useState(false);
   
   // Dados para modais
   const [empresasDisponiveis, setEmpresasDisponiveis] = useState<Empresa[]>([]);
-  const [clientesNW, setClientesNW] = useState<ClienteNW[]>([]);
   const [secoesDisponiveis, setSecoesDisponiveis] = useState<Secao[]>([]);
   
   // Estado de seleção para modais
   const [empresaSelecionada, setEmpresaSelecionada] = useState<CenarioEmpresa | null>(null);
-  const [clienteSelecionado, setClienteSelecionado] = useState<CenarioCliente | null>(null);
+  const [secaoSelecionadaParaCC, setSecaoSelecionadaParaCC] = useState<CenarioSecao | null>(null);
   const [selectedEmpresaId, setSelectedEmpresaId] = useState<string>("");
-  const [selectedClienteNW, setSelectedClienteNW] = useState<string>("");
   const [selectedSecaoIdModal, setSelectedSecaoIdModal] = useState<string>("");
-  
-  // Busca
-  const [buscaCliente, setBuscaCliente] = useState("");
-  const [loadingClientesNW, setLoadingClientesNW] = useState(false);
+  const [selectedCCIdModal, setSelectedCCIdModal] = useState<string>("");
   
   // Ações em andamento
   const [saving, setSaving] = useState(false);
@@ -131,21 +156,48 @@ export function MasterDetailTree({
     setLoading(true);
     setError(null);
     try {
-      const data = await cenariosApi.getEmpresas(token, cenarioId);
-      setEmpresas(data);
+      // Carregar empresas do cenário
+      const empresasData = await cenariosApi.getEmpresas(token, cenarioId);
+      
+      // Para cada empresa, carregar seções da nova hierarquia
+      const empresasComSecoes = await Promise.all(
+        empresasData.map(async (emp) => {
+          try {
+            const secoesData = await secoesEmpresa.listar(token, cenarioId, emp.id, true);
+            return {
+              ...emp,
+              secoes_diretas: secoesData,
+            };
+          } catch (err) {
+            // Se não encontrar seções na nova hierarquia, manter as antigas
+            const secoesAntigas: CenarioSecao[] = [];
+            emp.clientes?.forEach(cliente => {
+              cliente.secoes?.forEach(secao => {
+                if (secao.ativo) {
+                  secoesAntigas.push(secao);
+                }
+              });
+            });
+            return {
+              ...emp,
+              secoes_diretas: secoesAntigas,
+            };
+          }
+        })
+      );
+      
+      setEmpresas(empresasComSecoes);
       // Expandir todas as empresas por padrão
-      setExpandedEmpresas(new Set(data.map(e => e.id)));
+      setExpandedEmpresas(new Set(empresasComSecoes.map(e => e.id)));
       
       // Coletar todas as seções e notificar o pai
       if (onSecoesLoaded) {
         const todasSecoes: CenarioSecao[] = [];
-        data.forEach(empresa => {
-          empresa.clientes?.forEach(cliente => {
-            cliente.secoes?.forEach(secao => {
-              if (secao.ativo) {
-                todasSecoes.push(secao);
-              }
-            });
+        empresasComSecoes.forEach(empresa => {
+          empresa.secoes_diretas?.forEach(secao => {
+            if (secao.ativo) {
+              todasSecoes.push(secao);
+            }
           });
         });
         onSecoesLoaded(todasSecoes);
@@ -179,6 +231,63 @@ export function MasterDetailTree({
     }
   }, [token]);
 
+  // Carregar todos os CCs disponíveis
+  useEffect(() => {
+    if (token) {
+      centrosCustoApi.listar(token, { ativo: true })
+        .then(setTodosCCs)
+        .catch(console.error);
+    }
+  }, [token]);
+
+  // ============================================
+  // Carregar CCs de uma seção (associados via cenario_secao_cc)
+  // ============================================
+  
+  const carregarCCsSecao = useCallback(async (secaoId: string, forceReload = false) => {
+    if (!token || loadingCCs.has(secaoId)) return;
+    if (!forceReload && ccsPorSecao[secaoId]) return;
+    
+    setLoadingCCs(prev => new Set(prev).add(secaoId));
+    try {
+      // Buscar CCs associados a esta seção
+      const ccsAssociados = await secaoCentrosCusto.listar(token, cenarioId, secaoId);
+      
+      // Buscar quadro de pessoal para contar funções por CC
+      const quadro = await cenariosApi.getQuadro(token, cenarioId, { cenario_secao_id: secaoId });
+      
+      // Contar funções por CC
+      const ccCount = new Map<string, number>();
+      quadro.forEach((item: QuadroPessoal) => {
+        if (item.centro_custo_id && item.ativo) {
+          ccCount.set(item.centro_custo_id, (ccCount.get(item.centro_custo_id) || 0) + 1);
+        }
+      });
+      
+      // Converter para formato CCComContagem
+      const ccs: CCComContagem[] = ccsAssociados
+        .filter(assoc => assoc.centro_custo)
+        .map(assoc => ({
+          id: assoc.centro_custo!.id,
+          codigo: assoc.centro_custo!.codigo,
+          nome: assoc.centro_custo!.nome,
+          tipo: assoc.centro_custo!.tipo || 'OPERACIONAL',
+          qtdFuncoes: ccCount.get(assoc.centro_custo!.id) || 0,
+        }));
+      
+      setCCsPorSecao(prev => ({ ...prev, [secaoId]: ccs }));
+    } catch (err) {
+      console.error('Erro ao carregar CCs da seção:', err);
+      setCCsPorSecao(prev => ({ ...prev, [secaoId]: [] }));
+    } finally {
+      setLoadingCCs(prev => {
+        const next = new Set(prev);
+        next.delete(secaoId);
+        return next;
+      });
+    }
+  }, [token, cenarioId, loadingCCs, ccsPorSecao]);
+
   // ============================================
   // Handlers de expansão
   // ============================================
@@ -194,48 +303,20 @@ export function MasterDetailTree({
       return next;
     });
   };
-
-  const toggleCliente = (clienteId: string) => {
-    setExpandedClientes(prev => {
+  
+  const toggleSecao = (secaoId: string) => {
+    setExpandedSecoes(prev => {
       const next = new Set(prev);
-      if (next.has(clienteId)) {
-        next.delete(clienteId);
+      if (next.has(secaoId)) {
+        next.delete(secaoId);
       } else {
-        next.add(clienteId);
+        next.add(secaoId);
+        // Carregar CCs ao expandir
+        carregarCCsSecao(secaoId);
       }
       return next;
     });
   };
-
-  // ============================================
-  // Buscar clientes NW
-  // ============================================
-
-  const buscarClientesNW = async (busca: string) => {
-    if (!token || busca.length < 2) {
-      setClientesNW([]);
-      return;
-    }
-    setLoadingClientesNW(true);
-    try {
-      const data = await nwApi.getClientes(token, busca, true);
-      setClientesNW(data);
-    } catch (err) {
-      console.error("Erro ao buscar clientes NW:", err);
-    } finally {
-      setLoadingClientesNW(false);
-    }
-  };
-
-  // Debounce busca
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (buscaCliente.length >= 2) {
-        buscarClientesNW(buscaCliente);
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [buscaCliente]);
 
   // ============================================
   // Adicionar Empresa
@@ -258,7 +339,7 @@ export function MasterDetailTree({
 
   const handleDeleteEmpresa = async (empresa: CenarioEmpresa) => {
     if (!token) return;
-    if (!confirm(`Remover empresa "${empresa.empresa?.nome_fantasia || empresa.empresa?.razao_social}" e todos os seus clientes/seções?`)) {
+    if (!confirm(`Remover empresa "${empresa.empresa?.nome_fantasia || empresa.empresa?.razao_social}" e todas as suas seções?`)) {
       return;
     }
     try {
@@ -270,72 +351,22 @@ export function MasterDetailTree({
   };
 
   // ============================================
-  // Adicionar Cliente
+  // Adicionar Seção (Nova Hierarquia)
   // ============================================
 
-  const openAddCliente = (empresa: CenarioEmpresa) => {
+  const openAddSecao = (empresa: CenarioEmpresa) => {
     setEmpresaSelecionada(empresa);
-    setBuscaCliente("");
-    setClientesNW([]);
-    setSelectedClienteNW("");
-    setShowAddCliente(true);
-  };
-
-  const handleAddCliente = async () => {
-    if (!token || !empresaSelecionada || !selectedClienteNW) return;
-    const clienteNW = clientesNW.find(c => c.codigo === selectedClienteNW);
-    if (!clienteNW) return;
-    
-    setSaving(true);
-    try {
-      await cenariosApi.addCliente(token, cenarioId, empresaSelecionada.id, {
-        cliente_nw_codigo: clienteNW.codigo,
-        nome_cliente: clienteNW.razao_social || clienteNW.nome_fantasia
-      });
-      await carregarEstrutura();
-      setShowAddCliente(false);
-    } catch (err: any) {
-      alert(err.message || "Erro ao adicionar cliente");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDeleteCliente = async (empresa: CenarioEmpresa, cliente: CenarioCliente) => {
-    if (!token) return;
-    if (!confirm(`Remover cliente "${cliente.nome_cliente}" e todas as suas seções?`)) {
-      return;
-    }
-    try {
-      await cenariosApi.deleteCliente(token, cenarioId, empresa.id, cliente.id);
-      await carregarEstrutura();
-    } catch (err: any) {
-      alert(err.message || "Erro ao remover cliente");
-    }
-  };
-
-  // ============================================
-  // Adicionar Seção
-  // ============================================
-
-  const openAddSecao = (empresa: CenarioEmpresa, cliente: CenarioCliente) => {
-    setEmpresaSelecionada(empresa);
-    setClienteSelecionado(cliente);
     setSelectedSecaoIdModal("");
     setShowAddSecao(true);
   };
 
   const handleAddSecao = async () => {
-    if (!token || !empresaSelecionada || !clienteSelecionado || !selectedSecaoIdModal) return;
+    if (!token || !empresaSelecionada || !selectedSecaoIdModal) return;
     
     setSaving(true);
     try {
-      await cenariosApi.addSecao(token, cenarioId, empresaSelecionada.id, clienteSelecionado.id, {
-        secao_id: selectedSecaoIdModal
-      });
+      await secoesEmpresa.adicionar(token, cenarioId, empresaSelecionada.id, selectedSecaoIdModal);
       await carregarEstrutura();
-      // Expandir cliente para mostrar nova seção
-      setExpandedClientes(prev => new Set([...prev, clienteSelecionado.id]));
       setShowAddSecao(false);
     } catch (err: any) {
       alert(err.message || "Erro ao adicionar seção");
@@ -344,16 +375,33 @@ export function MasterDetailTree({
     }
   };
 
-  const handleDeleteSecao = async (empresa: CenarioEmpresa, cliente: CenarioCliente, secao: CenarioSecao) => {
+  const handleDeleteSecao = async (empresa: CenarioEmpresa, secao: CenarioSecao) => {
     if (!token) return;
     if (!confirm(`Remover seção "${secao.secao?.nome}"?`)) {
       return;
     }
     try {
-      await cenariosApi.deleteSecao(token, cenarioId, empresa.id, cliente.id, secao.id);
+      await secoesEmpresa.remover(token, cenarioId, empresa.id, secao.id);
       await carregarEstrutura();
     } catch (err: any) {
       alert(err.message || "Erro ao remover seção");
+    }
+  };
+
+  const handleAddCC = async () => {
+    if (!token || !secaoSelecionadaParaCC || !selectedCCIdModal) return;
+    
+    setSaving(true);
+    try {
+      await secaoCentrosCusto.adicionar(token, cenarioId, secaoSelecionadaParaCC.id, selectedCCIdModal);
+      // Recarregar CCs da seção
+      await carregarCCsSecao(secaoSelecionadaParaCC.id, true);
+      setShowAddCC(false);
+      setSelectedCCIdModal("");
+    } catch (err: any) {
+      alert(err.message || "Erro ao adicionar Centro de Custo");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -362,16 +410,8 @@ export function MasterDetailTree({
   // ============================================
 
   const calcularTotaisEmpresa = (empresa: CenarioEmpresa) => {
-    let totalClientes = empresa.clientes?.filter(c => c.ativo).length || 0;
-    let totalSecoes = 0;
-    empresa.clientes?.filter(c => c.ativo).forEach(cliente => {
-      totalSecoes += cliente.secoes?.filter(s => s.ativo).length || 0;
-    });
-    return { totalClientes, totalSecoes };
-  };
-
-  const calcularTotaisCliente = (cliente: CenarioCliente) => {
-    return cliente.secoes?.filter(s => s.ativo).length || 0;
+    const totalSecoes = empresa.secoes_diretas?.filter(s => s.ativo).length || 0;
+    return { totalSecoes };
   };
 
   // ============================================
@@ -381,6 +421,13 @@ export function MasterDetailTree({
   const empresasNaoAssociadas = empresasDisponiveis.filter(
     emp => !empresas.some(ce => ce.empresa_id === emp.id)
   );
+
+  // Filtrar seções não associadas à empresa selecionada
+  const secoesNaoAssociadas = secoesDisponiveis.filter(sec => {
+    if (!empresaSelecionada) return true;
+    const secoesAssociadas = empresaSelecionada.secoes_diretas || [];
+    return !secoesAssociadas.some(cs => cs.secao_id === sec.id);
+  });
 
   // ============================================
   // Render
@@ -438,7 +485,7 @@ export function MasterDetailTree({
               {empresas.map(empresa => {
                 const isExpanded = expandedEmpresas.has(empresa.id);
                 const totais = calcularTotaisEmpresa(empresa);
-                const clientes = empresa.clientes?.filter(c => c.ativo) || [];
+                const secoes = empresa.secoes_diretas?.filter(s => s.ativo) || [];
 
                 return (
                   <div key={empresa.id} className="select-none">
@@ -468,18 +515,18 @@ export function MasterDetailTree({
                         {truncateText(empresa.empresa?.nome_fantasia || empresa.empresa?.razao_social || "Empresa")}
                       </span>
                       <Badge variant="secondary" className="text-[9px] h-4 px-1">
-                        {totais.totalClientes}C/{totais.totalSecoes}S
+                        {totais.totalSecoes} seções
                       </Badge>
                       <div className="flex items-center gap-0.5">
                         <Button 
                           size="icon-xs" 
                           variant="ghost"
-                          className="h-5 w-5 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          className="h-5 w-5 text-green-600 hover:text-green-700 hover:bg-green-50"
                           onClick={(e) => {
                             e.stopPropagation();
-                            openAddCliente(empresa);
+                            openAddSecao(empresa);
                           }}
-                          title="Adicionar Cliente"
+                          title="Adicionar Seção"
                         >
                           <Plus className="h-3 w-3" />
                         </Button>
@@ -498,135 +545,160 @@ export function MasterDetailTree({
                       </div>
                     </div>
 
-                    {/* Clientes da Empresa */}
+                    {/* Seções da Empresa (Nova Hierarquia Simplificada) */}
                     {isExpanded && (
                       <div className="ml-4 border-l border-muted pl-1 mt-0.5 space-y-0.5">
-                        {clientes.length === 0 ? (
-                          <div className="text-xs text-muted-foreground py-2 px-2 italic">
-                            Nenhum cliente associado
+                        {secoes.length === 0 ? (
+                          <div 
+                            className="py-2 px-3 text-xs text-muted-foreground italic cursor-pointer hover:text-green-600 hover:bg-green-50/50 rounded transition-colors"
+                            onClick={() => openAddSecao(empresa)}
+                          >
+                            + Clique para adicionar seções (ex: CLARO, VIVO, CORPORATIVO)
                           </div>
                         ) : (
-                          clientes.map(cliente => {
-                            const isClienteExpanded = expandedClientes.has(cliente.id);
-                            const totalSecoes = calcularTotaisCliente(cliente);
-                            const secoes = cliente.secoes?.filter(s => s.ativo) || [];
-
+                          secoes.map(secao => {
+                            const isCorp = isCorporativo(secao.secao);
+                            const isSecaoExpanded = expandedSecoes.has(secao.id);
+                            const ccsSecao = ccsPorSecao[secao.id] || [];
+                            const isLoadingCCs = loadingCCs.has(secao.id);
+                            
                             return (
-                              <div key={cliente.id}>
-                                {/* Cliente */}
+                              <div key={secao.id}>
+                                {/* Seção */}
                                 <div 
                                   className={cn(
                                     "flex items-center gap-1 px-1.5 py-1 rounded-md cursor-pointer group",
-                                    "hover:bg-blue-50 hover:text-blue-700",
+                                    isCorp 
+                                      ? "hover:bg-purple-50 hover:text-purple-700" 
+                                      : "hover:bg-green-50 hover:text-green-700",
+                                    selectedSecaoId === secao.id && !selectedCCId && (isCorp ? "bg-purple-100 text-purple-800" : "bg-green-100 text-green-800"),
                                     "transition-colors"
                                   )}
+                                  onClick={() => toggleSecao(secao.id)}
                                 >
                                   <button 
-                                    onClick={() => toggleCliente(cliente.id)}
-                                    className="p-0.5 hover:bg-blue-100 rounded"
+                                    className="p-0.5 hover:bg-muted rounded"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleSecao(secao.id);
+                                    }}
                                   >
-                                    {secoes.length > 0 ? (
-                                      isClienteExpanded ? (
-                                        <ChevronDown className="h-3 w-3" />
-                                      ) : (
-                                        <ChevronRight className="h-3 w-3" />
-                                      )
+                                    {isSecaoExpanded ? (
+                                      <ChevronDown className="h-3 w-3" />
                                     ) : (
-                                      <div className="w-3" />
+                                      <ChevronRight className="h-3 w-3" />
                                     )}
                                   </button>
-                                  <Users className="h-3 w-3 text-blue-600" />
+                                  {isCorp ? (
+                                    <Building className="h-3 w-3 text-purple-600" />
+                                  ) : (
+                                    <FolderTree className="h-3 w-3 text-green-600" />
+                                  )}
                                   <span 
-                                    className="flex-1 text-xs"
-                                    title={cliente.nome_cliente || cliente.cliente_nw_codigo}
+                                    className="flex-1 text-xs font-medium"
+                                    title={secao.secao?.nome || "Seção"}
                                   >
-                                    {truncateText(cliente.nome_cliente || cliente.cliente_nw_codigo)}
+                                    {truncateText(secao.secao?.nome || "Seção", 18)}
                                   </span>
-                                  <Badge variant="outline" className="text-[9px] h-4 px-1">
-                                    {totalSecoes}S
+                                  {isCorp && (
+                                    <Badge variant="outline" className="text-[8px] h-3.5 px-1 bg-purple-50 text-purple-700 border-purple-200">
+                                      CORP
+                                    </Badge>
+                                  )}
+                                  <Badge variant="outline" className="text-[9px] h-4 px-1 font-mono">
+                                    {secao.secao?.codigo}
                                   </Badge>
-                                  <div className="flex items-center gap-0.5">
-                                    <Button 
-                                      size="icon-xs" 
-                                      variant="ghost"
-                                      className="h-5 w-5 text-green-600 hover:text-green-700 hover:bg-green-50"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        openAddSecao(empresa, cliente);
-                                      }}
-                                      title="Adicionar Seção"
-                                    >
-                                      <Plus className="h-3 w-3" />
-                                    </Button>
-                                    <Button 
-                                      size="icon-xs" 
-                                      variant="ghost"
-                                      className="h-5 w-5 text-red-500 hover:text-red-600 hover:bg-red-50"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDeleteCliente(empresa, cliente);
-                                      }}
-                                      title="Remover Cliente"
-                                    >
-                                      <Trash2 className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                </div>
-
-                                {/* Indicação para adicionar seção quando não há nenhuma */}
-                                {secoes.length === 0 && (
-                                  <div 
-                                    className="ml-10 py-2 px-3 text-xs text-muted-foreground italic cursor-pointer hover:text-green-600 hover:bg-green-50/50 rounded transition-colors"
-                                    onClick={() => openAddSecao(empresa, cliente)}
+                                  <Button 
+                                    size="icon-xs" 
+                                    variant="ghost"
+                                    className="h-5 w-5 text-red-500 hover:text-red-600 opacity-0 group-hover:opacity-100"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteSecao(empresa, secao);
+                                    }}
+                                    title="Remover Seção"
                                   >
-                                    + Clique aqui para adicionar uma seção
-                                  </div>
-                                )}
-
-                                {/* Seções do Cliente */}
-                                {isClienteExpanded && secoes.length > 0 && (
-                                  <div className="ml-4 border-l border-muted pl-1 mt-0.5 space-y-0.5">
-                                    {secoes.map(secao => (
-                                      <div 
-                                        key={secao.id}
-                                        className={cn(
-                                          "flex items-center gap-1 px-1.5 py-1 rounded-md cursor-pointer group",
-                                          "hover:bg-green-50 hover:text-green-700",
-                                          selectedSecaoId === secao.id && "bg-green-100 text-green-800",
-                                          "transition-colors"
+                                    <Trash2 className="h-2.5 w-2.5" />
+                                  </Button>
+                                </div>
+                                
+                                {/* Centros de Custo da Seção */}
+                                {isSecaoExpanded && (
+                                  <div className="ml-6 border-l border-muted pl-1 mt-0.5 space-y-0.5">
+                                    {isLoadingCCs ? (
+                                      <div className="py-2 px-3 text-xs text-muted-foreground flex items-center gap-2">
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                        Carregando projetos...
+                                      </div>
+                                    ) : (
+                                      <>
+                                        {ccsSecao.length === 0 ? (
+                                          <div className="py-1 px-3 text-xs text-muted-foreground italic">
+                                            Nenhum Centro de Custo adicionado
+                                          </div>
+                                        ) : (
+                                          ccsSecao.map(cc => (
+                                            <div 
+                                              key={cc.id}
+                                              className={cn(
+                                                "flex items-center gap-1 px-1.5 py-1 rounded-md cursor-pointer group",
+                                                "hover:bg-blue-50 hover:text-blue-700",
+                                                selectedCCId === cc.id && "bg-blue-100 text-blue-800",
+                                                "transition-colors"
+                                              )}
+                                              onClick={() => onNodeSelect?.({
+                                                type: 'centro_custo',
+                                                empresa,
+                                                secao,
+                                                centroCusto: {
+                                                  id: cc.id,
+                                                  codigo: cc.codigo,
+                                                  nome: cc.nome,
+                                                  tipo: cc.tipo as 'OPERACIONAL' | 'POOL' | 'ADMINISTRATIVO' | 'OVERHEAD',
+                                                  secao_id: null,
+                                                  codigo_totvs: null,
+                                                  cliente: null,
+                                                  contrato: null,
+                                                  uf: null,
+                                                  cidade: null,
+                                                  ativo: true,
+                                                  created_at: '',
+                                                  updated_at: ''
+                                                }
+                                              })}
+                                            >
+                                              <div className="w-3" />
+                                              <Briefcase className="h-3 w-3 text-blue-600" />
+                                              <span 
+                                                className="flex-1 text-xs"
+                                                title={cc.nome}
+                                              >
+                                                {truncateText(cc.nome, 16)}
+                                              </span>
+                                              <Badge variant="outline" className="text-[8px] h-3.5 px-1 bg-blue-50 text-blue-700 border-blue-200">
+                                                {cc.qtdFuncoes} {cc.qtdFuncoes === 1 ? 'função' : 'funções'}
+                                              </Badge>
+                                              <Badge variant="outline" className="text-[9px] h-4 px-1 font-mono">
+                                                {cc.codigo}
+                                              </Badge>
+                                            </div>
+                                          ))
                                         )}
-                                        onClick={() => onNodeSelect?.({
-                                          type: 'secao',
-                                          empresa,
-                                          cliente,
-                                          secao
-                                        })}
-                                      >
-                                        <div className="w-3" />
-                                        <FolderTree className="h-3 w-3 text-green-600" />
-                                        <span 
-                                          className="flex-1 text-xs"
-                                          title={secao.secao?.nome || "Seção"}
-                                        >
-                                          {truncateText(secao.secao?.nome || "Seção")}
-                                        </span>
-                                        <Badge variant="outline" className="text-[9px] h-4 px-1 font-mono">
-                                          {secao.secao?.codigo}
-                                        </Badge>
-                                        <Button 
-                                          size="icon-xs" 
-                                          variant="ghost"
-                                          className="h-5 w-5 text-red-500 hover:text-red-600"
+                                        {/* Botão Adicionar Centro de Custo */}
+                                        <div 
+                                          className="flex items-center gap-1 px-1.5 py-1 rounded-md cursor-pointer text-muted-foreground hover:text-orange-600 hover:bg-orange-50 transition-colors"
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            handleDeleteSecao(empresa, cliente, secao);
+                                            setSecaoSelecionadaParaCC(secao);
+                                            setShowAddCC(true);
                                           }}
-                                          title="Remover Seção"
                                         >
-                                          <Trash2 className="h-2.5 w-2.5" />
-                                        </Button>
-                                      </div>
-                                    ))}
+                                          <div className="w-3" />
+                                          <Plus className="h-3 w-3" />
+                                          <span className="text-xs">Adicionar Centro de Custo</span>
+                                        </div>
+                                      </>
+                                    )}
                                   </div>
                                 )}
                               </div>
@@ -645,11 +717,11 @@ export function MasterDetailTree({
 
       {/* Modal: Adicionar Empresa */}
       <Dialog open={showAddEmpresa} onOpenChange={setShowAddEmpresa}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Adicionar Empresa</DialogTitle>
             <DialogDescription>
-              Selecione uma empresa para adicionar ao cenário
+              Selecione uma empresa para adicionar ao cenário.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
@@ -660,7 +732,7 @@ export function MasterDetailTree({
               <SelectContent>
                 {empresasNaoAssociadas.map(emp => (
                   <SelectItem key={emp.id} value={emp.id}>
-                    {emp.nome_fantasia || emp.razao_social} ({emp.codigo})
+                    {emp.nome_fantasia || emp.razao_social}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -670,66 +742,10 @@ export function MasterDetailTree({
             <Button variant="outline" onClick={() => setShowAddEmpresa(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleAddEmpresa} disabled={!selectedEmpresaId || saving}>
-              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Adicionar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Modal: Adicionar Cliente */}
-      <Dialog open={showAddCliente} onOpenChange={setShowAddCliente}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Adicionar Cliente</DialogTitle>
-            <DialogDescription>
-              Busque um cliente do NW para adicionar à empresa {empresaSelecionada?.empresa?.nome_fantasia}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4 space-y-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Digite para buscar clientes..."
-                value={buscaCliente}
-                onChange={(e) => setBuscaCliente(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-            
-            {loadingClientesNW && (
-              <div className="flex items-center justify-center py-4">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
-            )}
-            
-            {!loadingClientesNW && clientesNW.length > 0 && (
-              <Select value={selectedClienteNW} onValueChange={setSelectedClienteNW}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um cliente..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {clientesNW.map(cli => (
-                    <SelectItem key={cli.codigo} value={cli.codigo}>
-                      {cli.razao_social || cli.nome_fantasia} ({cli.codigo})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-            
-            {!loadingClientesNW && buscaCliente.length >= 2 && clientesNW.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-2">
-                Nenhum cliente encontrado
-              </p>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddCliente(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleAddCliente} disabled={!selectedClienteNW || saving}>
+            <Button 
+              onClick={handleAddEmpresa} 
+              disabled={!selectedEmpresaId || saving}
+            >
               {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Adicionar
             </Button>
@@ -739,11 +755,15 @@ export function MasterDetailTree({
 
       {/* Modal: Adicionar Seção */}
       <Dialog open={showAddSecao} onOpenChange={setShowAddSecao}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Adicionar Seção</DialogTitle>
             <DialogDescription>
-              Selecione uma seção para o cliente {clienteSelecionado?.nome_cliente}
+              Selecione uma seção para adicionar à empresa {empresaSelecionada?.empresa?.nome_fantasia || empresaSelecionada?.empresa?.razao_social}.
+              <br />
+              <span className="text-purple-600 font-medium">
+                Seções CORPORATIVO aparecem destacadas.
+              </span>
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
@@ -751,22 +771,76 @@ export function MasterDetailTree({
               <SelectTrigger>
                 <SelectValue placeholder="Selecione uma seção..." />
               </SelectTrigger>
-              <SelectContent>
-                {secoesDisponiveis
-                  .filter(sec => !clienteSelecionado?.secoes?.some(s => s.secao_id === sec.id && s.ativo))
-                  .map(sec => (
-                    <SelectItem key={sec.id} value={sec.id}>
-                      {sec.nome} ({sec.codigo})
+              <SelectContent className="max-h-60">
+                {secoesNaoAssociadas.map(sec => {
+                  const isCorp = isCorporativo(sec);
+                  return (
+                    <SelectItem 
+                      key={sec.id} 
+                      value={sec.id}
+                      className={cn(isCorp && "text-purple-700 font-medium")}
+                    >
+                      {sec.codigo} - {sec.nome} {isCorp && "(CORPORATIVO)"}
                     </SelectItem>
-                  ))}
+                  );
+                })}
               </SelectContent>
             </Select>
+            
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddSecao(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleAddSecao} disabled={!selectedSecaoIdModal || saving}>
+            <Button 
+              onClick={handleAddSecao} 
+              disabled={!selectedSecaoIdModal || saving}
+            >
+              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Adicionar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Adicionar Centro de Custo */}
+      <Dialog open={showAddCC} onOpenChange={setShowAddCC}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Adicionar Centro de Custo</DialogTitle>
+            <DialogDescription>
+              Selecione um Centro de Custo para adicionar à seção {secaoSelecionadaParaCC?.secao?.nome}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Select value={selectedCCIdModal} onValueChange={setSelectedCCIdModal}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione um Centro de Custo..." />
+              </SelectTrigger>
+              <SelectContent className="max-h-60">
+                {todosCCs
+                  .filter(cc => {
+                    // Filtrar CCs já associados a esta seção
+                    const ccsAssociados = secaoSelecionadaParaCC ? ccsPorSecao[secaoSelecionadaParaCC.id] || [] : [];
+                    return !ccsAssociados.some(assoc => assoc.id === cc.id);
+                  })
+                  .map(cc => (
+                    <SelectItem key={cc.id} value={cc.id}>
+                      {cc.codigo} - {cc.nome}
+                    </SelectItem>
+                  ))
+                }
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddCC(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleAddCC} 
+              disabled={!selectedCCIdModal || saving}
+            >
               {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Adicionar
             </Button>
@@ -777,4 +851,4 @@ export function MasterDetailTree({
   );
 }
 
-
+export type { SelectedNode, NodeType };

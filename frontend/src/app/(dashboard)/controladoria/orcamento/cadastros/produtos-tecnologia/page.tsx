@@ -257,9 +257,9 @@ export default function ProdutosTecnologiaPage() {
     <div className="page-container">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="page-title">Produtos de Tecnologia</h1>
+          <h1 className="page-title">Itens de Custo</h1>
           <p className="text-sm text-muted-foreground">
-            Cadastro de produtos e soluções de tecnologia
+            Cadastro de itens de custo para orçamento
           </p>
         </div>
         <Button onClick={() => {

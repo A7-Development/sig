@@ -54,6 +54,19 @@ class SecaoBase(BaseModel):
     nome: str = Field(..., min_length=1, max_length=200)
     codigo_totvs: Optional[str] = Field(None, max_length=50)
     ativo: bool = True
+    
+    # Política de trabalho - dias da semana
+    trabalha_sabado: Decimal = Field(default=Decimal("0"), ge=0, le=1)  # 0=não, 0.5=meio período, 1=integral
+    trabalha_domingo: bool = False
+    
+    # Política de trabalho - feriados
+    trabalha_feriado_nacional: bool = False
+    trabalha_feriado_estadual: bool = False
+    trabalha_feriado_municipal: bool = False
+    
+    # Localização (para feriados estaduais/municipais)
+    uf: Optional[str] = Field(None, min_length=2, max_length=2)
+    cidade: Optional[str] = Field(None, max_length=100)
 
 
 class SecaoCreate(SecaoBase):
@@ -66,6 +79,15 @@ class SecaoUpdate(BaseModel):
     nome: Optional[str] = Field(None, min_length=1, max_length=200)
     codigo_totvs: Optional[str] = Field(None, max_length=50)
     ativo: Optional[bool] = None
+    
+    # Política de trabalho
+    trabalha_sabado: Optional[Decimal] = Field(None, ge=0, le=1)
+    trabalha_domingo: Optional[bool] = None
+    trabalha_feriado_nacional: Optional[bool] = None
+    trabalha_feriado_estadual: Optional[bool] = None
+    trabalha_feriado_municipal: Optional[bool] = None
+    uf: Optional[str] = Field(None, min_length=2, max_length=2)
+    cidade: Optional[str] = Field(None, max_length=100)
 
 
 class SecaoResponse(SecaoBase):
@@ -89,11 +111,12 @@ class CentroCustoBase(BaseModel):
     codigo: str = Field(..., min_length=1, max_length=50)
     nome: str = Field(..., min_length=1, max_length=200)
     codigo_totvs: Optional[str] = Field(None, max_length=50)
-    tipo: str = Field("OPERACIONAL", pattern="^(OPERACIONAL|ADMINISTRATIVO|OVERHEAD)$")
+    tipo: str = Field("OPERACIONAL", pattern="^(OPERACIONAL|ADMINISTRATIVO|OVERHEAD|POOL)$")
     cliente: Optional[str] = Field(None, max_length=200)
     contrato: Optional[str] = Field(None, max_length=100)
     uf: Optional[str] = Field(None, min_length=2, max_length=2)
     cidade: Optional[str] = Field(None, max_length=100)
+    area_m2: Optional[float] = Field(None, ge=0, description="Área em m² para rateio por área")
     ativo: bool = True
 
 
@@ -105,11 +128,12 @@ class CentroCustoUpdate(BaseModel):
     codigo: Optional[str] = Field(None, min_length=1, max_length=50)
     nome: Optional[str] = Field(None, min_length=1, max_length=200)
     codigo_totvs: Optional[str] = Field(None, max_length=50)
-    tipo: Optional[str] = Field(None, pattern="^(OPERACIONAL|ADMINISTRATIVO|OVERHEAD)$")
+    tipo: Optional[str] = Field(None, pattern="^(OPERACIONAL|ADMINISTRATIVO|OVERHEAD|POOL)$")
     cliente: Optional[str] = Field(None, max_length=200)
     contrato: Optional[str] = Field(None, max_length=100)
     uf: Optional[str] = Field(None, min_length=2, max_length=2)
     cidade: Optional[str] = Field(None, max_length=100)
+    area_m2: Optional[float] = Field(None, ge=0)
     ativo: Optional[bool] = None
 
 
@@ -251,7 +275,8 @@ class ProdutoTecnologiaBase(BaseModel):
     valor_unitario: Optional[float] = Field(None, ge=0, description="Valor unitário")
     valor_base: Optional[float] = Field(None, ge=0, description="Valor base/tabela do fornecedor (referência)")
     unidade_medida: Optional[str] = Field(None, max_length=30)
-    conta_contabil_id: Optional[UUID] = None
+    conta_contabil_codigo: Optional[str] = Field(None, max_length=50, description="Código da conta contábil (view NW)")
+    conta_contabil_descricao: Optional[str] = Field(None, max_length=255, description="Descrição da conta contábil")
     descricao: Optional[str] = None
     ativo: bool = True
 
@@ -265,7 +290,8 @@ class ProdutoTecnologiaCreate(BaseModel):
     valor_unitario: Optional[float] = Field(None, ge=0)
     valor_base: Optional[float] = Field(None, ge=0)
     unidade_medida: Optional[str] = Field(None, max_length=30)
-    conta_contabil_id: Optional[UUID] = None
+    conta_contabil_codigo: Optional[str] = Field(None, max_length=50)
+    conta_contabil_descricao: Optional[str] = Field(None, max_length=255)
     descricao: Optional[str] = None
     ativo: bool = True
 
@@ -278,7 +304,8 @@ class ProdutoTecnologiaUpdate(BaseModel):
     tipo_precificacao: Optional[str] = Field(None, max_length=30)
     valor_unitario: Optional[float] = Field(None, ge=0)
     unidade_medida: Optional[str] = Field(None, max_length=30)
-    conta_contabil_id: Optional[UUID] = None
+    conta_contabil_codigo: Optional[str] = Field(None, max_length=50)
+    conta_contabil_descricao: Optional[str] = Field(None, max_length=255)
     descricao: Optional[str] = None
     ativo: Optional[bool] = None
 
@@ -335,6 +362,8 @@ class TributoBase(BaseModel):
     codigo: str = Field(..., min_length=1, max_length=50)  # PIS, COFINS, ISS, CPREV
     nome: str = Field(..., min_length=1, max_length=200)
     aliquota: float = Field(..., ge=0, le=100)
+    conta_contabil_codigo: Optional[str] = Field(None, max_length=50)
+    conta_contabil_descricao: Optional[str] = Field(None, max_length=255)
     ordem: int = 0
     ativo: bool = True
 
@@ -348,6 +377,8 @@ class TributoUpdate(BaseModel):
     codigo: Optional[str] = Field(None, min_length=1, max_length=50)
     nome: Optional[str] = Field(None, min_length=1, max_length=200)
     aliquota: Optional[float] = Field(None, ge=0, le=100)
+    conta_contabil_codigo: Optional[str] = Field(None, max_length=50)
+    conta_contabil_descricao: Optional[str] = Field(None, max_length=255)
     ordem: Optional[int] = None
     ativo: Optional[bool] = None
 
@@ -686,41 +717,73 @@ class CenarioClienteResponse(CenarioClienteBase):
 
 
 # ============================================
-# CenÃ¡rio SeÃ§Ã£o (SeÃ§Ã£o do Cliente no CenÃ¡rio)
+# Cenário Seção (Seção do Cenário - Nova Hierarquia)
 # ============================================
+# NOVA HIERARQUIA: Cenário -> Empresa -> Seção (representa Cliente)
+# A Seção agora representa o "Cliente" (ex: CLARO, VIVO, CORPORATIVO)
 
 class CenarioSecaoBase(BaseModel):
-    cenario_cliente_id: UUID
+    cenario_cliente_id: Optional[UUID] = None  # Mantido para compatibilidade
+    cenario_empresa_id: Optional[UUID] = None  # Nova FK direta para empresa
     secao_id: UUID
     # Nota: fator_pa foi movido para QuadroPessoal (por função)
     ativo: bool = True
 
 
 class CenarioSecaoCreate(BaseModel):
+    """Schema para criar seção diretamente na empresa (nova hierarquia)."""
     secao_id: UUID
+    cenario_empresa_id: Optional[UUID] = None  # Preenchido automaticamente pela API
 
 
 class CenarioSecaoUpdate(BaseModel):
     ativo: Optional[bool] = None
 
 
-class CenarioSecaoResponse(CenarioSecaoBase):
+class CenarioSecaoResponse(BaseModel):
     id: UUID
+    cenario_cliente_id: Optional[UUID] = None
+    cenario_empresa_id: Optional[UUID] = None
+    secao_id: UUID
+    ativo: bool
     created_at: datetime
     updated_at: datetime
     secao: Optional["SecaoSimples"] = None
+    is_corporativo: bool = False  # Propriedade calculada
 
     class Config:
         from_attributes = True
 
 
 class CenarioClienteComSecoes(CenarioClienteResponse):
-    """Cliente do cenÃ¡rio com suas seÃ§Ãµes."""
+    """Cliente do cenário com suas seções (hierarquia antiga)."""
     secoes: List[CenarioSecaoResponse] = []
 
 
 # ============================================
-# CenÃ¡rio de OrÃ§amento
+# CenarioSecaoCC - Associação Seção-CC
+# ============================================
+
+class CenarioSecaoCCBase(BaseModel):
+    centro_custo_id: UUID
+
+class CenarioSecaoCCCreate(CenarioSecaoCCBase):
+    pass
+
+class CenarioSecaoCCResponse(BaseModel):
+    id: UUID
+    cenario_secao_id: UUID
+    centro_custo_id: UUID
+    ativo: bool
+    created_at: datetime
+    centro_custo: Optional["CentroCustoSimples"] = None
+    
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# Cenário de Orçamento
 # ============================================
 
 class CenarioBase(BaseModel):
@@ -823,7 +886,7 @@ class QuadroPessoalBase(BaseModel):
     cenario_id: UUID
     funcao_id: UUID
     secao_id: Optional[UUID] = None
-    centro_custo_id: Optional[UUID] = None
+    centro_custo_id: UUID = Field(..., description="Centro de Custo é obrigatório (projeto/pool)")
     tabela_salarial_id: Optional[UUID] = None
     cenario_secao_id: Optional[UUID] = None  # Referência para CenarioSecao (estrutura hierárquica)
     regime: str = Field("CLT", pattern="^(CLT|PJ)$")
@@ -1067,6 +1130,72 @@ class CustoTecnologiaResponse(CustoTecnologiaBase):
 class CustoTecnologiaComRelacionamentos(CustoTecnologiaResponse):
     produto: Optional["ProdutoTecnologiaResponse"] = None
     alocacao: Optional["AlocacaoTecnologiaResponse"] = None
+
+
+# ============================================
+# Custo Direto (Alocação por Centro de Custo)
+# ============================================
+
+class CustoDiretoBase(BaseModel):
+    cenario_id: UUID
+    cenario_secao_id: UUID
+    centro_custo_id: UUID
+    item_custo_id: UUID
+    
+    # Tipo de valor: FIXO, VARIAVEL, FIXO_VARIAVEL
+    tipo_valor: str = Field("FIXO", max_length=20, description="FIXO, VARIAVEL, FIXO_VARIAVEL")
+    
+    # Componente Fixo
+    valor_fixo: Optional[float] = Field(None, ge=0, description="Valor fixo mensal")
+    
+    # Componente Variável
+    valor_unitario_variavel: Optional[float] = Field(None, ge=0, description="Valor por unidade")
+    unidade_medida: Optional[str] = Field(None, max_length=20, description="HC, PA, UNIDADE")
+    funcao_base_id: Optional[UUID] = Field(None, description="Função base para cálculo variável (null = total do CC)")
+    tipo_medida: Optional[str] = Field(None, max_length=30, description="HC_TOTAL, HC_FUNCAO, PA_TOTAL, PA_FUNCAO")
+    
+    # Rateio
+    tipo_calculo: str = Field("manual", max_length=20, description="manual, rateio")
+    rateio_grupo_id: Optional[UUID] = None
+    rateio_percentual: Optional[float] = Field(None, ge=0, le=100)
+    
+    descricao: Optional[str] = None
+    ativo: bool = True
+
+
+class CustoDiretoCreate(CustoDiretoBase):
+    pass
+
+
+class CustoDiretoUpdate(BaseModel):
+    cenario_secao_id: Optional[UUID] = None
+    centro_custo_id: Optional[UUID] = None
+    item_custo_id: Optional[UUID] = None
+    tipo_valor: Optional[str] = Field(None, max_length=20)
+    valor_fixo: Optional[float] = Field(None, ge=0)
+    valor_unitario_variavel: Optional[float] = Field(None, ge=0)
+    unidade_medida: Optional[str] = Field(None, max_length=20)
+    funcao_base_id: Optional[UUID] = None
+    tipo_medida: Optional[str] = Field(None, max_length=30)
+    tipo_calculo: Optional[str] = Field(None, max_length=20)
+    rateio_grupo_id: Optional[UUID] = None
+    rateio_percentual: Optional[float] = Field(None, ge=0, le=100)
+    descricao: Optional[str] = None
+    ativo: Optional[bool] = None
+
+
+class CustoDiretoResponse(CustoDiretoBase):
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+    
+    # Relacionamentos
+    item_custo: Optional["ProdutoTecnologiaResponse"] = None
+    centro_custo: Optional["CentroCustoResponse"] = None
+    funcao_base: Optional["FuncaoResponse"] = None
+
+    class Config:
+        from_attributes = True
 
 
 # ============================================
@@ -1326,9 +1455,287 @@ class DREResponse(BaseModel):
     total_geral: float
 
 
+class DRELinhaPorCC(BaseModel):
+    """Linha do DRE com separação de custos diretos e indiretos."""
+    conta_contabil_codigo: str
+    conta_contabil_descricao: str
+    conta_contabil_completa: str
+    tipo_custo_codigo: Optional[str] = None
+    tipo_custo_nome: Optional[str] = None
+    categoria: str
+    origem: str  # "DIRETO" ou "INDIRETO"
+    valores_mensais: List[float]
+    total: float
+
+
+class DRECentroCusto(BaseModel):
+    """DRE de um Centro de Custo específico."""
+    centro_custo_id: UUID
+    centro_custo_codigo: str
+    centro_custo_nome: str
+    linhas_diretas: List[DRELinhaPorCC]
+    linhas_indiretas: List[DRELinhaPorCC]
+    total_receitas: float
+    total_custos_diretos: float
+    total_custos_indiretos: float
+    total_custos: float
+    margem: float  # Receitas - Custos
+    margem_percentual: float  # Margem / Receitas * 100
+
+
+class DREPorCCResponse(BaseModel):
+    """Resposta do DRE agrupado por Centro de Custo."""
+    cenario_id: UUID
+    ano: int
+    visao: str  # "por_cc", "comparativo", "margem"
+    centros_custo: List[DRECentroCusto]
+    consolidado: Optional[DRECentroCusto] = None  # Totais gerais
+
+
+# ============================================
+# Rateio de Custos (POOL -> OPERACIONAL)
+# ============================================
+
+class RateioDestinoBase(BaseModel):
+    """Destino de um rateio com percentual."""
+    cc_destino_id: UUID
+    percentual: float = Field(..., ge=0, le=100, description="Percentual do rateio (0-100)")
+
+
+class RateioDestinoCreate(RateioDestinoBase):
+    pass
+
+
+class RateioDestinoResponse(RateioDestinoBase):
+    id: UUID
+    rateio_grupo_id: UUID
+    created_at: datetime
+    cc_destino: Optional["CentroCustoSimples"] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RateioGrupoBase(BaseModel):
+    """Grupo de rateio para distribuir custos de CC POOL para CCs OPERACIONAIS."""
+    cc_origem_pool_id: UUID
+    nome: str = Field(..., min_length=1, max_length=200)
+    descricao: Optional[str] = None
+    tipo_rateio: str = Field("MANUAL", pattern="^(MANUAL|HC|AREA|PA)$", description="Tipo de rateio: MANUAL (percentuais definidos), HC (proporcional ao headcount), AREA (proporcional à área m²), PA (proporcional às PAs)")
+    ativo: bool = True
+
+
+class RateioGrupoCreate(RateioGrupoBase):
+    """Schema para criar grupo de rateio."""
+    destinos: List[RateioDestinoCreate] = Field(default_factory=list, description="Destinos do rateio com percentuais")
+
+
+class RateioGrupoUpdate(BaseModel):
+    """Schema para atualizar grupo de rateio."""
+    nome: Optional[str] = Field(None, min_length=1, max_length=200)
+    descricao: Optional[str] = None
+    tipo_rateio: Optional[str] = Field(None, pattern="^(MANUAL|HC|AREA|PA)$")
+    ativo: Optional[bool] = None
+
+
+class RateioGrupoResponse(RateioGrupoBase):
+    id: UUID
+    cenario_id: UUID
+    created_at: datetime
+    updated_at: datetime
+    cc_origem: Optional["CentroCustoSimples"] = None
+    destinos: List[RateioDestinoResponse] = []
+    percentual_total: float = 0  # Soma dos percentuais dos destinos
+
+    class Config:
+        from_attributes = True
+
+
+class RateioGrupoComValidacao(RateioGrupoResponse):
+    """Grupo de rateio com informação de validação."""
+    is_valido: bool = False  # True se percentual_total == 100
+    mensagem_validacao: Optional[str] = None
+
+
+# ============================================
+# CenarioEmpresa com Seções (Nova Hierarquia)
+# ============================================
+
+class CenarioEmpresaComSecoes(CenarioEmpresaResponse):
+    """Empresa do cenário com seções diretamente ligadas (nova hierarquia)."""
+    secoes_diretas: List[CenarioSecaoResponse] = []
+    empresa: Optional["EmpresaResponse"] = None
+
+
+# ============================================
+# Tipos de Receita
+# ============================================
+
+class TipoReceitaBase(BaseModel):
+    codigo: str = Field(..., min_length=1, max_length=50)
+    nome: str = Field(..., min_length=1, max_length=200)
+    descricao: Optional[str] = None
+    categoria: str = Field("OPERACIONAL", max_length=50, description="OPERACIONAL, FINANCEIRA, OUTRAS")
+    conta_contabil_codigo: Optional[str] = Field(None, max_length=50)
+    conta_contabil_descricao: Optional[str] = Field(None, max_length=255)
+    ordem: int = 0
+    ativo: bool = True
+
+
+class TipoReceitaCreate(BaseModel):
+    """Schema para criação - código é gerado automaticamente."""
+    nome: str = Field(..., min_length=1, max_length=200)
+    descricao: Optional[str] = None
+    categoria: str = Field("OPERACIONAL", max_length=50, description="OPERACIONAL, FINANCEIRA, OUTRAS")
+    conta_contabil_codigo: Optional[str] = Field(None, max_length=50)
+    conta_contabil_descricao: Optional[str] = Field(None, max_length=255)
+    ativo: bool = True
+
+
+class TipoReceitaUpdate(BaseModel):
+    """Schema para atualização - código não pode ser alterado."""
+    nome: Optional[str] = Field(None, min_length=1, max_length=200)
+    descricao: Optional[str] = None
+    categoria: Optional[str] = Field(None, max_length=50)
+    conta_contabil_codigo: Optional[str] = Field(None, max_length=50)
+    conta_contabil_descricao: Optional[str] = Field(None, max_length=255)
+    ativo: Optional[bool] = None
+
+
+class TipoReceitaResponse(TipoReceitaBase):
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TipoReceitaSimples(BaseModel):
+    """Versão simplificada para listagens."""
+    id: UUID
+    codigo: str
+    nome: str
+    categoria: str
+    
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# Receita Premissa Mes (Indicadores Mensais)
+# ============================================
+
+class ReceitaPremissaMesBase(BaseModel):
+    mes: int = Field(..., ge=1, le=12)
+    ano: int = Field(..., ge=2020, le=2100)
+    vopdu: float = Field(0, ge=0, description="Venda Operador Dia Útil")
+    indice_conversao: float = Field(0, ge=0, le=1, description="Índice de instalação/ativação (0-1)")
+    ticket_medio: float = Field(0, ge=0, description="Ticket médio em R$")
+    fator: float = Field(1, ge=0, description="Fator multiplicador")
+    indice_estorno: float = Field(0, ge=0, le=1, description="Índice de estorno (0-1)")
+
+
+class ReceitaPremissaMesCreate(ReceitaPremissaMesBase):
+    receita_cenario_id: Optional[UUID] = None  # Preenchido pela API
+
+
+class ReceitaPremissaMesUpdate(BaseModel):
+    vopdu: Optional[float] = Field(None, ge=0)
+    indice_conversao: Optional[float] = Field(None, ge=0, le=1)
+    ticket_medio: Optional[float] = Field(None, ge=0)
+    fator: Optional[float] = Field(None, ge=0)
+    indice_estorno: Optional[float] = Field(None, ge=0, le=1)
+
+
+class ReceitaPremissaMesResponse(ReceitaPremissaMesBase):
+    id: UUID
+    receita_cenario_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# Receita do Cenário
+# ============================================
+
+class ReceitaCenarioBase(BaseModel):
+    centro_custo_id: UUID
+    tipo_receita_id: UUID
+    tipo_calculo: str = Field("FIXA_CC", max_length=20, description="FIXA_CC, FIXA_HC, FIXA_PA, VARIAVEL")
+    funcao_pa_id: Optional[UUID] = Field(None, description="Função do PA (obrigatório para FIXA_PA e VARIAVEL)")
+    valor_fixo: Optional[float] = Field(None, ge=0, description="Valor fixo (por CC, HC ou PA)")
+    valor_minimo_pa: Optional[float] = Field(None, ge=0, description="Mínimo por PA (para VARIAVEL)")
+    valor_maximo_pa: Optional[float] = Field(None, ge=0, description="Máximo por PA (para VARIAVEL)")
+    descricao: Optional[str] = None
+    ativo: bool = True
+
+
+class ReceitaCenarioCreate(ReceitaCenarioBase):
+    cenario_id: Optional[UUID] = None  # Preenchido pela API
+    premissas: Optional[List[ReceitaPremissaMesCreate]] = Field(default_factory=list, description="Premissas mensais para VARIAVEL")
+
+
+class ReceitaCenarioUpdate(BaseModel):
+    centro_custo_id: Optional[UUID] = None
+    tipo_receita_id: Optional[UUID] = None
+    tipo_calculo: Optional[str] = Field(None, max_length=20)
+    funcao_pa_id: Optional[UUID] = None
+    valor_fixo: Optional[float] = Field(None, ge=0)
+    valor_minimo_pa: Optional[float] = Field(None, ge=0)
+    valor_maximo_pa: Optional[float] = Field(None, ge=0)
+    descricao: Optional[str] = None
+    ativo: Optional[bool] = None
+
+
+class ReceitaCenarioResponse(ReceitaCenarioBase):
+    id: UUID
+    cenario_id: UUID
+    created_at: datetime
+    updated_at: datetime
+    
+    # Relacionamentos
+    tipo_receita: Optional[TipoReceitaSimples] = None
+    centro_custo: Optional[CentroCustoSimples] = None
+    funcao_pa: Optional[FuncaoSimples] = None
+    premissas: List[ReceitaPremissaMesResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+class ReceitaPremissasBulkUpdate(BaseModel):
+    """Atualização em lote das premissas de uma receita."""
+    premissas: List[ReceitaPremissaMesCreate]
+
+
+# ============================================
+# Cálculo de Receita
+# ============================================
+
+class ReceitaCalculadaResponse(BaseModel):
+    """Receita calculada por mês."""
+    receita_cenario_id: UUID
+    mes: int
+    ano: int
+    valor_calculado: float
+    valor_bruto: Optional[float] = None  # Antes de limites min/max
+    hc_pa: Optional[float] = None
+    qtd_pa: Optional[float] = None
+    dias_uteis: Optional[int] = None
+    memoria_calculo: Optional[Dict[str, Any]] = None
+
+
 # Atualizar forward references
 DepartamentoComSecoes.model_rebuild()
 CenarioSecaoResponse.model_rebuild()
 CenarioClienteComSecoes.model_rebuild()
 CenarioEmpresaComClientes.model_rebuild()
+RateioDestinoResponse.model_rebuild()
+RateioGrupoResponse.model_rebuild()
+CenarioEmpresaComSecoes.model_rebuild()
+ReceitaCenarioResponse.model_rebuild()
 

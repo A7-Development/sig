@@ -41,19 +41,29 @@ import {
   Calculator,
   Pencil,
   PieChart,
+  Briefcase,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth-store";
 import { 
   cenariosApi,
   funcoesApi,
+  centrosCustoApi,
+  validacaoCenario,
   type CenarioEmpresa,
-  type CenarioCliente,
   type CenarioSecao,
   type QuadroPessoal,
   type Funcao,
+  type CentroCusto,
 } from "@/lib/api/orcamento";
 import { AddFuncaoModal, type AddFuncaoData } from "./AddFuncaoModal";
 import { v4 as uuidv4 } from "uuid";
+
+interface CCDisponivel {
+  id: string;
+  codigo: string;
+  nome: string;
+  tipo: string;
+}
 
 // ============================================
 // Tipos
@@ -62,9 +72,9 @@ import { v4 as uuidv4 } from "uuid";
 interface CapacityPlanningPanelProps {
   cenarioId: string;
   empresa: CenarioEmpresa;
-  cliente: CenarioCliente;
   secao: CenarioSecao;
   todasSecoes: CenarioSecao[];  // Para rateio entre seções
+  centroCusto?: CentroCusto;    // CC selecionado na árvore (filtra o quadro)
   anoInicio: number;
   mesInicio: number;
   anoFim: number;
@@ -81,9 +91,9 @@ const MESES_KEYS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set
 export function CapacityPlanningPanel({
   cenarioId,
   empresa,
-  cliente,
   secao,
   todasSecoes,
+  centroCusto,
   anoInicio,
   mesInicio,
   anoFim,
@@ -91,10 +101,18 @@ export function CapacityPlanningPanel({
 }: CapacityPlanningPanelProps) {
   const { accessToken: token } = useAuthStore();
   
-  const [quadro, setQuadro] = useState<QuadroPessoal[]>([]);
+  const [quadroCompleto, setQuadroCompleto] = useState<QuadroPessoal[]>([]);
   const [funcoes, setFuncoes] = useState<Funcao[]>([]);
+  const [centrosCustoDisponiveis, setCentrosCustoDisponiveis] = useState<CCDisponivel[]>([]);
+  const [todosCentrosCusto, setTodosCentrosCusto] = useState<CCDisponivel[]>([]);  // Todos os CCs para rateio
+  const [isCorporativo, setIsCorporativo] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Filtrar quadro pelo CC selecionado (se houver)
+  const quadro = centroCusto 
+    ? quadroCompleto.filter(q => q.centro_custo_id === centroCusto.id)
+    : quadroCompleto;
   
   // Modal adicionar função
   const [showAddFuncao, setShowAddFuncao] = useState(false);
@@ -137,11 +155,29 @@ export function CapacityPlanningPanel({
       // Carregar quadro de pessoal da seção
       const quadroData = await cenariosApi.getQuadro(token, cenarioId);
       const quadroSecao = quadroData.filter(q => q.cenario_secao_id === secao.id && q.ativo);
-      setQuadro(quadroSecao);
+      setQuadroCompleto(quadroSecao);
       
       // Carregar funções disponíveis
       const funcoesData = await funcoesApi.listar(token, { ativo: true });
       setFuncoes(funcoesData);
+      
+      // Carregar TODOS os centros de custo (sem validação de tipo)
+      try {
+        const todosCCsData = await centrosCustoApi.listar(token, { ativo: true });
+        const ccsFormatados = todosCCsData.map(cc => ({
+          id: cc.id,
+          codigo: cc.codigo,
+          nome: cc.nome,
+          tipo: cc.tipo || 'OPERACIONAL',
+        }));
+        setCentrosCustoDisponiveis(ccsFormatados);
+        setTodosCentrosCusto(ccsFormatados);
+        setIsCorporativo(false); // Não usar mais essa validação
+      } catch (err) {
+        console.warn("Não foi possível carregar CCs:", err);
+        setCentrosCustoDisponiveis([]);
+        setTodosCentrosCusto([]);
+      }
     } catch (err: any) {
       setError(err.message || "Erro ao carregar dados");
     } finally {
@@ -158,7 +194,7 @@ export function CapacityPlanningPanel({
   // ============================================
 
   const mesesPeriodo = useCallback(() => {
-    const meses: { ano: number; mes: number; label: string; key: string }[] = [];
+    const meses: { ano: number; mes: number; label: string; key: string; mesKey: string }[] = [];
     let ano = anoInicio;
     let mes = mesInicio;
     
@@ -167,7 +203,8 @@ export function CapacityPlanningPanel({
         ano,
         mes,
         label: `${MESES[mes - 1]}/${String(ano).slice(-2)}`,
-        key: MESES_KEYS[mes - 1]
+        key: `${ano}-${mes}`,  // Unique key for React
+        mesKey: MESES_KEYS[mes - 1]  // Key for database field access (jan, fev, etc.)
       });
       
       mes++;
@@ -188,25 +225,34 @@ export function CapacityPlanningPanel({
     if (!token) return;
     
     try {
-      if (data.tipo_calculo === "rateio" && data.rateio_secoes && data.rateio_secoes.length > 0) {
-        // RATEIO: Criar uma entrada para cada seção participante
+      if (data.tipo_calculo === "rateio" && data.rateio_ccs && data.rateio_ccs.length > 0) {
+        // RATEIO entre CCs: Criar uma entrada para cada CC participante
         const grupoId = uuidv4();
         const qtdTotal = data.rateio_qtd_total || 1;
         
-        for (const rateioSecao of data.rateio_secoes) {
+        for (const rateioCC of data.rateio_ccs) {
           // Calcular quantidade rateada: total * percentual / 100
-          const qtdRateada = qtdTotal * (rateioSecao.percentual / 100);
+          const qtdRateada = qtdTotal * (rateioCC.percentual / 100);
           
           await cenariosApi.addQuadro(token, cenarioId, {
             cenario_id: cenarioId,
             funcao_id: data.funcao_id,
-            cenario_secao_id: rateioSecao.secaoId,
+            cenario_secao_id: secao.id,  // Mantém a seção atual
+            centro_custo_id: rateioCC.ccId,  // Varia por CC
+            secao_id: null,
+            tabela_salarial_id: null,
             fator_pa: data.fator_pa,
             regime: "CLT",
             tipo_calculo: "rateio",
             rateio_grupo_id: grupoId,
-            rateio_percentual: rateioSecao.percentual,
+            rateio_percentual: rateioCC.percentual,
             rateio_qtd_total: qtdTotal,
+            span: null,
+            span_ratio: null,
+            span_funcoes_base_ids: null,
+            salario_override: null,
+            observacao: null,
+            ativo: true,
             // Aplicar quantidade rateada em todos os meses
             qtd_jan: qtdRateada, qtd_fev: qtdRateada, qtd_mar: qtdRateada, qtd_abr: qtdRateada,
             qtd_mai: qtdRateada, qtd_jun: qtdRateada, qtd_jul: qtdRateada, qtd_ago: qtdRateada,
@@ -219,11 +265,21 @@ export function CapacityPlanningPanel({
           cenario_id: cenarioId,
           funcao_id: data.funcao_id,
           cenario_secao_id: secao.id,
+          centro_custo_id: data.centro_custo_id,
+          secao_id: null,
+          tabela_salarial_id: null,
           fator_pa: data.fator_pa,
           regime: "CLT",
           tipo_calculo: data.tipo_calculo,
+          span: null,
           span_ratio: data.span_ratio || null,
           span_funcoes_base_ids: data.span_funcoes_base_ids || null,
+          rateio_grupo_id: null,
+          rateio_percentual: null,
+          rateio_qtd_total: null,
+          salario_override: null,
+          observacao: null,
+          ativo: true,
           qtd_jan: 0, qtd_fev: 0, qtd_mar: 0, qtd_abr: 0,
           qtd_mai: 0, qtd_jun: 0, qtd_jul: 0, qtd_ago: 0,
           qtd_set: 0, qtd_out: 0, qtd_nov: 0, qtd_dez: 0,
@@ -283,7 +339,7 @@ export function CapacityPlanningPanel({
     
     try {
       await cenariosApi.updateQuadro(token, cenarioId, quadroItem.id, { fator_pa: novoFator });
-      setQuadro(prev => prev.map(q => 
+      setQuadroCompleto(prev => prev.map(q => 
         q.id === quadroItem.id ? { ...q, fator_pa: novoFator } : q
       ));
     } catch (err: any) {
@@ -318,9 +374,10 @@ export function CapacityPlanningPanel({
   // Funções não utilizadas nesta seção
   // ============================================
 
-  const funcoesNaoUtilizadas = funcoes.filter(
-    f => !quadro.some(q => q.funcao_id === f.id)
-  );
+  // Funções disponíveis: permite a mesma função em diferentes CCs
+  // A unicidade agora é por (função_id + centro_custo_id)
+  // Aqui mostramos todas as funções, pois o usuário pode usar a mesma função em outro CC
+  const funcoesNaoUtilizadas = funcoes.filter(f => f.ativo !== false);
 
   const meses = mesesPeriodo();
 
@@ -362,27 +419,44 @@ export function CapacityPlanningPanel({
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <FolderTree className="h-5 w-5 text-green-600" />
-              <CardTitle className="text-lg">{secao.secao?.nome}</CardTitle>
+              {centroCusto ? (
+                <Briefcase className="h-5 w-5 text-blue-600" />
+              ) : (
+                <FolderTree className="h-5 w-5 text-green-600" />
+              )}
+              <CardTitle className="text-lg">
+                {centroCusto ? centroCusto.nome : secao.secao?.nome}
+              </CardTitle>
               <Badge variant="outline" className="font-mono text-xs">
-                {secao.secao?.codigo}
+                {centroCusto ? centroCusto.codigo : secao.secao?.codigo}
               </Badge>
+              {centroCusto && (
+                <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">
+                  {centroCusto.tipo}
+                </Badge>
+              )}
             </div>
-            <CardDescription className="flex items-center gap-4">
-              <span className="flex items-center gap-1">
-                <Users className="h-3 w-3" />
-                {cliente.nome_cliente}
-              </span>
+            <CardDescription className="flex items-center gap-4 flex-wrap">
               <span className="flex items-center gap-1">
                 <Building2 className="h-3 w-3" />
                 {empresa.empresa?.nome_fantasia || empresa.empresa?.razao_social}
               </span>
+              <span className="flex items-center gap-1 text-green-600">
+                <FolderTree className="h-3 w-3" />
+                {secao.secao?.nome}
+              </span>
+              {secao.is_corporativo && (
+                <Badge variant="outline" className="bg-orange-100 text-orange-600 text-xs">
+                  CORPORATIVO
+                </Badge>
+              )}
             </CardDescription>
           </div>
           <Button 
             size="sm" 
             onClick={() => setShowAddFuncao(true)}
-            disabled={funcoesNaoUtilizadas.length === 0}
+            disabled={funcoesNaoUtilizadas.length === 0 || !centroCusto}
+            title={!centroCusto ? "Selecione um Centro de Custo na árvore para adicionar funções" : undefined}
           >
             <Plus className="h-4 w-4 mr-1" />
             Função
@@ -392,10 +466,18 @@ export function CapacityPlanningPanel({
 
       {/* Tabela de Quadro */}
       <CardContent className="flex-1 overflow-auto p-0">
-        {quadro.length === 0 ? (
+        {!centroCusto ? (
+          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+            <Briefcase className="h-12 w-12 mb-3 opacity-30" />
+            <p className="text-sm font-medium">Selecione um Centro de Custo</p>
+            <p className="text-xs mt-1 max-w-sm text-center">
+              Expanda esta seção na árvore e clique em um Centro de Custo para visualizar e gerenciar o quadro de pessoal
+            </p>
+          </div>
+        ) : quadro.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
             <Calculator className="h-12 w-12 mb-3 opacity-30" />
-            <p className="text-sm">Nenhuma função configurada nesta seção</p>
+            <p className="text-sm">Nenhuma função configurada neste Centro de Custo</p>
             <p className="text-xs mt-1">Clique em "+ Função" para adicionar</p>
           </div>
         ) : (
@@ -421,10 +503,15 @@ export function CapacityPlanningPanel({
                     <TableCell className="sticky left-0 bg-background z-10 font-medium text-[10px]">
                       <div className="flex flex-col gap-0.5">
                         <span className="truncate leading-tight">{item.funcao?.nome}</span>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 flex-wrap">
                           <span className="text-[9px] text-muted-foreground font-mono">
                             {item.funcao?.codigo}
                           </span>
+                          {item.centro_custo && (
+                            <Badge variant="outline" className="text-[8px] h-3.5 px-1 bg-green-50 text-green-700 border-green-200">
+                              {item.centro_custo.codigo}
+                            </Badge>
+                          )}
                           {item.tipo_calculo === 'span' && (
                             <Badge variant="outline" className="text-[8px] h-3.5 px-1 bg-blue-50 text-blue-700 border-blue-200">
                               SPAN
@@ -456,9 +543,10 @@ export function CapacityPlanningPanel({
                       />
                     </TableCell>
                     {meses.map((m, mesIndex) => {
-                      const key = m.key;
-                      const valor = item[`qtd_${key}` as keyof QuadroPessoal] as number || 0;
-                      const isEditing = editingCell?.id === item.id && editingCell?.mes === key;
+                      const uniqueKey = m.key;  // Unique key for React (2025-1)
+                      const mesKey = m.mesKey;  // Key for DB field access (jan, fev)
+                      const valor = item[`qtd_${mesKey}` as keyof QuadroPessoal] as number || 0;
+                      const isEditing = editingCell?.id === item.id && editingCell?.mes === mesKey;
                       const isSpan = item.tipo_calculo === 'span';
                       const isRateio = item.tipo_calculo === 'rateio';
                       const isCalculado = isSpan || isRateio; // Não editável se calculado
@@ -474,7 +562,7 @@ export function CapacityPlanningPanel({
                         for (let i = mesIndex + 1; i < meses.length; i++) {
                           const nextItem = quadro[itemIndex];
                           if (nextItem && nextItem.tipo_calculo === 'manual') {
-                            return { id: nextItem.id, mes: meses[i].key };
+                            return { id: nextItem.id, mes: meses[i].mesKey };
                           }
                         }
                         
@@ -482,7 +570,7 @@ export function CapacityPlanningPanel({
                         for (let row = itemIndex + 1; row < quadro.length; row++) {
                           const nextItem = quadro[row];
                           if (nextItem && nextItem.tipo_calculo === 'manual') {
-                            return { id: nextItem.id, mes: meses[0].key };
+                            return { id: nextItem.id, mes: meses[0].mesKey };
                           }
                         }
                         
@@ -490,7 +578,7 @@ export function CapacityPlanningPanel({
                       };
                       
                       return (
-                        <TableCell key={`${item.id}-${key}`} className="text-center p-1">
+                        <TableCell key={`${item.id}-${uniqueKey}`} className="text-center p-1">
                           {isSpan ? (
                             // Célula somente leitura para SPAN
                             <div 
@@ -519,11 +607,11 @@ export function CapacityPlanningPanel({
                                 const newValue = e.target.value.replace(/[^0-9]/g, '');
                                 setEditValue(newValue);
                               }}
-                              onBlur={() => handleCellEdit(item, key, parseInt(editValue) || 0)}
+                              onBlur={() => handleCellEdit(item, mesKey, parseInt(editValue) || 0)}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter' || e.key === 'Tab') {
                                   e.preventDefault();
-                                  handleCellEdit(item, key, parseInt(editValue) || 0, getNextCell());
+                                  handleCellEdit(item, mesKey, parseInt(editValue) || 0, getNextCell());
                                 } else if (e.key === 'Escape') {
                                   setEditingCell(null);
                                 }
@@ -534,7 +622,7 @@ export function CapacityPlanningPanel({
                             <button
                               className="w-full h-6 hover:bg-muted/50 rounded text-[10px] font-mono"
                               onClick={() => {
-                                setEditingCell({ id: item.id, mes: key });
+                                setEditingCell({ id: item.id, mes: mesKey });
                                 setEditValue(String(valor));
                               }}
                             >
@@ -569,7 +657,7 @@ export function CapacityPlanningPanel({
                 <TableCell></TableCell>
                 {meses.map(m => (
                   <TableCell key={`total-${m.key}`} className="text-center">
-                    <span className="text-[10px] font-semibold">{calcularTotalMes(m.key).toFixed(2)}</span>
+                    <span className="text-[10px] font-semibold">{calcularTotalMes(m.mesKey).toFixed(2)}</span>
                   </TableCell>
                 ))}
                 <TableCell className="text-center bg-muted/50">
@@ -586,11 +674,11 @@ export function CapacityPlanningPanel({
                 <TableCell></TableCell>
                 {meses.map(m => (
                   <TableCell key={`pa-${m.key}`} className="text-center">
-                    <span className="text-[10px] font-mono text-orange-700">{calcularPAsMes(m.key).toFixed(1)}</span>
+                    <span className="text-[10px] font-mono text-orange-700">{calcularPAsMes(m.mesKey).toFixed(1)}</span>
                   </TableCell>
                 ))}
                 <TableCell className="text-center bg-orange-100">
-                  <span className="text-[10px] font-semibold text-orange-700">{meses.reduce((sum, m) => sum + calcularPAsMes(m.key), 0).toFixed(1)}</span>
+                  <span className="text-[10px] font-semibold text-orange-700">{meses.reduce((sum, m) => sum + calcularPAsMes(m.mesKey), 0).toFixed(1)}</span>
                 </TableCell>
                 <TableCell></TableCell>
               </TableRow>
@@ -609,6 +697,15 @@ export function CapacityPlanningPanel({
         secaoAtual={secao}
         todasSecoes={todasSecoes}
         cenarioId={cenarioId}
+        centrosCustoDisponiveis={centrosCustoDisponiveis}
+        todosCentrosCusto={todosCentrosCusto}
+        isCorporativo={isCorporativo}
+        centroCustoPreSelecionado={centroCusto ? {
+          id: centroCusto.id,
+          codigo: centroCusto.codigo,
+          nome: centroCusto.nome,
+          tipo: centroCusto.tipo,
+        } : undefined}
       />
     </Card>
   );

@@ -25,9 +25,32 @@ export interface Secao {
   codigo_totvs: string | null;
   nome: string;
   ativo: boolean;
+  
+  // Política de trabalho - dias da semana
+  trabalha_sabado: number;  // 0=não, 0.5=meio período, 1=integral
+  trabalha_domingo: boolean;
+  
+  // Política de trabalho - feriados
+  trabalha_feriado_nacional: boolean;
+  trabalha_feriado_estadual: boolean;
+  trabalha_feriado_municipal: boolean;
+  
+  // Localização (para feriados estaduais/municipais)
+  uf: string | null;
+  cidade: string | null;
+  
   created_at: string;
   updated_at: string;
   departamento?: Departamento;
+}
+
+export interface DiasUteisSecao {
+  ano: number;
+  mes: number;
+  dias_uteis: number;
+  secao_id: string;
+  secao_codigo: string;
+  secao_nome: string;
 }
 
 export interface CentroCusto {
@@ -35,11 +58,13 @@ export interface CentroCusto {
   codigo: string;
   codigo_totvs: string | null;
   nome: string;
-  tipo: 'OPERACIONAL' | 'ADMINISTRATIVO' | 'OVERHEAD';
+  tipo: 'OPERACIONAL' | 'ADMINISTRATIVO' | 'OVERHEAD' | 'POOL';
+  secao_id: string | null;
   cliente: string | null;
   contrato: string | null;
   uf: string | null;
   cidade: string | null;
+  area_m2: number | null;  // Área em m² para rateio por área
   ativo: boolean;
   created_at: string;
   updated_at: string;
@@ -209,6 +234,16 @@ export interface ClienteNW {
   cnpj: string | null;
 }
 
+export interface ContaContabilNW {
+  codigo: string;
+  descricao: string;
+  nivel1: string | null;
+  nivel2: string | null;
+  nivel3: string | null;
+  nivel4: string | null;
+  nivel5: string | null;
+}
+
 export const nwApi = {
   getEmpresas: (token: string, busca?: string) =>
     api.get<EmpresaNW[]>(`/api/v1/orcamento/nw/empresas${busca ? `?busca=${busca}` : ''}`, token),
@@ -225,6 +260,16 @@ export const nwApi = {
   
   getCliente: (token: string, codigo: string) =>
     api.get<ClienteNW>(`/api/v1/orcamento/nw/clientes/${codigo}`, token),
+
+  getContasContabeis: (token: string, busca?: string, limit: number = 100) => {
+    const params = new URLSearchParams();
+    if (busca) params.set('busca', busca);
+    params.set('limit', String(limit));
+    return api.get<ContaContabilNW[]>(`/api/v1/orcamento/nw/contas-contabeis?${params.toString()}`, token);
+  },
+  
+  getContaContabil: (token: string, codigo: string) =>
+    api.get<ContaContabilNW>(`/api/v1/orcamento/nw/contas-contabeis/${codigo}`, token),
 };
 
 // ============================================
@@ -288,6 +333,22 @@ export const secoesApi = {
       { codigos },
       token
     ),
+  
+  /**
+   * Calcula os dias úteis por mês para uma seção específica.
+   * Considera política de trabalho da seção (sábados, domingos, feriados).
+   */
+  diasUteis: (
+    token: string, 
+    secaoId: string, 
+    anoInicio: number, 
+    mesInicio: number, 
+    anoFim: number, 
+    mesFim: number
+  ) => api.get<DiasUteisSecao[]>(
+    `/api/v1/orcamento/receitas/dias-uteis-secao?secao_id=${secaoId}&ano_inicio=${anoInicio}&mes_inicio=${mesInicio}&ano_fim=${anoFim}&mes_fim=${mesFim}`,
+    token
+  ),
 };
 
 // ============================================
@@ -556,6 +617,8 @@ export interface Tributo {
   codigo: string;
   nome: string;
   aliquota: number;
+  conta_contabil_codigo: string | null;
+  conta_contabil_descricao: string | null;
   ordem: number;
   ativo: boolean;
   created_at: string;
@@ -709,13 +772,15 @@ export interface FuncaoSpan {
 
 export interface CenarioSecao {
   id: string;
-  cenario_cliente_id: string;
+  cenario_cliente_id: string | null;  // FK antiga (hierarquia cliente)
+  cenario_empresa_id: string | null;  // FK nova (hierarquia simplificada)
   secao_id: string;
   // Nota: fator_pa foi movido para QuadroPessoal
   ativo: boolean;
   created_at: string;
   updated_at: string;
   secao?: Secao;
+  is_corporativo?: boolean;  // Indica se a seção é CORPORATIVO
 }
 
 export interface CenarioCliente {
@@ -735,7 +800,8 @@ export interface CenarioEmpresa {
   empresa_id: string;
   created_at: string;
   empresa?: Empresa;
-  clientes?: CenarioCliente[];
+  clientes?: CenarioCliente[];  // Hierarquia antiga
+  secoes_diretas?: CenarioSecao[];  // Nova hierarquia: Empresa -> Seção
 }
 
 export interface CenarioEmpresaCreate {
@@ -817,12 +883,13 @@ export const cenariosApi = {
     api.post<Cenario>(`/api/v1/orcamento/cenarios/${id}/duplicar?novo_codigo=${encodeURIComponent(novoCodigo)}&novo_nome=${encodeURIComponent(novoNome)}`, {}, token),
   
   // Quadro de Pessoal
-  getQuadro: (token: string, cenarioId: string, params?: { funcao_id?: string; secao_id?: string; centro_custo_id?: string; regime?: string }) => {
+  getQuadro: (token: string, cenarioId: string, params?: { funcao_id?: string; secao_id?: string; centro_custo_id?: string; regime?: string; cenario_secao_id?: string }) => {
     const queryParams = new URLSearchParams();
     if (params?.funcao_id) queryParams.set('funcao_id', params.funcao_id);
     if (params?.secao_id) queryParams.set('secao_id', params.secao_id);
     if (params?.centro_custo_id) queryParams.set('centro_custo_id', params.centro_custo_id);
     if (params?.regime) queryParams.set('regime', params.regime);
+    if (params?.cenario_secao_id) queryParams.set('cenario_secao_id', params.cenario_secao_id);
     const query = queryParams.toString();
     return api.get<QuadroPessoal[]>(`/api/v1/orcamento/cenarios/${cenarioId}/quadro${query ? `?${query}` : ''}`, token);
   },
@@ -871,7 +938,7 @@ export const cenariosApi = {
   calcularSpans: (token: string, cenarioId: string, aplicar: boolean = false) => {
     const params = new URLSearchParams();
     if (aplicar) params.set('aplicar', 'true');
-    return api.post<{ aplicado: boolean; quantidades?: Record<string, number>; criadas?: number; atualizadas?: number; erros?: string[] }>(
+    return api.post<{ aplicado: boolean; quantidades?: Record<string, number>; criadas?: number; atualizadas?: number; erros?: string[]; total_funcoes?: number; total_meses?: number }>(
       `/api/v1/orcamento/cenarios/${cenarioId}/calcular-spans?${params.toString()}`,
       {},
       token
@@ -1025,6 +1092,59 @@ export interface DREResponse {
   total_geral: number;
 }
 
+// DRE por Centro de Custo
+export interface DRELinhaPorCC {
+  conta_contabil_codigo: string;
+  conta_contabil_descricao: string;
+  conta_contabil_completa: string;
+  tipo_custo_codigo: string | null;
+  tipo_custo_nome: string | null;
+  categoria: string;
+  origem: 'DIRETO' | 'INDIRETO';
+  valores_mensais: number[];
+  total: number;
+}
+
+export interface DRECentroCusto {
+  centro_custo_id: string;
+  centro_custo_codigo: string;
+  centro_custo_nome: string;
+  linhas_diretas: DRELinhaPorCC[];
+  linhas_indiretas: DRELinhaPorCC[];
+  total_receitas: number;
+  total_custos_diretos: number;
+  total_custos_indiretos: number;
+  total_custos: number;
+  margem: number;
+  margem_percentual: number;
+}
+
+export interface DREPorCCResponse {
+  cenario_id: string;
+  ano: number;
+  visao: string;
+  centros_custo: DRECentroCusto[];
+  consolidado: DRECentroCusto | null;
+}
+
+// Validação de Configuração
+export interface ValidacaoItem {
+  tipo: 'erro' | 'aviso';
+  categoria: string;
+  titulo: string;
+  descricao: string;
+  funcoes_afetadas: string[];
+  hc_total_afetado: number;
+}
+
+export interface ValidacaoResponse {
+  tem_erros: boolean;
+  tem_avisos: boolean;
+  total_hc_sem_politica: number;
+  total_funcoes_sem_politica: number;
+  items: ValidacaoItem[];
+}
+
 // API de Custos
 export const custosApi = {
   // Tipos de custo (rubricas)
@@ -1085,6 +1205,25 @@ export const custosApi = {
     if (ano) params.append('ano', ano.toString());
     return api.get<DREResponse>(
       `/api/v1/orcamento/custos/cenarios/${cenarioId}/dre?${params}`, token
+    );
+  },
+
+  // DRE por Centro de Custo
+  drePorCC: (token: string, cenarioId: string, ano?: number, centroCustoId?: string) => {
+    const params = new URLSearchParams();
+    if (ano) params.append('ano', ano.toString());
+    if (centroCustoId) params.append('centro_custo_id', centroCustoId);
+    return api.get<DREPorCCResponse>(
+      `/api/v1/orcamento/custos/cenarios/${cenarioId}/dre-por-cc?${params}`, token
+    );
+  },
+
+  // Validar configuração do cenário
+  validar: (token: string, cenarioId: string, cenarioSecaoId?: string) => {
+    const params = new URLSearchParams();
+    if (cenarioSecaoId) params.append('cenario_secao_id', cenarioSecaoId);
+    return api.get<ValidacaoResponse>(
+      `/api/v1/orcamento/custos/cenarios/${cenarioId}/validar?${params}`, token
     );
   },
   
@@ -1203,7 +1342,8 @@ export interface ProdutoTecnologia {
   categoria: string;
   valor_base?: number | null;
   unidade_medida?: string | null;
-  conta_contabil_id?: string | null;
+  conta_contabil_codigo?: string | null;
+  conta_contabil_descricao?: string | null;
   descricao?: string | null;
   ativo: boolean;
   created_at: string;
@@ -1218,7 +1358,8 @@ export interface ProdutoTecnologiaCreate {
   categoria: string;
   valor_base?: number | null;
   unidade_medida?: string | null;
-  conta_contabil_id?: string | null;
+  conta_contabil_codigo?: string | null;
+  conta_contabil_descricao?: string | null;
   descricao?: string | null;
   ativo?: boolean;
 }
@@ -1332,6 +1473,482 @@ export const alocacoesTecnologia = {
   // Excluir
   excluir: (token: string, id: string, softDelete: boolean = true) => {
     return api.delete<void>(`/api/v1/orcamento/alocacoes/${id}?soft_delete=${softDelete}`, token);
+  },
+};
+
+// ============================================
+// Custo Direto (Alocação por Centro de Custo)
+// ============================================
+
+export type TipoValorCusto = 'FIXO' | 'VARIAVEL' | 'FIXO_VARIAVEL';
+export type UnidadeMedidaCusto = 'HC' | 'PA' | 'UNIDADE';
+export type TipoMedidaCusto = 'HC_TOTAL' | 'HC_FUNCAO' | 'PA_TOTAL' | 'PA_FUNCAO' | 'QUANTIDADE_FIXA';
+
+export interface CustoDireto {
+  id: string;
+  cenario_id: string;
+  cenario_secao_id: string;
+  centro_custo_id: string;
+  item_custo_id: string;
+  tipo_valor: TipoValorCusto;
+  valor_fixo: number | null;
+  valor_unitario_variavel: number | null;
+  unidade_medida: UnidadeMedidaCusto | null;
+  funcao_base_id: string | null;
+  tipo_medida: TipoMedidaCusto | null;
+  tipo_calculo: 'manual' | 'rateio';
+  rateio_grupo_id: string | null;
+  rateio_percentual: number | null;
+  descricao: string | null;
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+  item_custo?: ProdutoTecnologia;
+  centro_custo?: CentroCusto;
+  funcao_base?: Funcao;
+}
+
+export interface CustoDiretoCreate {
+  cenario_id: string;
+  cenario_secao_id: string;
+  centro_custo_id: string;
+  item_custo_id: string;
+  tipo_valor: TipoValorCusto;
+  valor_fixo?: number | null;
+  valor_unitario_variavel?: number | null;
+  unidade_medida?: UnidadeMedidaCusto | null;
+  funcao_base_id?: string | null;
+  tipo_medida?: TipoMedidaCusto | null;
+  tipo_calculo?: 'manual' | 'rateio';
+  rateio_grupo_id?: string | null;
+  rateio_percentual?: number | null;
+  descricao?: string | null;
+}
+
+export interface CustoDiretoUpdate extends Partial<CustoDiretoCreate> {
+  ativo?: boolean;
+}
+
+export const custosDiretos = {
+  // Listar custos diretos
+  listar: (token: string, cenarioId: string, filtros?: { cenario_secao_id?: string; centro_custo_id?: string; apenas_ativos?: boolean }) => {
+    const params = new URLSearchParams();
+    params.append('cenario_id', cenarioId);
+    if (filtros?.cenario_secao_id) params.append('cenario_secao_id', filtros.cenario_secao_id);
+    if (filtros?.centro_custo_id) params.append('centro_custo_id', filtros.centro_custo_id);
+    if (filtros?.apenas_ativos !== undefined) params.append('apenas_ativos', filtros.apenas_ativos.toString());
+    return api.get<CustoDireto[]>(`/api/v1/orcamento/custos-diretos?${params}`, token);
+  },
+
+  // Obter por ID
+  obter: (token: string, id: string) => {
+    return api.get<CustoDireto>(`/api/v1/orcamento/custos-diretos/${id}`, token);
+  },
+
+  // Criar
+  criar: (token: string, data: CustoDiretoCreate) => {
+    return api.post<CustoDireto>('/api/v1/orcamento/custos-diretos', data, token);
+  },
+
+  // Atualizar
+  atualizar: (token: string, id: string, data: CustoDiretoUpdate) => {
+    return api.put<CustoDireto>(`/api/v1/orcamento/custos-diretos/${id}`, data, token);
+  },
+
+  // Excluir
+  excluir: (token: string, id: string, hardDelete: boolean = false) => {
+    return api.delete<void>(`/api/v1/orcamento/custos-diretos/${id}?hard_delete=${hardDelete}`, token);
+  },
+
+  // Listar funções disponíveis para cálculo variável
+  funcoesDisponiveis: (token: string, cenarioId: string, centroCustoId?: string) => {
+    const params = new URLSearchParams();
+    if (centroCustoId) params.append('centro_custo_id', centroCustoId);
+    return api.get<{ id: string; codigo: string; nome: string; cbo: string }[]>(
+      `/api/v1/orcamento/custos-diretos/funcoes-disponiveis/${cenarioId}?${params}`, 
+      token
+    );
+  },
+};
+
+// ============================================
+// Rateio de Custos (POOL -> OPERACIONAL)
+// ============================================
+
+export interface RateioDestino {
+  id: string;
+  rateio_grupo_id: string;
+  cc_destino_id: string;
+  percentual: number;
+  created_at: string;
+  cc_destino?: CentroCusto;
+}
+
+export interface RateioDestinoCreate {
+  cc_destino_id: string;
+  percentual: number;
+}
+
+export type TipoRateio = 'MANUAL' | 'HC' | 'AREA' | 'PA';
+
+export interface RateioGrupo {
+  id: string;
+  cenario_id: string;
+  cc_origem_pool_id: string;
+  nome: string;
+  descricao: string | null;
+  tipo_rateio: TipoRateio;
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+  cc_origem?: CentroCusto;
+  destinos: RateioDestino[];
+  percentual_total: number;
+}
+
+export interface RateioGrupoComValidacao extends RateioGrupo {
+  is_valido: boolean;
+  mensagem_validacao: string | null;
+}
+
+export interface RateioGrupoCreate {
+  cc_origem_pool_id: string;
+  nome: string;
+  descricao?: string | null;
+  tipo_rateio?: TipoRateio;
+  ativo?: boolean;
+  destinos?: RateioDestinoCreate[];
+}
+
+export interface RateioGrupoUpdate {
+  nome?: string;
+  descricao?: string | null;
+  tipo_rateio?: TipoRateio;
+  ativo?: boolean;
+}
+
+export const rateios = {
+  // Listar grupos de rateio de um cenário
+  listar: (token: string, cenarioId: string, apenasAtivos: boolean = true) => {
+    const params = new URLSearchParams();
+    params.append('apenas_ativos', apenasAtivos.toString());
+    return api.get<RateioGrupoComValidacao[]>(`/api/v1/orcamento/rateios/cenario/${cenarioId}?${params}`, token);
+  },
+
+  // Obter grupo de rateio
+  obter: (token: string, rateioId: string) => {
+    return api.get<RateioGrupoComValidacao>(`/api/v1/orcamento/rateios/${rateioId}`, token);
+  },
+
+  // Criar grupo de rateio
+  criar: (token: string, cenarioId: string, data: RateioGrupoCreate) => {
+    return api.post<RateioGrupo>(`/api/v1/orcamento/rateios/cenario/${cenarioId}`, data, token);
+  },
+
+  // Atualizar grupo de rateio
+  atualizar: (token: string, rateioId: string, data: RateioGrupoUpdate) => {
+    return api.patch<RateioGrupo>(`/api/v1/orcamento/rateios/${rateioId}`, data, token);
+  },
+
+  // Excluir grupo de rateio
+  excluir: (token: string, rateioId: string) => {
+    return api.delete<void>(`/api/v1/orcamento/rateios/${rateioId}`, token);
+  },
+
+  // Adicionar destino
+  adicionarDestino: (token: string, rateioId: string, data: RateioDestinoCreate) => {
+    return api.post<RateioDestino>(`/api/v1/orcamento/rateios/${rateioId}/destinos`, data, token);
+  },
+
+  // Atualizar percentual do destino
+  atualizarDestino: (token: string, rateioId: string, destinoId: string, percentual: number) => {
+    return api.patch<RateioDestino>(`/api/v1/orcamento/rateios/${rateioId}/destinos/${destinoId}?percentual=${percentual}`, {}, token);
+  },
+
+  // Remover destino
+  removerDestino: (token: string, rateioId: string, destinoId: string) => {
+    return api.delete<void>(`/api/v1/orcamento/rateios/${rateioId}/destinos/${destinoId}`, token);
+  },
+
+  // Validar rateio
+  validar: (token: string, rateioId: string) => {
+    return api.post<{ is_valido: boolean; percentual_total: number; mensagem: string }>(`/api/v1/orcamento/rateios/${rateioId}/validar`, {}, token);
+  },
+
+  // Listar CCs POOL disponíveis
+  listarPoolsDisponiveis: (token: string, cenarioId: string) => {
+    return api.get<Array<{ id: string; codigo: string; nome: string; tipo: string }>>(`/api/v1/orcamento/rateios/cenario/${cenarioId}/pools-disponiveis`, token);
+  },
+
+  // Listar CCs OPERACIONAIS disponíveis
+  listarOperacionaisDisponiveis: (token: string, cenarioId: string) => {
+    return api.get<Array<{ id: string; codigo: string; nome: string; tipo: string }>>(`/api/v1/orcamento/rateios/cenario/${cenarioId}/operacionais-disponiveis`, token);
+  },
+};
+
+// ============================================
+// Seções de Empresa (Nova Hierarquia)
+// ============================================
+
+export const secoesEmpresa = {
+  // Listar seções de uma empresa (nova hierarquia)
+  listar: (token: string, cenarioId: string, cenarioEmpresaId: string, apenasAtivas: boolean = true) => {
+    const params = new URLSearchParams();
+    params.append('apenas_ativas', apenasAtivas.toString());
+    return api.get<CenarioSecao[]>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${cenarioEmpresaId}/secoes?${params}`, token);
+  },
+
+  // Adicionar seção a uma empresa
+  adicionar: (token: string, cenarioId: string, cenarioEmpresaId: string, secaoId: string) => {
+    return api.post<CenarioSecao>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${cenarioEmpresaId}/secoes`, { secao_id: secaoId }, token);
+  },
+
+  // Remover seção de uma empresa
+  remover: (token: string, cenarioId: string, cenarioEmpresaId: string, cenarioSecaoId: string) => {
+    return api.delete<void>(`/api/v1/orcamento/cenarios/${cenarioId}/empresas/${cenarioEmpresaId}/secoes/${cenarioSecaoId}`, token);
+  },
+};
+
+// ============================================
+// Validação CC vs Seção
+// ============================================
+
+export interface ValidacaoCCSecaoResponse {
+  valido: boolean;
+  mensagem: string;
+  secao: {
+    id: string;
+    codigo: string | null;
+    nome: string;
+    is_corporativo: boolean;
+  };
+  centro_custo: {
+    id: string;
+    codigo: string;
+    nome: string;
+    tipo: string;
+  };
+}
+
+export interface CCDisponivelParaSecao {
+  id: string;
+  codigo: string;
+  nome: string;
+  tipo: string;
+}
+
+export const validacaoCenario = {
+  // Validar se um CC pode ser usado com uma seção
+  validarCCSecao: (token: string, cenarioId: string, secaoId: string, centroCustoId: string) => {
+    const params = new URLSearchParams();
+    params.append('secao_id', secaoId);
+    params.append('centro_custo_id', centroCustoId);
+    return api.post<ValidacaoCCSecaoResponse>(`/api/v1/orcamento/cenarios/${cenarioId}/validar-cc-secao?${params}`, {}, token);
+  },
+
+  // Listar CCs disponíveis para uma seção do cenário
+  listarCCsDisponiveis: (token: string, cenarioId: string, cenarioSecaoId: string) => {
+    const params = new URLSearchParams();
+    params.append('cenario_secao_id', cenarioSecaoId);
+    return api.get<{
+      cenario_secao_id: string;
+      is_corporativo: boolean;
+      tipo_cc_permitido: string;
+      centros_custo: CCDisponivelParaSecao[];
+    }>(`/api/v1/orcamento/cenarios/${cenarioId}/centros-custo-disponiveis?${params}`, token);
+  },
+};
+
+// ============================================
+// Centros de Custo da Seção
+// ============================================
+
+export interface CenarioSecaoCC {
+  id: string;
+  cenario_secao_id: string;
+  centro_custo_id: string;
+  ativo: boolean;
+  created_at: string;
+  centro_custo?: CentroCusto;
+}
+
+export const secaoCentrosCusto = {
+  // Listar CCs de uma seção do cenário
+  listar: (token: string, cenarioId: string, cenarioSecaoId: string) => {
+    return api.get<CenarioSecaoCC[]>(`/api/v1/orcamento/cenarios/${cenarioId}/secoes/${cenarioSecaoId}/centros-custo`, token);
+  },
+
+  // Adicionar CC a uma seção
+  adicionar: (token: string, cenarioId: string, cenarioSecaoId: string, centroCustoId: string) => {
+    return api.post<CenarioSecaoCC>(`/api/v1/orcamento/cenarios/${cenarioId}/secoes/${cenarioSecaoId}/centros-custo`, { centro_custo_id: centroCustoId }, token);
+  },
+
+  // Remover CC de uma seção
+  remover: (token: string, cenarioId: string, cenarioSecaoId: string, centroCustoId: string) => {
+    return api.delete<void>(`/api/v1/orcamento/cenarios/${cenarioId}/secoes/${cenarioSecaoId}/centros-custo/${centroCustoId}`, token);
+  },
+};
+
+// ============================================
+// Tipos de Receita
+// ============================================
+
+export interface TipoReceita {
+  id: string;
+  codigo: string;
+  nome: string;
+  descricao: string | null;
+  categoria: string;
+  conta_contabil_codigo: string | null;
+  conta_contabil_descricao: string | null;
+  ordem: number;
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TipoReceitaCreate {
+  codigo: string;
+  nome: string;
+  descricao?: string;
+  categoria?: string;
+  conta_contabil_codigo?: string;
+  conta_contabil_descricao?: string;
+  ordem?: number;
+  ativo?: boolean;
+}
+
+export const tiposReceita = {
+  listar: (token: string, ativo?: boolean) => {
+    const params = new URLSearchParams();
+    if (ativo !== undefined) params.append('ativo', String(ativo));
+    return api.get<TipoReceita[]>(`/api/v1/orcamento/tipos-receita?${params}`, token);
+  },
+  obter: (token: string, id: string) => {
+    return api.get<TipoReceita>(`/api/v1/orcamento/tipos-receita/${id}`, token);
+  },
+  criar: (token: string, data: TipoReceitaCreate) => {
+    return api.post<TipoReceita>('/api/v1/orcamento/tipos-receita', data, token);
+  },
+  atualizar: (token: string, id: string, data: Partial<TipoReceitaCreate>) => {
+    return api.put<TipoReceita>(`/api/v1/orcamento/tipos-receita/${id}`, data, token);
+  },
+  excluir: (token: string, id: string) => {
+    return api.delete<void>(`/api/v1/orcamento/tipos-receita/${id}`, token);
+  },
+};
+
+// ============================================
+// Receitas do Cenário
+// ============================================
+
+export interface ReceitaPremissaMes {
+  id: string;
+  receita_cenario_id: string;
+  mes: number;
+  ano: number;
+  vopdu: number;
+  indice_conversao: number;
+  ticket_medio: number;
+  fator: number;
+  indice_estorno: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReceitaCenario {
+  id: string;
+  cenario_id: string;
+  centro_custo_id: string;
+  tipo_receita_id: string;
+  tipo_calculo: 'FIXA_CC' | 'FIXA_HC' | 'FIXA_PA' | 'VARIAVEL';
+  funcao_pa_id: string | null;
+  valor_fixo: number | null;
+  valor_minimo_pa: number | null;
+  valor_maximo_pa: number | null;
+  descricao: string | null;
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+  tipo_receita?: TipoReceita;
+  centro_custo?: CentroCusto;
+  funcao_pa?: Funcao;
+  premissas: ReceitaPremissaMes[];
+}
+
+export interface ReceitaCenarioCreate {
+  centro_custo_id: string;
+  tipo_receita_id: string;
+  tipo_calculo: 'FIXA_CC' | 'FIXA_HC' | 'FIXA_PA' | 'VARIAVEL';
+  funcao_pa_id?: string;
+  valor_fixo?: number;
+  valor_minimo_pa?: number;
+  valor_maximo_pa?: number;
+  descricao?: string;
+  premissas?: {
+    mes: number;
+    ano: number;
+    vopdu: number;
+    indice_conversao: number;
+    ticket_medio: number;
+    fator: number;
+    indice_estorno: number;
+  }[];
+}
+
+export interface ReceitaCalculada {
+  receita_cenario_id: string;
+  mes: number;
+  ano: number;
+  valor_calculado: number;
+  valor_bruto: number | null;
+  hc_pa: number | null;
+  qtd_pa: number | null;
+  dias_uteis: number | null;
+  memoria_calculo: Record<string, any> | null;
+}
+
+export const receitasCenario = {
+  // Listar receitas de um cenário
+  listar: (token: string, cenarioId: string, centroCustoId?: string) => {
+    const params = new URLSearchParams();
+    if (centroCustoId) params.append('centro_custo_id', centroCustoId);
+    return api.get<ReceitaCenario[]>(`/api/v1/orcamento/receitas/cenarios/${cenarioId}?${params}`, token);
+  },
+
+  // Obter receita por ID
+  obter: (token: string, receitaId: string) => {
+    return api.get<ReceitaCenario>(`/api/v1/orcamento/receitas/${receitaId}`, token);
+  },
+
+  // Criar nova receita
+  criar: (token: string, cenarioId: string, data: ReceitaCenarioCreate) => {
+    return api.post<ReceitaCenario>(`/api/v1/orcamento/receitas/cenarios/${cenarioId}`, data, token);
+  },
+
+  // Atualizar receita
+  atualizar: (token: string, receitaId: string, data: Partial<ReceitaCenarioCreate>) => {
+    return api.put<ReceitaCenario>(`/api/v1/orcamento/receitas/${receitaId}`, data, token);
+  },
+
+  // Excluir receita
+  excluir: (token: string, receitaId: string) => {
+    return api.delete<void>(`/api/v1/orcamento/receitas/${receitaId}`, token);
+  },
+
+  // Listar premissas de uma receita
+  listarPremissas: (token: string, receitaId: string) => {
+    return api.get<ReceitaPremissaMes[]>(`/api/v1/orcamento/receitas/${receitaId}/premissas`, token);
+  },
+
+  // Atualizar premissas em lote
+  atualizarPremissas: (token: string, receitaId: string, premissas: ReceitaPremissaMes[]) => {
+    return api.put<ReceitaPremissaMes[]>(`/api/v1/orcamento/receitas/${receitaId}/premissas`, { premissas }, token);
+  },
+
+  // Calcular receita
+  calcular: (token: string, receitaId: string) => {
+    return api.get<ReceitaCalculada[]>(`/api/v1/orcamento/receitas/${receitaId}/calcular`, token);
   },
 };
 

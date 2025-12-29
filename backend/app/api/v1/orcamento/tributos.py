@@ -18,11 +18,12 @@ router = APIRouter(prefix="/tributos", tags=["Tributos"])
 
 
 # Tributos padrão para geração automática
+# conta_contabil_codigo e conta_contabil_descricao podem ser definidos pelo usuário depois
 TRIBUTOS_PADRAO = [
-    {"codigo": "PIS", "nome": "PIS", "aliquota": 0.65, "ordem": 1},
-    {"codigo": "COFINS", "nome": "COFINS", "aliquota": 3.00, "ordem": 2},
-    {"codigo": "ISS", "nome": "ISS", "aliquota": 5.00, "ordem": 3},
-    {"codigo": "CPREV", "nome": "Contribuição Previdenciária sobre Receita", "aliquota": 4.50, "ordem": 4},
+    {"codigo": "PIS", "nome": "PIS - Programa de Integração Social", "aliquota": 0.65, "ordem": 1},
+    {"codigo": "COFINS", "nome": "COFINS - Contribuição para Financ. da Seguridade Social", "aliquota": 3.00, "ordem": 2},
+    {"codigo": "ISS", "nome": "ISS - Imposto sobre Serviços", "aliquota": 5.00, "ordem": 3},
+    {"codigo": "CPREV", "nome": "CPRB - Contribuição Previdenciária sobre Receita Bruta", "aliquota": 4.50, "ordem": 4},
 ]
 
 

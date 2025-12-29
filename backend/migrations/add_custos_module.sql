@@ -161,3 +161,6 @@ CREATE TRIGGER update_parametros_custo_updated_at
 
 
 
+
+
+

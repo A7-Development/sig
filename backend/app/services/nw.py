@@ -349,9 +349,9 @@ def listar_contas_contabeis_nw(
     params = []
     
     if busca:
-        query += " AND (cod_contacontabil ILIKE %s OR cod_conta_nivel ILIKE %s)"
+        query += " AND (cod_contacontabil ILIKE %s OR cod_conta_nivel ILIKE %s OR nivel5 ILIKE %s)"
         busca_param = f"%{busca}%"
-        params.extend([busca_param, busca_param])
+        params.extend([busca_param, busca_param, busca_param])
     
     query += " ORDER BY cod_contacontabil"
     query += f" LIMIT {limit}"

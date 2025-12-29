@@ -165,6 +165,7 @@ export function PremissasFuncaoMesGrid({
               mes: mesData.mes,
               ano: mesData.ano,
               absenteismo: valores.absenteismo || 3.0,
+              abs_pct_justificado: valores.abs_pct_justificado || 0,
               turnover: valores.turnover || 5.0,
               ferias_indice: valores.ferias_indice || 8.33,
               dias_treinamento: valores.dias_treinamento || 15,
